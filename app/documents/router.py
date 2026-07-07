@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -85,6 +85,7 @@ def upload_form(
 @router.post("/upload")
 async def upload_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
     description: str = Form(default=""),
     department_id: str = Form(...),
@@ -127,7 +128,8 @@ async def upload_document(
     db.add(doc)
     db.commit()
 
-    rag.index_document(
+    background_tasks.add_task(
+        rag.index_document,
         doc_id=doc_id,
         title=title,
         description=description,
@@ -177,6 +179,7 @@ def edit_form(
 async def edit_document(
     doc_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
     description: str = Form(default=""),
     status: str = Form(...),
@@ -218,7 +221,8 @@ async def edit_document(
     db.commit()
 
     rag.delete_document_from_index(doc_id)
-    rag.index_document(
+    background_tasks.add_task(
+        rag.index_document,
         doc_id=doc_id,
         title=doc.title,
         description=doc.description,

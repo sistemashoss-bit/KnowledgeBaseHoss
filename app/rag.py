@@ -4,6 +4,7 @@ import os
 import tempfile
 
 from openai import OpenAI
+from opensearchpy.helpers import bulk
 
 from app.config import settings
 from app import search as search_module
@@ -100,11 +101,11 @@ def index_document(
         },
     )
 
-    for i, chunk in enumerate(chunk_text(text)):
-        client.index(
-            index=search_module.CHUNKS_INDEX,
-            id=f"{doc_id}_{i}",
-            body={
+    actions = [
+        {
+            "_index": search_module.CHUNKS_INDEX,
+            "_id": f"{doc_id}_{i}",
+            "_source": {
                 "document_id": doc_id,
                 "document_title": title,
                 "department_id": department_id or "",
@@ -113,7 +114,11 @@ def index_document(
                 "chunk_index": i,
                 "content": chunk,
             },
-        )
+        }
+        for i, chunk in enumerate(chunk_text(text))
+    ]
+    if actions:
+        bulk(client, actions)
 
 
 def delete_document_from_index(doc_id: str) -> None:
