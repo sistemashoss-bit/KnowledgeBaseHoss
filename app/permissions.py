@@ -16,25 +16,25 @@ def build_access_filter(user: "User | None") -> dict:
     if user.role == ROLE_SUPERADMIN:
         return {"match_all": {}}
 
-    dept_id = str(user.department_id) if user.department_id else "__none__"
-    accessible = ["employee", "admin"] if user.role == ROLE_ADMIN else ["employee"]
+    # employee status is company-wide (any authenticated user)
+    should_clauses: list[dict] = [
+        {"term": {"status": "public"}},
+        {"term": {"status": "employee"}},
+    ]
 
-    return {
-        "bool": {
-            "should": [
-                {"term": {"status": "public"}},
-                {
-                    "bool": {
-                        "must": [
-                            {"term": {"department_id": dept_id}},
-                            {"terms": {"status": accessible}},
-                        ]
-                    }
-                },
-            ],
-            "minimum_should_match": 1,
-        }
-    }
+    # admin status is still scoped to the user's own department
+    if user.role == ROLE_ADMIN:
+        dept_id = str(user.department_id) if user.department_id else "__none__"
+        should_clauses.append({
+            "bool": {
+                "must": [
+                    {"term": {"department_id": dept_id}},
+                    {"term": {"status": "admin"}},
+                ]
+            }
+        })
+
+    return {"bool": {"should": should_clauses, "minimum_should_match": 1}}
 
 
 def can_access_document(user: "User | None", doc: "Document") -> bool:
@@ -46,12 +46,10 @@ def can_access_document(user: "User | None", doc: "Document") -> bool:
         return False
     if user.role == ROLE_SUPERADMIN:
         return True
-    if str(doc.department_id) != str(user.department_id):
-        return False
     if doc.status == "employee":
-        return user.role in (ROLE_EMPLOYEE, ROLE_ADMIN, ROLE_SUPERADMIN)
+        return True  # any authenticated user
     if doc.status == "admin":
-        return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+        return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and str(doc.department_id) == str(user.department_id)
     return False
 
 
