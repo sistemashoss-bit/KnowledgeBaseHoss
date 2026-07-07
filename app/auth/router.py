@@ -189,6 +189,8 @@ def profile_page(
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(require_auth),
+    pw_changed: bool = False,
+    pw_error: str | None = None,
 ):
     dept = (
         db.query(Department).filter(Department.id == user.department_id).first()
@@ -198,8 +200,37 @@ def profile_page(
     csrf = generate_csrf_token(str(user.id))
     return templates.TemplateResponse(
         request, "profile.html",
-        {"current_user": user, "dept": dept, "csrf_token": csrf},
+        {"current_user": user, "dept": dept, "csrf_token": csrf,
+         "pw_changed": pw_changed, "pw_error": pw_error},
     )
+
+
+@router.post("/profile/password")
+def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    new_password_confirm: str = Form(...),
+    csrf_token: str = Form(...),
+    user=Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    if not verify_csrf_token(csrf_token, str(user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    if not verify_password(current_password, user.password_hash):
+        return RedirectResponse("/auth/profile?pw_error=La+contraseña+actual+es+incorrecta", status_code=302)
+
+    if new_password != new_password_confirm:
+        return RedirectResponse("/auth/profile?pw_error=Las+contraseñas+no+coinciden", status_code=302)
+
+    if len(new_password) < 8:
+        return RedirectResponse("/auth/profile?pw_error=La+contraseña+debe+tener+al+menos+8+caracteres", status_code=302)
+
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    audit.log_action("password_change", user=user, request=request)
+    return RedirectResponse("/auth/profile?pw_changed=1", status_code=302)
 
 
 @router.post("/profile/avatar")
