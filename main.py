@@ -1,0 +1,44 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.database import engine
+    from app.models import Base
+    from app import search as search_module
+
+    Base.metadata.create_all(bind=engine)
+    search_module.ensure_indices()
+    yield
+
+
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(title="Knowledge Base", version="1.0.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+from app.auth.router import router as auth_router
+from app.documents.router import router as documents_router
+from app.departments.router import router as departments_router
+from app.users.router import api_router as users_api_router, mgmt_router as users_mgmt_router
+from app.chat.router import router as chat_router
+from app.logs.router import router as logs_router
+
+app.include_router(auth_router)
+app.include_router(documents_router)
+app.include_router(departments_router)
+app.include_router(users_api_router)
+app.include_router(users_mgmt_router)
+app.include_router(chat_router)
+app.include_router(logs_router)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/documents/")

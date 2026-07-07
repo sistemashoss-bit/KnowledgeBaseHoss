@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Usuarios{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6" x-data="{ resetFor: null }">
+  <div class="max-w-5xl mx-auto space-y-6">
+
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold text-gray-900">Usuarios</h1>
+      <span class="text-sm text-gray-400">{{ users|length }} usuario{{ 's' if users|length != 1 }}</span>
+    </div>
+
+    <!-- Create user -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <h2 class="text-sm font-semibold text-gray-700 mb-4">Nuevo usuario</h2>
+      <form method="post" action="/users/create" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Correo</label>
+          <input type="email" name="email" required
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                 placeholder="usuario@empresa.com" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Contraseña</label>
+          <input type="password" name="password" required minlength="8"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                 placeholder="Mínimo 8 caracteres" />
+        </div>
+
+        {% if current_user.role == "superadmin" %}
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
+          <select name="role" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+            {% for r in roles %}
+            <option value="{{ r }}">{{ r }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+          <select name="department_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+            <option value="">Sin departamento</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% else %}
+        {# Admin: role and dept are fixed #}
+        <input type="hidden" name="role" value="employee" />
+        <input type="hidden" name="department_id" value="" />
+        {% endif %}
+
+        <div class="md:col-span-2">
+          <button type="submit"
+                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
+            Crear usuario
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- User table -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {% if users %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
+            <th class="px-4 py-3">Usuario</th>
+            <th class="px-4 py-3">Rol</th>
+            <th class="px-4 py-3">Departamento</th>
+            <th class="px-4 py-3">Estado</th>
+            <th class="px-4 py-3">Acciones</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for u in users %}
+          <tr class="hover:bg-gray-50 {% if not u.is_active %}opacity-50{% endif %}">
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-2">
+                {% if u.avatar_key %}
+                <img src="{{ avatar_url(u.avatar_key) }}" alt=""
+                     class="w-7 h-7 rounded-full object-cover shrink-0" />
+                {% else %}
+                <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-bold shrink-0">
+                  {{ u.email[0].upper() }}
+                </div>
+                {% endif %}
+                <span class="font-medium text-gray-900 truncate max-w-[180px]">{{ u.email }}</span>
+              </div>
+            </td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                {% if u.role == 'superadmin' %}bg-purple-100 text-purple-700
+                {% elif u.role == 'admin' %}bg-blue-100 text-blue-700
+                {% else %}bg-gray-100 text-gray-600{% endif %}">
+                {{ u.role }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-gray-500 text-xs">
+              {{ u.department.name if u.department else "—" }}
+            </td>
+            <td class="px-4 py-3">
+              {% if u.is_active %}
+              <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs">Activo</span>
+              {% else %}
+              <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">Inactivo</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              {% if u.id|string != current_user.id|string %}
+              <div class="flex items-center gap-2">
+
+                {# Toggle active #}
+                <form method="post" action="/users/{{ u.id }}/toggle">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button type="submit"
+                          class="text-xs px-2 py-1 rounded border transition-colors
+                            {% if u.is_active %}border-orange-300 text-orange-600 hover:bg-orange-50
+                            {% else %}border-green-300 text-green-600 hover:bg-green-50{% endif %}">
+                    {{ "Deshabilitar" if u.is_active else "Habilitar" }}
+                  </button>
+                </form>
+
+                {# Reset password #}
+                <button @click="resetFor = resetFor === '{{ u.id }}' ? null : '{{ u.id }}'"
+                        class="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
+                  Reset password
+                </button>
+
+              </div>
+
+              {# Inline reset form #}
+              <div x-show="resetFor === '{{ u.id }}'" x-cloak class="mt-2">
+                <form method="post" action="/users/{{ u.id }}/reset-password" class="flex gap-2">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="password" name="new_password" required minlength="8"
+                         class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
+                         placeholder="Nueva contraseña" />
+                  <button type="submit"
+                          class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors">
+                    Guardar
+                  </button>
+                  <button type="button" @click="resetFor = null"
+                          class="px-2 py-1 border border-gray-300 text-gray-500 rounded text-xs hover:bg-gray-50 transition-colors">
+                    ✕
+                  </button>
+                </form>
+              </div>
+              {% else %}
+              <span class="text-xs text-gray-300">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-center py-12 text-gray-400 text-sm">
+        No hay usuarios en tu departamento todavía.
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Búsquedas{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6">
+  <div class="max-w-5xl mx-auto space-y-4">
+
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold text-gray-900">Historial de búsquedas</h1>
+      <span class="text-sm text-gray-400">{{ total }} búsquedas</span>
+    </div>
+
+    <!-- Filter -->
+    <form method="get" class="flex gap-3 items-center">
+      <select name="search_type" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-indigo-500">
+        <option value="">Todos los tipos</option>
+        <option value="document" {{ 'selected' if selected_type == 'document' }}>Documentos</option>
+        <option value="rag" {{ 'selected' if selected_type == 'rag' }}>Preguntas (RAG)</option>
+      </select>
+      {% if selected_type %}
+      <a href="/logs/searches" class="text-xs text-gray-500 hover:text-gray-700">Limpiar filtro</a>
+      {% endif %}
+    </form>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {% if logs %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 border-b text-xs text-gray-500 uppercase tracking-wide text-left">
+            <th class="px-4 py-3">Fecha</th>
+            <th class="px-4 py-3">Usuario</th>
+            <th class="px-4 py-3">Tipo</th>
+            <th class="px-4 py-3">Búsqueda / Pregunta</th>
+            <th class="px-4 py-3">Resultados</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for log in logs %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+              {{ log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else '—' }}
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-600">
+              {{ log.user_email or '<span class="text-gray-400">anónimo</span>'|safe }}
+            </td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                {{ 'bg-purple-100 text-purple-700' if log.search_type == 'rag' else 'bg-blue-100 text-blue-700' }}">
+                {{ 'Pregunta' if log.search_type == 'rag' else 'Búsqueda' }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-gray-900">{{ log.query[:120] }}</td>
+            <td class="px-4 py-3 text-xs text-gray-500 text-center">{{ log.result_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-center py-12 text-gray-400 text-sm">Sin búsquedas registradas</div>
+      {% endif %}
+    </div>
+
+    <!-- Pagination -->
+    {% set pages = (total // page_size) + (1 if total % page_size else 0) %}
+    {% if pages > 1 %}
+    <div class="flex gap-2 justify-center">
+      {% for p in range(1, pages + 1) %}
+      <a href="?page={{ p }}{% if selected_type %}&search_type={{ selected_type }}{% endif %}"
+         class="px-3 py-1 rounded text-sm {{ 'bg-indigo-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
+        {{ p }}
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

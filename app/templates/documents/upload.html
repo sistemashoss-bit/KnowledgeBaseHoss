@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Subir documento{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6"
+     x-data="{
+       uploading: false,
+       step: 0,
+       fileName: '',
+       dragging: false,
+       steps: [
+         { label: 'Subiendo archivo a Wasabi',      sub: 'Transfiriendo el archivo al almacenamiento…' },
+         { label: 'Extrayendo texto del documento', sub: 'Analizando el contenido con MarkItDown…' },
+         { label: 'Indexando en búsqueda',          sub: 'Guardando en OpenSearch para búsqueda y IA…' }
+       ],
+       begin() {
+         this.uploading = true;
+         this.step = 0;
+         setTimeout(() => this.step = 1, 2000);
+         setTimeout(() => this.step = 2, 5500);
+       }
+     }">
+
+  <!-- ── Upload progress overlay ───────────────────────────────────────────── -->
+  <div x-show="uploading" x-cloak
+       class="fixed inset-0 z-50 flex items-center justify-center"
+       style="background: rgba(15,23,42,0.65); backdrop-filter: blur(4px);">
+    <div class="bg-white rounded-2xl shadow-2xl w-80 overflow-hidden">
+
+      <!-- Animated header bar -->
+      <div class="h-1.5 bg-gray-100 relative overflow-hidden">
+        <div class="absolute inset-y-0 left-0 bg-indigo-500 rounded-full transition-all duration-700 ease-out"
+             :style="'width:' + (step === 0 ? '20' : step === 1 ? '55' : '82') + '%'"></div>
+        <!-- Shimmer -->
+        <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+             style="animation: shimmer 1.6s ease-in-out infinite; background-size: 200% 100%;"></div>
+      </div>
+
+      <div class="p-6">
+        <!-- Icon -->
+        <div class="w-14 h-14 mx-auto rounded-full bg-indigo-50 flex items-center justify-center mb-5">
+          <svg class="w-7 h-7 text-indigo-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+        </div>
+
+        <h3 class="text-sm font-semibold text-gray-900 text-center mb-1">Procesando documento</h3>
+        <p class="text-xs text-gray-400 text-center mb-6" x-text="fileName || 'un momento…'"></p>
+
+        <!-- Steps -->
+        <ol class="space-y-3">
+          <template x-for="(s, i) in steps" :key="i">
+            <li class="flex items-start gap-3">
+              <!-- State icon -->
+              <div class="shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 transition-colors duration-300"
+                   :class="i < step ? 'bg-green-100' : i === step ? 'bg-indigo-100' : 'bg-gray-100'">
+
+                <!-- Done: checkmark -->
+                <template x-if="i < step">
+                  <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </template>
+
+                <!-- Active: spinner -->
+                <template x-if="i === step">
+                  <svg class="w-3.5 h-3.5 text-indigo-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                </template>
+
+                <!-- Pending: dot -->
+                <template x-if="i > step">
+                  <span class="w-2 h-2 rounded-full bg-gray-300"></span>
+                </template>
+              </div>
+
+              <!-- Label -->
+              <div>
+                <p class="text-xs font-medium transition-colors duration-300"
+                   :class="i < step ? 'text-green-700' : i === step ? 'text-indigo-700' : 'text-gray-400'"
+                   x-text="s.label"></p>
+                <p class="text-xs text-gray-400 mt-0.5 transition-opacity duration-300"
+                   x-show="i === step" x-text="s.sub"></p>
+              </div>
+            </li>
+          </template>
+        </ol>
+
+        <p class="text-xs text-gray-400 text-center mt-5">No cierres esta ventana</p>
+      </div>
+    </div>
+  </div>
+  <!-- ──────────────────────────────────────────────────────────────────────── -->
+
+  <div class="max-w-2xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-xl font-bold text-gray-900">Subir documento</h1>
+      <p class="text-sm text-gray-500 mt-1">Los documentos serán indexados para búsqueda y consultas de IA.</p>
+    </div>
+
+    <form method="post" action="/documents/upload" enctype="multipart/form-data"
+          @submit="begin()"
+          class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
+        <input type="text" name="title" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+               placeholder="Política de vacaciones 2024" />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+        <textarea name="description" rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 resize-none"
+                  placeholder="Breve descripción del contenido del documento..."></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Departamento <span class="text-red-500">*</span></label>
+          <select name="department_id" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+            <option value="">Seleccionar...</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Visibilidad <span class="text-red-500">*</span></label>
+          <select name="status" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+            {% for s in statuses %}
+            <option value="{{ s }}">
+              {% if s == "public" %}Público (sin login)
+              {% elif s == "employee" %}Empleados
+              {% else %}Solo admins{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- Visibility legend -->
+      <div class="grid grid-cols-3 gap-2 text-xs">
+        <div class="flex items-start gap-1.5 p-2 bg-green-50 rounded-lg border border-green-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+          <span class="text-green-700"><strong>Público</strong> — Clientes y externos sin login</span>
+        </div>
+        <div class="flex items-start gap-1.5 p-2 bg-blue-50 rounded-lg border border-blue-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+          <span class="text-blue-700"><strong>Empleados</strong> — Solo empleados de este departamento</span>
+        </div>
+        <div class="flex items-start gap-1.5 p-2 bg-red-50 rounded-lg border border-red-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
+          <span class="text-red-700"><strong>Admin</strong> — Solo admins de este departamento</span>
+        </div>
+      </div>
+
+      <!-- File drop zone -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Archivo <span class="text-red-500">*</span></label>
+        <label :class="dragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 bg-gray-50'"
+               class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:border-indigo-500 hover:bg-indigo-50 transition-colors"
+               @dragover.prevent="dragging = true"
+               @dragleave="dragging = false"
+               @drop.prevent="dragging = false; fileName = $event.dataTransfer.files[0]?.name || ''">
+          <div class="text-center px-4">
+            <svg class="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <p class="text-sm text-gray-500" x-show="!fileName">
+              <span class="font-medium text-indigo-600">Seleccionar archivo</span> o arrastra aquí
+            </p>
+            <p class="text-sm text-indigo-600 font-medium" x-show="fileName" x-text="fileName"></p>
+            <p class="text-xs text-gray-400 mt-1">PDF, DOCX, PPTX, XLSX, TXT y más</p>
+          </div>
+          <input type="file" name="file" required class="hidden"
+                 @change="fileName = $event.target.files[0]?.name || ''" />
+        </label>
+      </div>
+
+      <div class="flex gap-3 pt-2">
+        <button type="submit"
+                :disabled="uploading"
+                class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 text-white rounded-lg text-sm font-medium transition-colors">
+          Subir documento
+        </button>
+        <a href="/documents/"
+           class="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+          Cancelar
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  [x-cloak] { display: none !important; }
+  @keyframes shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
+</style>
+{% endblock %}

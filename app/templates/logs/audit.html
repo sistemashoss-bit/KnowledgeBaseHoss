@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Audit Log{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6">
+  <div class="max-w-6xl mx-auto space-y-4">
+
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold text-gray-900">Audit Log</h1>
+      <span class="text-sm text-gray-400">{{ total }} registros</span>
+    </div>
+
+    <!-- Filter -->
+    <form method="get" class="flex gap-3 items-center">
+      <select name="action" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-indigo-500">
+        <option value="">Todas las acciones</option>
+        {% for a in actions %}
+        <option value="{{ a }}" {{ 'selected' if a == selected_action }}>{{ a }}</option>
+        {% endfor %}
+      </select>
+      {% if selected_action %}
+      <a href="/logs/audit" class="text-xs text-gray-500 hover:text-gray-700">Limpiar filtro</a>
+      {% endif %}
+    </form>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {% if logs %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 border-b text-xs text-gray-500 uppercase tracking-wide text-left">
+            <th class="px-4 py-3">Fecha</th>
+            <th class="px-4 py-3">Usuario</th>
+            <th class="px-4 py-3">Acción</th>
+            <th class="px-4 py-3">Recurso</th>
+            <th class="px-4 py-3">Detalles</th>
+            <th class="px-4 py-3">IP</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for log in logs %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+              {{ log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else '—' }}
+            </td>
+            <td class="px-4 py-3 text-xs">
+              {{ log.user_email or '<span class="text-gray-400">anónimo</span>'|safe }}
+            </td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                {% if 'delete' in log.action or 'fail' in log.action %}bg-red-100 text-red-700
+                {% elif 'login' in log.action %}bg-blue-100 text-blue-700
+                {% elif 'upload' in log.action or 'create' in log.action %}bg-green-100 text-green-700
+                {% else %}bg-gray-100 text-gray-600{% endif %}">
+                {{ log.action }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-600">
+              {% if log.resource_name %}
+              <span class="font-medium">{{ log.resource_name[:60] }}</span>
+              {% if log.resource_type %}
+              <span class="text-gray-400">({{ log.resource_type }})</span>
+              {% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-400">{{ log.details or '—' }}</td>
+            <td class="px-4 py-3 text-xs text-gray-400">{{ log.ip_address or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-center py-12 text-gray-400 text-sm">Sin registros</div>
+      {% endif %}
+    </div>
+
+    <!-- Pagination -->
+    {% set pages = (total // page_size) + (1 if total % page_size else 0) %}
+    {% if pages > 1 %}
+    <div class="flex gap-2 justify-center">
+      {% for p in range(1, pages + 1) %}
+      <a href="?page={{ p }}{% if selected_action %}&action={{ selected_action }}{% endif %}"
+         class="px-3 py-1 rounded text-sm {{ 'bg-indigo-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
+        {{ p }}
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

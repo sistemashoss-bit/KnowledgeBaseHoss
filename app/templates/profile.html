@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Mi perfil{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6">
+  <div class="max-w-lg mx-auto space-y-6">
+    <h1 class="text-xl font-bold text-gray-900">Mi perfil</h1>
+
+    <!-- Avatar + info -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <div class="flex items-start gap-5">
+        <div class="shrink-0">
+          {% if current_user.avatar_key %}
+          <img src="{{ avatar_url(current_user.avatar_key) }}"
+               alt="Avatar"
+               class="w-20 h-20 rounded-full object-cover border-2 border-gray-100" />
+          {% else %}
+          <div class="w-20 h-20 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-2xl font-bold border-2 border-gray-100">
+            {{ current_user.email[0].upper() }}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="flex-1 space-y-3">
+          <div>
+            <p class="text-gray-400 text-xs mb-0.5">Correo</p>
+            <p class="font-medium text-gray-900 text-sm">{{ current_user.email }}</p>
+          </div>
+          <div class="flex gap-4">
+            <div>
+              <p class="text-gray-400 text-xs mb-0.5">Rol</p>
+              <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium
+                {% if current_user.role == 'superadmin' %}bg-purple-100 text-purple-700
+                {% elif current_user.role == 'admin' %}bg-blue-100 text-blue-700
+                {% else %}bg-gray-100 text-gray-600{% endif %}">
+                {{ current_user.role }}
+              </span>
+            </div>
+            <div>
+              <p class="text-gray-400 text-xs mb-0.5">Departamento</p>
+              <p class="text-sm text-gray-700">{{ dept.name if dept else "—" }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Avatar upload -->
+      <div class="mt-4 pt-4 border-t border-gray-100">
+        <p class="text-xs font-medium text-gray-600 mb-2">Cambiar foto de perfil</p>
+        <form method="post" action="/auth/profile/avatar" enctype="multipart/form-data"
+              class="flex items-center gap-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="file" name="avatar" accept="image/*" required
+                 class="block text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
+          <button type="submit"
+                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors shrink-0">
+            Subir
+          </button>
+        </form>
+        <p class="text-xs text-gray-400 mt-1">JPG, PNG o GIF · máx 5 MB · se redimensiona a 256×256</p>
+      </div>
+    </div>
+
+    <!-- 2FA -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-700">Autenticación de dos factores (2FA)</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Se te pedirá un código al iniciar sesión</p>
+        </div>
+        {% if current_user.totp_enabled %}
+        <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">Activo</span>
+        {% else %}
+        <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">Inactivo</span>
+        {% endif %}
+      </div>
+
+      {% if current_user.totp_enabled %}
+      <form method="post" action="/auth/totp/disable"
+            onsubmit="return confirm('¿Desactivar la autenticación de dos factores?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit"
+                class="px-4 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors">
+          Desactivar 2FA
+        </button>
+      </form>
+      {% else %}
+      <a href="/auth/totp/setup"
+         class="inline-block px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
+        Activar 2FA
+      </a>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
