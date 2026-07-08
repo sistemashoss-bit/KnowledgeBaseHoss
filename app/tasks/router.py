@@ -3,11 +3,12 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
+from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app.models import (
     Department, Project, Task, TaskComment, User,
@@ -66,7 +67,7 @@ def list_tasks(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     q = _tasks_query(current_user, db)
 
@@ -82,6 +83,7 @@ def list_tasks(
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     projects = db.query(Project).order_by(Project.name).all()
 
+    csrf = generate_csrf_token(str(current_user.id))
     return templates.TemplateResponse(
         request,
         "tasks/list.html",
@@ -95,15 +97,16 @@ def list_tasks(
             "priorities": TASK_PRIORITIES,
             "filter_status": status,
             "filter_mine": mine,
+            "today": date.today().isoformat(),
+            "csrf_token": csrf,
         },
     )
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-@router.post("/", response_class=HTMLResponse)
+@router.post("/")
 def create_task(
-    request: Request,
     title: str = Form(...),
     description: str = Form(""),
     priority: str = Form("medium"),
@@ -112,11 +115,14 @@ def create_task(
     project_id: str = Form(""),
     due_date: str = Form(""),
     next_url: str = Form(""),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
 
     task = Task(
         id=uuid.uuid4(),
@@ -132,7 +138,7 @@ def create_task(
     db.add(task)
     db.commit()
     redirect = next_url if next_url and next_url.startswith("/") else "/tasks/"
-    return HTMLResponse(headers={"HX-Redirect": redirect})
+    return RedirectResponse(redirect, status_code=302)
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -145,7 +151,7 @@ def task_detail(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     task = (
         db.query(Task)
@@ -182,6 +188,7 @@ def task_detail(
             "priorities": TASK_PRIORITIES,
             "can_edit": _can_edit_task(current_user, task),
             "can_update_status": _can_update_status(current_user, task),
+            "today": date.today().isoformat(),
         },
     )
 

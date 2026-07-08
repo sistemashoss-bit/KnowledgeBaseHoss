@@ -2,11 +2,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
+from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app.models import (
     Branch, Department, Project, Task, User, UserZone, Zone,
@@ -65,7 +66,7 @@ def list_projects(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     q = _projects_query(current_user, db)
     if status and status in PROJECT_STATUSES:
@@ -77,6 +78,7 @@ def list_projects(
     branches = db.query(Branch).order_by(Branch.name).all()
     zones = db.query(Zone).order_by(Zone.name).all()
 
+    csrf = generate_csrf_token(str(current_user.id))
     return templates.TemplateResponse(
         request,
         "projects/list.html",
@@ -88,13 +90,15 @@ def list_projects(
             "zones": zones,
             "statuses": PROJECT_STATUSES,
             "filter_status": status,
+            "today": date.today().isoformat(),
+            "csrf_token": csrf,
         },
     )
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-@router.post("/", response_class=HTMLResponse)
+@router.post("/")
 def create_project(
     name: str = Form(...),
     description: str = Form(""),
@@ -104,11 +108,14 @@ def create_project(
     zone_id: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
 
     project = Project(
         id=uuid.uuid4(),
@@ -124,7 +131,7 @@ def create_project(
     )
     db.add(project)
     db.commit()
-    return HTMLResponse(headers={"HX-Redirect": f"/projects/{project.id}"})
+    return RedirectResponse(f"/projects/{project.id}", status_code=302)
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -138,7 +145,7 @@ def project_detail(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     project = (
         db.query(Project)
@@ -198,6 +205,7 @@ def project_detail(
             "project_statuses": PROJECT_STATUSES,
             "filter_task_status": task_status,
             "can_edit": _can_edit_project(current_user, project),
+            "today": date.today().isoformat(),
         },
     )
 

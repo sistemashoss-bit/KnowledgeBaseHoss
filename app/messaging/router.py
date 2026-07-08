@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
+from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
@@ -171,7 +172,7 @@ def messaging_index(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
@@ -193,6 +194,7 @@ def messaging_index(
             "zones": zones,
             "branches": branches,
             "all_users": all_users,
+            "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
 
@@ -205,7 +207,7 @@ def conversation_view(
     current_user=Depends(get_current_user),
 ):
     if not current_user:
-        return HTMLResponse(headers={"HX-Redirect": "/auth/login"})
+        return RedirectResponse("/auth/login", status_code=302)
 
     conv = (
         db.query(Conversation)
@@ -253,6 +255,7 @@ def conversation_view(
             "zones": zones,
             "branches": branches,
             "all_users": all_users,
+            "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
 
@@ -335,35 +338,41 @@ def send_message(
     return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
 
 
-@router.post("/direct/{target_user_id}", response_class=HTMLResponse)
+@router.post("/direct/{target_user_id}")
 def start_direct(
     target_user_id: str,
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
 
     target = db.query(User).filter(User.id == target_user_id, User.is_active == True).first()
     if not target:
         raise HTTPException(404)
 
     conv = _get_or_create_direct(current_user.id, target.id, db)
-    return HTMLResponse(headers={"HX-Redirect": f"/messaging/{conv.id}"})
+    return RedirectResponse(f"/messaging/{conv.id}", status_code=302)
 
 
-@router.post("/group/new", response_class=HTMLResponse)
+@router.post("/group/new")
 def create_group(
     name: str = Form(...),
     member_ids: list[str] = Form(default=[]),
     department_id: str = Form(""),
     zone_id: str = Form(""),
     branch_id: str = Form(""),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
 
     conv = Conversation(
         id=uuid.uuid4(),
@@ -377,10 +386,9 @@ def create_group(
     db.add(conv)
     db.flush()
 
-    # Add creator + selected members
     all_ids = set(member_ids) | {str(current_user.id)}
     for uid in all_ids:
         db.add(ConversationParticipant(conversation_id=conv.id, user_id=uid))
 
     db.commit()
-    return HTMLResponse(headers={"HX-Redirect": f"/messaging/{conv.id}"})
+    return RedirectResponse(f"/messaging/{conv.id}", status_code=302)

@@ -150,6 +150,7 @@
     </div>
 
     <form method="post" action="/projects/" class="space-y-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Nombre <span class="text-red-500">*</span></label>
         <input type="text" name="name" required
@@ -239,5 +240,4 @@
   </div>
 </div>
 
-<script>const today = new Date().toISOString().split('T')[0];</script>
 {% endblock %}

@@ -108,7 +108,7 @@
               </span>
               {% endif %}
               {% if task.due_date %}
-              <span class="flex items-center gap-1 {% if task.due_date < today %}text-red-400{% endif %}">
+              <span class="flex items-center gap-1 {% if task.due_date.isoformat() < today %}text-red-400{% endif %}">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -157,6 +157,7 @@
     </div>
 
     <form method="post" action="/tasks/" class="space-y-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
@@ -235,7 +236,4 @@
   </div>
 </div>
 
-<script>
-  const today = new Date().toISOString().split('T')[0];
-</script>
 {% endblock %}
