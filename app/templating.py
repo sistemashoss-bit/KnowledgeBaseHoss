@@ -1,3 +1,4 @@
+import json
 from fastapi.templating import Jinja2Templates
 from app import storage as _storage
 
@@ -18,3 +19,4 @@ def _evidence_url(key: str, filename: str) -> str:
 
 
 templates.env.globals["evidence_url"] = _evidence_url
+templates.env.filters["tojson"] = lambda v: json.dumps(v)

@@ -315,10 +315,11 @@ def poll_messages(
     )
     _mark_read(conv_id, current_user.id, db)
 
+    conv_type = db.query(Conversation.type).filter(Conversation.id == conv_id).scalar()
     return templates.TemplateResponse(
         request,
         "messaging/_feed.html",
-        {"messages": messages, "current_user": current_user},
+        {"messages": messages, "current_user": current_user, "is_group": conv_type == CONV_GROUP},
     )
 
 

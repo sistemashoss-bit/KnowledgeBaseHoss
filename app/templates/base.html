@@ -13,10 +13,9 @@
   <!-- Sidebar -->
   <aside class="w-64 bg-slate-900 flex flex-col shrink-0 min-h-screen">
     <div class="px-6 py-5 border-b border-slate-700">
-      <a href="/" class="flex flex-col items-center gap-1.5">
+      <a href="/" class="flex items-center justify-center">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
              alt="HOSS" class="h-8 w-auto object-contain brightness-0 invert" />
-        <span class="text-white font-bold text-sm tracking-tight">HOSS Conocimiento</span>
       </a>
     </div>
 
@@ -95,6 +94,17 @@
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-1-3z" />
         </svg>
         Mensajes
+      </a>
+      {% endif %}
+
+      {% if current_user and current_user.role in ("superadmin", "admin") %}
+      <a href="/reports/"
+         class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+        Reportería
       </a>
       {% endif %}
 

@@ -1,22 +1,47 @@
+{% set show_avatars = is_group if is_group is defined else (active_conv is defined and active_conv and active_conv.type == 'group') %}
+
 {% for msg in messages %}
-<div class="flex {% if msg.sender_id == current_user.id %}justify-end{% else %}justify-start{% endif %} mb-3">
-  <div class="max-w-xs lg:max-w-md xl:max-w-lg">
-    {% if msg.sender_id != current_user.id %}
-    <p class="text-xs text-gray-400 mb-1 ml-3">
-      {{ msg.sender.name or msg.sender.email if msg.sender else "?" }}
+{% set is_mine = msg.sender_id == current_user.id %}
+<div class="flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
+
+  {# ── Avatar (others, group only) ─────────────────────────────────────── #}
+  {% if show_avatars and not is_mine %}
+  <div class="shrink-0 self-end mb-5">
+    {% if msg.sender and msg.sender.avatar_key %}
+    <img src="{{ avatar_url(msg.sender.avatar_key) }}"
+         alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-white" />
+    {% else %}
+    <div class="w-7 h-7 rounded-full bg-indigo-200 flex items-center justify-center text-indigo-700 text-xs font-bold ring-1 ring-white select-none">
+      {{ (msg.sender.name or msg.sender.email)[0].upper() if msg.sender else "?" }}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── Bubble ──────────────────────────────────────────────────────────── #}
+  <div class="{% if is_mine %}max-w-xs lg:max-w-md xl:max-w-lg{% else %}max-w-xs lg:max-w-md xl:max-w-lg{% endif %}">
+
+    {# Sender name — only in groups for others #}
+    {% if show_avatars and not is_mine and msg.sender %}
+    <p class="text-xs text-gray-400 mb-1 ml-1">
+      {{ msg.sender.name or msg.sender.email }}
     </p>
     {% endif %}
 
-    {% set is_mine = msg.sender_id == current_user.id %}
-
+    {# Text bubble #}
     {% if msg.content %}
     <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed
-      {% if is_mine %}bg-orange-500 text-white rounded-br-sm{% else %}bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm{% endif %}
+      {% if is_mine %}
+        bg-orange-500 text-white rounded-br-sm
+      {% else %}
+        bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
+      {% endif %}
       {% if msg.attachments %}rounded-b-sm{% endif %}">
       {{ msg.content }}
     </div>
     {% endif %}
 
+    {# Attachments #}
     {% if msg.attachments %}
     <div class="flex flex-col gap-1 {% if msg.content %}mt-1{% endif %}">
       {% for att in msg.attachments %}
@@ -47,13 +72,15 @@
     </div>
     {% endif %}
 
-    <p class="text-xs text-gray-400 mt-1
-      {% if is_mine %}text-right mr-1{% else %}ml-3{% endif %}">
+    {# Timestamp #}
+    <p class="text-xs text-gray-400 mt-1 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">
       {{ msg.created_at.strftime('%H:%M') }}
     </p>
   </div>
+
 </div>
 {% endfor %}
+
 {% if not messages %}
 <div class="flex items-center justify-center h-full">
   <div class="text-center">

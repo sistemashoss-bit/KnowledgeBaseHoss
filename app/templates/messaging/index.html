@@ -337,26 +337,28 @@
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
       </div>
 
-      <!-- Optional scope -->
-      {% if departments or zones or branches %}
-      <div class="grid grid-cols-{% if departments and (zones or branches) %}2{% else %}1{% endif %} gap-3">
-        {% if departments %}
+      <!-- Scope filters (double as group metadata) -->
+      {% if departments or zones %}
+      <div class="grid grid-cols-{% if departments and zones %}2{% else %}1{% endif %} gap-3">
+        {% if zones %}
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento (opcional)</label>
-          <select name="department_id"
+          <label class="block text-xs font-medium text-gray-600 mb-1">Zona</label>
+          <select id="ng-zone" name="zone_id"
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
-            <option value="">— Ninguno —</option>
-            {% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
+            <option value="">— Todas —</option>
+            {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
           </select>
         </div>
         {% endif %}
-        {% if zones %}
+        {% if departments %}
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Zona (opcional)</label>
-          <select name="zone_id"
+          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+          <select id="ng-dept" name="department_id"
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
-            <option value="">— Ninguna —</option>
-            {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
+            <option value="">— Todos —</option>
+            {% for d in departments %}
+            <option value="{{ d.id }}" data-zone="{{ d.branch.zone_id if d.branch else '' }}">{{ d.name }}</option>
+            {% endfor %}
           </select>
         </div>
         {% endif %}
@@ -365,19 +367,31 @@
 
       <!-- Members -->
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">
-          Miembros
-          <span class="text-xs text-gray-400 font-normal ml-1">(tú serás añadido automáticamente)</span>
-        </label>
-        <div class="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-sm font-medium text-gray-700">
+            Miembros
+            <span class="text-xs text-gray-400 font-normal ml-1">(tú serás añadido automáticamente)</span>
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input id="ng-check-all" type="checkbox"
+                   class="w-3.5 h-3.5 rounded text-orange-500 focus:ring-orange-400 border-gray-300" />
+            Seleccionar todos
+          </label>
+        </div>
+
+        <!-- Member count badge -->
+        <p id="ng-count" class="text-xs text-gray-400 mb-1.5"></p>
+
+        <div class="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
           {% for u in all_users %}
-          <label class="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0">
+          <label class="ng-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
+                 data-dept="{{ u.department_id or '' }}">
             <input type="checkbox" name="member_ids" value="{{ u.id }}"
-                   class="w-4 h-4 rounded text-orange-500 focus:ring-orange-400 border-gray-300"/>
+                   class="ng-cb w-4 h-4 rounded text-orange-500 focus:ring-orange-400 border-gray-300"/>
             <div class="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-bold shrink-0">
               {{ (u.name or u.email)[0].upper() }}
             </div>
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               {% if u.name %}
               <p class="text-sm text-gray-800">{{ u.name }}</p>
               <p class="text-xs text-gray-400 truncate">{{ u.email }}</p>
@@ -385,6 +399,9 @@
               <p class="text-sm text-gray-800 truncate">{{ u.email }}</p>
               {% endif %}
             </div>
+            {% if u.department %}
+            <span class="text-xs text-gray-300 shrink-0">{{ u.department.name }}</span>
+            {% endif %}
           </label>
           {% endfor %}
         </div>
@@ -401,5 +418,83 @@
     </form>
   </div>
 </div>
+
+<script>
+(function () {
+  var zoneSel  = document.getElementById('ng-zone');
+  var deptSel  = document.getElementById('ng-dept');
+  var checkAll = document.getElementById('ng-check-all');
+  var countEl  = document.getElementById('ng-count');
+  var rows     = Array.from(document.querySelectorAll('.ng-member-row'));
+
+  function allowedDepts() {
+    var deptVal = deptSel ? deptSel.value : '';
+    var zoneVal = zoneSel ? zoneSel.value : '';
+
+    if (deptVal) return [deptVal];
+
+    if (zoneVal && deptSel) {
+      return Array.from(deptSel.options)
+        .filter(function (o) { return o.value && o.dataset.zone === zoneVal; })
+        .map(function (o) { return o.value; });
+    }
+
+    return null; // no filter → show all
+  }
+
+  function applyFilter() {
+    var allowed = allowedDepts();
+    rows.forEach(function (row) {
+      var show = allowed === null || allowed.indexOf(row.dataset.dept) !== -1;
+      row.style.display = show ? '' : 'none';
+      if (!show) row.querySelector('.ng-cb').checked = false;
+    });
+    syncCheckAll();
+    updateCount();
+  }
+
+  function syncCheckAll() {
+    if (!checkAll) return;
+    var visible  = rows.filter(function (r) { return r.style.display !== 'none'; });
+    var checked  = visible.filter(function (r) { return r.querySelector('.ng-cb').checked; });
+    checkAll.checked       = visible.length > 0 && checked.length === visible.length;
+    checkAll.indeterminate = checked.length > 0 && checked.length < visible.length;
+  }
+
+  function updateCount() {
+    if (!countEl) return;
+    var visible = rows.filter(function (r) { return r.style.display !== 'none'; });
+    var checked = visible.filter(function (r) { return r.querySelector('.ng-cb').checked; });
+    countEl.textContent = checked.length
+      ? checked.length + ' seleccionado(s) de ' + visible.length + ' visible(s)'
+      : visible.length + ' disponible(s)';
+  }
+
+  if (zoneSel) zoneSel.addEventListener('change', function () {
+    // When zone changes, reset dept to "Todos" and refilter
+    if (deptSel) deptSel.value = '';
+    applyFilter();
+  });
+
+  if (deptSel) deptSel.addEventListener('change', applyFilter);
+
+  rows.forEach(function (row) {
+    row.querySelector('.ng-cb').addEventListener('change', function () {
+      syncCheckAll();
+      updateCount();
+    });
+  });
+
+  if (checkAll) {
+    checkAll.addEventListener('change', function () {
+      var visible = rows.filter(function (r) { return r.style.display !== 'none'; });
+      visible.forEach(function (r) { r.querySelector('.ng-cb').checked = checkAll.checked; });
+      updateCount();
+    });
+  }
+
+  updateCount();
+})();
+</script>
 
 {% endblock %}

@@ -34,6 +34,7 @@ from app.zones.router import router as zones_router
 from app.tasks.router import router as tasks_router
 from app.projects.router import router as projects_router
 from app.messaging.router import router as messaging_router
+from app.reports.router import router as reports_router
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import build_access_filter
@@ -51,6 +52,7 @@ app.include_router(zones_router)
 app.include_router(tasks_router)
 app.include_router(projects_router)
 app.include_router(messaging_router)
+app.include_router(reports_router)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
