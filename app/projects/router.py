@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
+from app import audit
 from app.models import (
     Branch, Department, Project, Task, User, UserZone, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN,
@@ -100,6 +101,7 @@ def list_projects(
 
 @router.post("/")
 def create_project(
+    request: Request,
     name: str = Form(...),
     description: str = Form(""),
     status: str = Form("draft"),
@@ -131,6 +133,11 @@ def create_project(
     )
     db.add(project)
     db.commit()
+    audit.log_action(
+        "project_create", user=current_user, request=request,
+        resource_type="project", resource_id=project.id, resource_name=project.name,
+        details=f"status={project.status}",
+    )
     return RedirectResponse(f"/projects/{project.id}", status_code=302)
 
 
@@ -216,6 +223,7 @@ def project_detail(
 @router.post("/{project_id}/status", response_class=HTMLResponse)
 def update_project_status(
     project_id: str,
+    request: Request,
     status: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -227,8 +235,14 @@ def update_project_status(
         raise HTTPException(403)
     if status not in PROJECT_STATUSES:
         raise HTTPException(400)
+    prev = project.status
     project.status = status
     db.commit()
+    audit.log_action(
+        "project_status_change", user=current_user, request=request,
+        resource_type="project", resource_id=project_id, resource_name=project.name,
+        details=f"{prev} → {status}",
+    )
     return HTMLResponse(headers={"HX-Redirect": f"/projects/{project_id}"})
 
 
@@ -237,6 +251,7 @@ def update_project_status(
 @router.delete("/{project_id}", response_class=HTMLResponse)
 def delete_project(
     project_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -245,8 +260,12 @@ def delete_project(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project or not _can_edit_project(current_user, project):
         raise HTTPException(403)
-    # Detach tasks rather than cascade-delete them
+    name = project.name
     db.query(Task).filter(Task.project_id == project_id).update({"project_id": None})
     db.delete(project)
     db.commit()
+    audit.log_action(
+        "project_delete", user=current_user, request=request,
+        resource_type="project", resource_id=project_id, resource_name=name,
+    )
     return HTMLResponse(headers={"HX-Redirect": "/projects/"})

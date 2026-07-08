@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_superadmin
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
+from app import audit
 from app.models import Zone, Branch
 from app.templating import templates
 
@@ -55,6 +56,7 @@ def list_zones(
 
 @router.post("/zones/")
 def create_zone(
+    request: Request,
     name: str = Form(...),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
@@ -63,14 +65,20 @@ def create_zone(
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Zone, _slugify(name))
-    db.add(Zone(id=uuid.uuid4(), name=name.strip(), slug=slug))
+    zone = Zone(id=uuid.uuid4(), name=name.strip(), slug=slug)
+    db.add(zone)
     db.commit()
+    audit.log_action(
+        "zone_create", user=current_user, request=request,
+        resource_type="zone", resource_id=zone.id, resource_name=zone.name,
+    )
     return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.post("/zones/{zone_id}/edit")
 def edit_zone(
     zone_id: str,
+    request: Request,
     name: str = Form(...),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
@@ -81,15 +89,22 @@ def edit_zone(
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
     if not zone:
         raise HTTPException(404)
+    old_name = zone.name
     zone.name = name.strip()
     zone.slug = _unique_slug(db, Zone, _slugify(name), exclude_id=zone_id)
     db.commit()
+    audit.log_action(
+        "zone_edit", user=current_user, request=request,
+        resource_type="zone", resource_id=zone_id, resource_name=zone.name,
+        details=f"{old_name!r} → {zone.name!r}",
+    )
     return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.delete("/zones/{zone_id}", response_class=HTMLResponse)
 def delete_zone(
     zone_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
@@ -98,8 +113,13 @@ def delete_zone(
         raise HTTPException(404)
     if zone.branches:
         raise HTTPException(400, "Mueve o elimina las sucursales antes de borrar la zona.")
+    name = zone.name
     db.delete(zone)
     db.commit()
+    audit.log_action(
+        "zone_delete", user=current_user, request=request,
+        resource_type="zone", resource_id=zone_id, resource_name=name,
+    )
     return HTMLResponse(headers={"HX-Redirect": "/org/zones/"})
 
 
@@ -107,6 +127,7 @@ def delete_zone(
 
 @router.post("/branches/")
 def create_branch(
+    request: Request,
     name: str = Form(...),
     zone_id: str = Form(""),
     csrf_token: str = Form(...),
@@ -116,19 +137,20 @@ def create_branch(
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Branch, _slugify(name))
-    db.add(Branch(
-        id=uuid.uuid4(),
-        name=name.strip(),
-        slug=slug,
-        zone_id=zone_id if zone_id else None,
-    ))
+    branch = Branch(id=uuid.uuid4(), name=name.strip(), slug=slug, zone_id=zone_id if zone_id else None)
+    db.add(branch)
     db.commit()
+    audit.log_action(
+        "branch_create", user=current_user, request=request,
+        resource_type="branch", resource_id=branch.id, resource_name=branch.name,
+    )
     return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.post("/branches/{branch_id}/edit")
 def edit_branch(
     branch_id: str,
+    request: Request,
     name: str = Form(...),
     zone_id: str = Form(""),
     csrf_token: str = Form(...),
@@ -140,16 +162,23 @@ def edit_branch(
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(404)
+    old_name = branch.name
     branch.name = name.strip()
     branch.slug = _unique_slug(db, Branch, _slugify(name), exclude_id=branch_id)
     branch.zone_id = zone_id if zone_id else None
     db.commit()
+    audit.log_action(
+        "branch_edit", user=current_user, request=request,
+        resource_type="branch", resource_id=branch_id, resource_name=branch.name,
+        details=f"{old_name!r} → {branch.name!r}",
+    )
     return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.delete("/branches/{branch_id}", response_class=HTMLResponse)
 def delete_branch(
     branch_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
@@ -158,6 +187,11 @@ def delete_branch(
         raise HTTPException(404)
     if branch.users or branch.departments:
         raise HTTPException(400, "Reasigna usuarios y departamentos antes de eliminar la sucursal.")
+    name = branch.name
     db.delete(branch)
     db.commit()
+    audit.log_action(
+        "branch_delete", user=current_user, request=request,
+        resource_type="branch", resource_id=branch_id, resource_name=name,
+    )
     return HTMLResponse(headers={"HX-Redirect": "/org/zones/"})

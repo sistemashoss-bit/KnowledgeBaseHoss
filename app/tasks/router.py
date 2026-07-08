@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
-from app import storage
+from app import audit, storage
 from app.models import (
     Department, Project, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
@@ -116,6 +116,7 @@ def list_tasks(
 
 @router.post("/")
 async def create_task(
+    request: Request,
     title: str = Form(...),
     description: str = Form(""),
     priority: str = Form("medium"),
@@ -168,6 +169,11 @@ async def create_task(
         ))
 
     db.commit()
+    audit.log_action(
+        "task_create", user=current_user, request=request,
+        resource_type="task", resource_id=task.id, resource_name=task.title,
+        details=f"priority={task.priority} evidences={len([f for f in evidences if f.filename])}",
+    )
     redirect = next_url if next_url and next_url.startswith("/") else "/tasks/"
     return RedirectResponse(redirect, status_code=302)
 
@@ -231,6 +237,7 @@ def task_detail(
 @router.post("/{task_id}/evidences")
 async def upload_evidences(
     task_id: str,
+    request: Request,
     files: list[UploadFile] = File(...),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
@@ -268,6 +275,14 @@ async def upload_evidences(
             file_size=len(content),
         ))
     db.commit()
+    uploaded = [f.filename for f in files if f.filename]
+    task_obj = db.query(Task).filter(Task.id == task_id).first()
+    audit.log_action(
+        "evidence_upload", user=current_user, request=request,
+        resource_type="task", resource_id=task_id,
+        resource_name=task_obj.title if task_obj else task_id,
+        details=f"files={len(uploaded)} names={','.join(uploaded[:5])}",
+    )
     return RedirectResponse(f"/tasks/{task_id}", status_code=302)
 
 
@@ -275,6 +290,7 @@ async def upload_evidences(
 def delete_evidence(
     task_id: str,
     evidence_id: str,
+    request: Request,
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -296,12 +312,17 @@ def delete_evidence(
     if not is_uploader and not _can_edit_task(current_user, task):
         raise HTTPException(403)
 
+    filename = ev.filename
     try:
         storage.delete_evidence(ev.file_key)
     except Exception:
         pass
     db.delete(ev)
     db.commit()
+    audit.log_action(
+        "evidence_delete", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=filename,
+    )
     return RedirectResponse(f"/tasks/{task_id}", status_code=302)
 
 
@@ -346,8 +367,14 @@ def update_status(
         raise HTTPException(403)
     if status not in TASK_STATUSES:
         raise HTTPException(400)
+    prev = task.status
     task.status = status
     db.commit()
+    audit.log_action(
+        "task_status_change", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+        details=f"{prev} → {status}",
+    )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
 
@@ -356,6 +383,7 @@ def update_status(
 @router.post("/{task_id}/assign", response_class=HTMLResponse)
 def assign_task(
     task_id: str,
+    request: Request,
     assigned_to: str = Form(""),
     department_id: str = Form(""),
     db: Session = Depends(get_db),
@@ -369,6 +397,12 @@ def assign_task(
     task.assigned_to = assigned_to if assigned_to else None
     task.department_id = department_id if department_id else task.department_id
     db.commit()
+    assignee = db.query(User).filter(User.id == assigned_to).first() if assigned_to else None
+    audit.log_action(
+        "task_assign", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+        details=f"assigned_to={assignee.email if assignee else 'none'}",
+    )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
 
@@ -377,6 +411,7 @@ def assign_task(
 @router.delete("/{task_id}", response_class=HTMLResponse)
 def delete_task(
     task_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -385,8 +420,13 @@ def delete_task(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task or not _can_edit_task(current_user, task):
         raise HTTPException(403)
+    title = task.title
     db.delete(task)
     db.commit()
+    audit.log_action(
+        "task_delete", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=title,
+    )
     return HTMLResponse(headers={"HX-Redirect": "/tasks/"})
 
 

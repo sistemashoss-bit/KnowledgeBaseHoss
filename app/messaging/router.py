@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db, SessionLocal
-from app import storage, valkey_client as vk
+from app import audit, storage, valkey_client as vk
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
     Message, MessageAttachment, User, UserZone, Zone,
@@ -378,6 +378,12 @@ async def send_message(
     _mark_read(conv_id, current_user.id, db)
     db.commit()
 
+    if valid_files:
+        audit.log_action(
+            "chat_attachment", user=current_user, request=request,
+            resource_type="conversation", resource_id=conv_id,
+            details=f"files={len(valid_files)} names={','.join(f.filename for f in valid_files[:5])}",
+        )
     return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
 
 
@@ -437,6 +443,7 @@ def start_direct(
 
 @router.post("/group/new")
 def create_group(
+    request: Request,
     name: str = Form(...),
     member_ids: list[str] = Form(default=[]),
     department_id: str = Form(""),
@@ -468,12 +475,18 @@ def create_group(
         db.add(ConversationParticipant(conversation_id=conv.id, user_id=uid))
 
     db.commit()
+    audit.log_action(
+        "group_create", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv.id, resource_name=conv.name,
+        details=f"members={len(all_ids)}",
+    )
     return RedirectResponse(f"/messaging/{conv.id}", status_code=302)
 
 
 @router.post("/{conv_id}/members")
 def add_member(
     conv_id: str,
+    request: Request,
     user_id: str = Form(...),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
@@ -505,12 +518,18 @@ def add_member(
 
     db.add(ConversationParticipant(conversation_id=conv.id, user_id=target.id))
     db.commit()
+    audit.log_action(
+        "group_member_add", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id, resource_name=conv.name,
+        details=f"added={target.email}",
+    )
     return RedirectResponse(f"/messaging/{conv_id}", status_code=302)
 
 
 @router.post("/{conv_id}/members/remove")
 def remove_member(
     conv_id: str,
+    request: Request,
     user_id: str = Form(...),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
@@ -534,6 +553,7 @@ def remove_member(
     if not (is_creator or is_superadmin or removing_self):
         raise HTTPException(403)
 
+    removed_user = db.query(User).filter(User.id == user_id).first()
     participant = db.query(ConversationParticipant).filter(
         ConversationParticipant.conversation_id == conv_id,
         ConversationParticipant.user_id == user_id,
@@ -541,6 +561,13 @@ def remove_member(
     if participant:
         db.delete(participant)
         db.commit()
+
+    action = "group_leave" if removing_self else "group_member_remove"
+    audit.log_action(
+        action, user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id, resource_name=conv.name,
+        details=f"user={removed_user.email if removed_user else user_id}",
+    )
 
     if removing_self:
         return RedirectResponse("/messaging/", status_code=302)
