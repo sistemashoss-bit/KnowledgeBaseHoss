@@ -62,9 +62,9 @@
           </select>
         </div>
 
-        {% if zones %}
         <div class="md:col-span-2">
           <label class="block text-xs font-medium text-gray-600 mb-1">Zonas asignadas</label>
+          {% if zones %}
           <div class="flex flex-wrap gap-3 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
             {% for z in zones %}
             <label class="flex items-center gap-1.5 cursor-pointer">
@@ -74,8 +74,13 @@
             </label>
             {% endfor %}
           </div>
+          {% else %}
+          <p class="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
+            No hay zonas creadas. Crea zonas en
+            <a href="/org/zones/" class="text-orange-600 underline">Zonas y Sucursales</a>.
+          </p>
+          {% endif %}
         </div>
-        {% endif %}
 
         {% else %}
         <input type="hidden" name="role" value="employee" />

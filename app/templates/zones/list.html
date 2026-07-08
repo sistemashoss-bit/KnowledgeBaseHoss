@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Zonas y Sucursales — HOSS Conocimiento{% endblock %}
 {% block content %}
-<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+<div class="flex-1 overflow-y-auto p-8 bg-gray-50"
+     x-data="{ editZone: null, editBranch: null }">
 
   <div class="max-w-5xl mx-auto">
     <div class="flex items-center justify-between mb-8">
@@ -10,7 +11,6 @@
         <p class="text-sm text-gray-500 mt-0.5">Estructura organizacional de regiones y sucursales</p>
       </div>
       <div class="flex gap-3">
-        <!-- Create Zone -->
         <button onclick="document.getElementById('modal-zone').classList.remove('hidden')"
                 class="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -18,7 +18,6 @@
           </svg>
           Nueva Zona
         </button>
-        <!-- Create Branch -->
         <button onclick="document.getElementById('modal-branch').classList.remove('hidden')"
                 class="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -34,46 +33,101 @@
     <div class="space-y-4 mb-8">
       {% for zone in zones %}
       <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+        <!-- Zone header -->
         <div class="flex items-center justify-between px-6 py-4 bg-gray-50 border-b border-gray-200">
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center">
+            <div class="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center shrink-0">
               <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
               </svg>
             </div>
-            <div>
+            <div x-show="editZone !== '{{ zone.id }}'">
               <p class="font-semibold text-gray-900">{{ zone.name }}</p>
               <p class="text-xs text-gray-400">{{ zone.branches | length }} sucursal(es)</p>
             </div>
+            <!-- Inline edit zone name -->
+            <form x-show="editZone === '{{ zone.id }}'" x-cloak
+                  method="post" action="/org/zones/{{ zone.id }}/edit"
+                  class="flex items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="text" name="name" value="{{ zone.name }}" required
+                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-48" />
+              <button type="submit"
+                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                Guardar
+              </button>
+              <button type="button" @click="editZone = null"
+                      class="px-2 py-1 border border-gray-300 text-gray-500 rounded text-xs hover:bg-white transition-colors">
+                Cancelar
+              </button>
+            </form>
           </div>
-          <button hx-delete="/org/zones/{{ zone.id }}"
-                  hx-confirm="¿Eliminar zona {{ zone.name }}? Solo es posible si no tiene sucursales."
-                  hx-target="body"
-                  class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors">
-            Eliminar
-          </button>
-        </div>
-
-        {% if zone.branches %}
-        <div class="divide-y divide-gray-100">
-          {% for branch in zone.branches %}
-          <div class="flex items-center justify-between px-6 py-3">
-            <div class="flex items-center gap-3">
-              <div class="w-2 h-2 rounded-full bg-orange-400"></div>
-              <div>
-                <p class="text-sm font-medium text-gray-800">{{ branch.name }}</p>
-                <p class="text-xs text-gray-400">
-                  {{ branch.users | length }} usuario(s) · {{ branch.departments | length }} depto(s)
-                </p>
-              </div>
-            </div>
-            <button hx-delete="/org/branches/{{ branch.id }}"
-                    hx-confirm="¿Eliminar sucursal {{ branch.name }}?"
+          <div class="flex items-center gap-2">
+            <button @click="editZone = editZone === '{{ zone.id }}' ? null : '{{ zone.id }}'; editBranch = null"
+                    class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+              Editar
+            </button>
+            <button hx-delete="/org/zones/{{ zone.id }}"
+                    hx-confirm="¿Eliminar zona {{ zone.name }}? Solo es posible si no tiene sucursales."
                     hx-target="body"
                     class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors">
               Eliminar
             </button>
+          </div>
+        </div>
+
+        <!-- Branches in this zone -->
+        {% if zone.branches %}
+        <div class="divide-y divide-gray-100">
+          {% for branch in zone.branches %}
+          <div class="px-6 py-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-2 h-2 rounded-full bg-orange-400 shrink-0"></div>
+                <div x-show="editBranch !== '{{ branch.id }}'">
+                  <p class="text-sm font-medium text-gray-800">{{ branch.name }}</p>
+                  <p class="text-xs text-gray-400">
+                    {{ branch.users | length }} usuario(s) · {{ branch.departments | length }} depto(s)
+                  </p>
+                </div>
+                <form x-show="editBranch === '{{ branch.id }}'" x-cloak
+                      method="post" action="/org/branches/{{ branch.id }}/edit"
+                      class="flex items-center gap-2 flex-wrap">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="text" name="name" value="{{ branch.name }}" required
+                         class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-40" />
+                  <select name="zone_id"
+                          class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                    <option value="">— Sin zona —</option>
+                    {% for z in zones %}
+                    <option value="{{ z.id }}" {% if branch.zone_id|string == z.id|string %}selected{% endif %}>{{ z.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit"
+                          class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                    Guardar
+                  </button>
+                  <button type="button" @click="editBranch = null"
+                          class="px-2 py-1 border border-gray-300 text-gray-500 rounded text-xs hover:bg-white transition-colors">
+                    Cancelar
+                  </button>
+                </form>
+              </div>
+              <div class="flex items-center gap-2">
+                <button @click="editBranch = editBranch === '{{ branch.id }}' ? null : '{{ branch.id }}'; editZone = null"
+                        class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                  Editar
+                </button>
+                <button hx-delete="/org/branches/{{ branch.id }}"
+                        hx-confirm="¿Eliminar sucursal {{ branch.name }}?"
+                        hx-target="body"
+                        class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors">
+                  Eliminar
+                </button>
+              </div>
+            </div>
           </div>
           {% endfor %}
         </div>
@@ -101,14 +155,49 @@
       </div>
       <div class="divide-y divide-gray-100">
         {% for branch in branches_without_zone %}
-        <div class="flex items-center justify-between px-6 py-3">
-          <p class="text-sm text-gray-700">{{ branch.name }}</p>
-          <button hx-delete="/org/branches/{{ branch.id }}"
-                  hx-confirm="¿Eliminar sucursal {{ branch.name }}?"
-                  hx-target="body"
-                  class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors">
-            Eliminar
-          </button>
+        <div class="px-6 py-3">
+          <div class="flex items-center justify-between">
+            <div x-show="editBranch !== '{{ branch.id }}'">
+              <p class="text-sm text-gray-700">{{ branch.name }}</p>
+              <p class="text-xs text-gray-400">
+                {{ branch.users | length }} usuario(s) · {{ branch.departments | length }} depto(s)
+              </p>
+            </div>
+            <form x-show="editBranch === '{{ branch.id }}'" x-cloak
+                  method="post" action="/org/branches/{{ branch.id }}/edit"
+                  class="flex items-center gap-2 flex-wrap">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="text" name="name" value="{{ branch.name }}" required
+                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-40" />
+              <select name="zone_id"
+                      class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                <option value="">— Sin zona —</option>
+                {% for z in zones %}
+                <option value="{{ z.id }}">{{ z.name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit"
+                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                Guardar
+              </button>
+              <button type="button" @click="editBranch = null"
+                      class="px-2 py-1 border border-gray-300 text-gray-500 rounded text-xs hover:bg-white transition-colors">
+                Cancelar
+              </button>
+            </form>
+            <div class="flex items-center gap-2">
+              <button @click="editBranch = editBranch === '{{ branch.id }}' ? null : '{{ branch.id }}'; editZone = null"
+                      class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                Editar
+              </button>
+              <button hx-delete="/org/branches/{{ branch.id }}"
+                      hx-confirm="¿Eliminar sucursal {{ branch.name }}?"
+                      hx-target="body"
+                      class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors">
+                Eliminar
+              </button>
+            </div>
+          </div>
         </div>
         {% endfor %}
       </div>
@@ -130,6 +219,7 @@
       </button>
     </div>
     <form method="post" action="/org/zones/">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-1">Nombre de la zona</label>
         <input type="text" name="name" required placeholder="Ej. Norte, Centro, Sur"
@@ -160,6 +250,7 @@
       </button>
     </div>
     <form method="post" action="/org/branches/">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-1">Nombre de la sucursal</label>
         <input type="text" name="name" required placeholder="Ej. Sucursal Monterrey"

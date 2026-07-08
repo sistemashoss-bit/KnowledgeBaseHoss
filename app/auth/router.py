@@ -205,6 +205,20 @@ def profile_page(
     )
 
 
+@router.post("/profile/name")
+def update_name(
+    name: str = Form(default=""),
+    csrf_token: str = Form(...),
+    user=Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    if not verify_csrf_token(csrf_token, str(user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    user.name = name.strip() or None
+    db.commit()
+    return RedirectResponse("/auth/profile", status_code=302)
+
+
 @router.post("/profile/password")
 def change_password(
     request: Request,

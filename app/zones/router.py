@@ -1,10 +1,11 @@
 import re
 import uuid
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth.deps import get_current_user, require_superadmin
+from app.auth.deps import require_superadmin
+from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app.models import Zone, Branch
 from app.templating import templates
@@ -39,6 +40,7 @@ def list_zones(
 ):
     zones = db.query(Zone).order_by(Zone.name).all()
     branches_without_zone = db.query(Branch).filter(Branch.zone_id.is_(None)).order_by(Branch.name).all()
+    csrf = generate_csrf_token(str(current_user.id))
     return templates.TemplateResponse(
         request,
         "zones/list.html",
@@ -46,22 +48,43 @@ def list_zones(
             "current_user": current_user,
             "zones": zones,
             "branches_without_zone": branches_without_zone,
+            "csrf_token": csrf,
         },
     )
 
 
-@router.post("/zones/", response_class=HTMLResponse)
+@router.post("/zones/")
 def create_zone(
-    request: Request,
     name: str = Form(...),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Zone, _slugify(name))
-    zone = Zone(id=uuid.uuid4(), name=name.strip(), slug=slug)
-    db.add(zone)
+    db.add(Zone(id=uuid.uuid4(), name=name.strip(), slug=slug))
     db.commit()
-    return HTMLResponse(headers={"HX-Redirect": "/org/zones/"})
+    return RedirectResponse("/org/zones/", status_code=302)
+
+
+@router.post("/zones/{zone_id}/edit")
+def edit_zone(
+    zone_id: str,
+    name: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_superadmin),
+):
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    zone = db.query(Zone).filter(Zone.id == zone_id).first()
+    if not zone:
+        raise HTTPException(404)
+    zone.name = name.strip()
+    zone.slug = _unique_slug(db, Zone, _slugify(name), exclude_id=zone_id)
+    db.commit()
+    return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.delete("/zones/{zone_id}", response_class=HTMLResponse)
@@ -82,24 +105,46 @@ def delete_zone(
 
 # ── Branches ───────────────────────────────────────────────────────────────────
 
-@router.post("/branches/", response_class=HTMLResponse)
+@router.post("/branches/")
 def create_branch(
-    request: Request,
     name: str = Form(...),
     zone_id: str = Form(""),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Branch, _slugify(name))
-    branch = Branch(
+    db.add(Branch(
         id=uuid.uuid4(),
         name=name.strip(),
         slug=slug,
         zone_id=zone_id if zone_id else None,
-    )
-    db.add(branch)
+    ))
     db.commit()
-    return HTMLResponse(headers={"HX-Redirect": "/org/zones/"})
+    return RedirectResponse("/org/zones/", status_code=302)
+
+
+@router.post("/branches/{branch_id}/edit")
+def edit_branch(
+    branch_id: str,
+    name: str = Form(...),
+    zone_id: str = Form(""),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_superadmin),
+):
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise HTTPException(404)
+    branch.name = name.strip()
+    branch.slug = _unique_slug(db, Branch, _slugify(name), exclude_id=branch_id)
+    branch.zone_id = zone_id if zone_id else None
+    db.commit()
+    return RedirectResponse("/org/zones/", status_code=302)
 
 
 @router.delete("/branches/{branch_id}", response_class=HTMLResponse)

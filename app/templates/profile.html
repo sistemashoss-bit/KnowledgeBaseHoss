@@ -23,6 +23,10 @@
 
         <div class="flex-1 space-y-3">
           <div>
+            <p class="text-gray-400 text-xs mb-0.5">Nombre</p>
+            <p class="font-medium text-gray-900 text-sm">{{ current_user.name or "—" }}</p>
+          </div>
+          <div>
             <p class="text-gray-400 text-xs mb-0.5">Correo</p>
             <p class="font-medium text-gray-900 text-sm">{{ current_user.email }}</p>
           </div>
@@ -42,6 +46,30 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Edit name -->
+      <div class="mt-4 pt-4 border-t border-gray-100" x-data="{ editing: false }">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-medium text-gray-600">Nombre para mostrar</p>
+          <button type="button" @click="editing = !editing"
+                  class="text-xs text-orange-600 hover:text-orange-500 font-medium transition-colors">
+            <span x-text="editing ? 'Cancelar' : 'Editar'"></span>
+          </button>
+        </div>
+        <div x-show="!editing">
+          <p class="text-sm text-gray-700">{{ current_user.name or "Sin nombre asignado" }}</p>
+        </div>
+        <form x-show="editing" x-cloak method="post" action="/auth/profile/name" class="flex gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="text" name="name" value="{{ current_user.name or '' }}"
+                 placeholder="Tu nombre completo"
+                 class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500" />
+          <button type="submit"
+                  class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-medium transition-colors shrink-0">
+            Guardar
+          </button>
+        </form>
       </div>
 
       <!-- Avatar upload -->
