@@ -5,7 +5,8 @@ _client: OpenSearch | None = None
 
 DOCUMENTS_INDEX = "kb_documents"
 CHUNKS_INDEX = "kb_chunks"
-EMBEDDING_DIM = 2048  # voyage-4-large, máxima precisión
+def _embedding_dim() -> int:
+    return settings.voyage_embedding_dim
 
 
 def get_client() -> OpenSearch:
@@ -67,7 +68,7 @@ def _ensure_chunks_index(client: OpenSearch) -> None:
                     "status": {"type": "keyword"},
                     "chunk_index": {"type": "integer"},
                     "content": {"type": "text"},
-                    "embedding": {"type": "knn_vector", "dimension": EMBEDDING_DIM},
+                    "embedding": {"type": "knn_vector", "dimension": _embedding_dim()},
                 }
             },
         },

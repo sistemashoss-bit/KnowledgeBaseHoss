@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # Voyage AI (embeddings + rerank)
     voyage_api_key: str
     voyage_embedding_model: str = "voyage-4-large"
+    voyage_embedding_dim: int = 2048
     voyage_rerank_model: str = "rerank-2.5"
 
 

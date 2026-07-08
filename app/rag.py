@@ -89,7 +89,12 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
         return []
     try:
         vo = _voyage_client()
-        result = vo.embed(texts, model=settings.voyage_embedding_model, input_type="document")
+        result = vo.embed(
+            texts,
+            model=settings.voyage_embedding_model,
+            input_type="document",
+            output_dimension=settings.voyage_embedding_dim,
+        )
         return result.embeddings
     except Exception:
         return None
@@ -98,7 +103,12 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
 def embed_text(text: str) -> list[float] | None:
     try:
         vo = _voyage_client()
-        result = vo.embed([text], model=settings.voyage_embedding_model, input_type="query")
+        result = vo.embed(
+            [text],
+            model=settings.voyage_embedding_model,
+            input_type="query",
+            output_dimension=settings.voyage_embedding_dim,
+        )
         return result.embeddings[0]
     except Exception:
         return None
@@ -178,6 +188,59 @@ def index_document(
 
     if actions:
         bulk(client, actions)
+
+
+def update_document_metadata(
+    doc_id: str,
+    title: str,
+    description: str,
+    department_id: str,
+    department_name: str,
+    status: str,
+    content_type: str,
+    uploaded_by: str,
+) -> None:
+    """Update metadata fields in OpenSearch without touching chunk content."""
+    client = search_module.get_client()
+
+    client.index(
+        index=search_module.DOCUMENTS_INDEX,
+        id=doc_id,
+        body={
+            "id": doc_id,
+            "title": title,
+            "description": description or "",
+            "department_id": department_id or "",
+            "department_name": department_name or "",
+            "status": status,
+            "content_type": content_type or "",
+            "uploaded_by": uploaded_by or "",
+        },
+    )
+
+    try:
+        client.update_by_query(
+            index=search_module.CHUNKS_INDEX,
+            body={
+                "query": {"term": {"document_id": doc_id}},
+                "script": {
+                    "source": (
+                        "ctx._source.document_title = params.title;"
+                        "ctx._source.status = params.status;"
+                        "ctx._source.department_id = params.department_id;"
+                        "ctx._source.department_name = params.department_name;"
+                    ),
+                    "params": {
+                        "title": title,
+                        "status": status,
+                        "department_id": department_id or "",
+                        "department_name": department_name or "",
+                    },
+                },
+            },
+        )
+    except Exception:
+        pass
 
 
 def delete_document_from_index(doc_id: str) -> None:

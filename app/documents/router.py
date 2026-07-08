@@ -220,19 +220,34 @@ async def edit_document(
 
     db.commit()
 
-    rag.delete_document_from_index(doc_id)
-    background_tasks.add_task(
-        rag.index_document,
-        doc_id=doc_id,
-        title=doc.title,
-        description=doc.description,
-        department_id=str(doc.department_id),
-        department_name=dept.name if dept else "",
-        status=doc.status,
-        content_type=doc.content_type or "",
-        uploaded_by=str(doc.uploaded_by),
-        text=new_text or "",
-    )
+    if new_text is not None:
+        # New file uploaded — delete old chunks and reindex with new content
+        rag.delete_document_from_index(doc_id)
+        background_tasks.add_task(
+            rag.index_document,
+            doc_id=doc_id,
+            title=doc.title,
+            description=doc.description,
+            department_id=str(doc.department_id),
+            department_name=dept.name if dept else "",
+            status=doc.status,
+            content_type=doc.content_type or "",
+            uploaded_by=str(doc.uploaded_by),
+            text=new_text,
+        )
+    else:
+        # Metadata only — update title/status/dept in existing chunks
+        background_tasks.add_task(
+            rag.update_document_metadata,
+            doc_id=doc_id,
+            title=doc.title,
+            description=doc.description,
+            department_id=str(doc.department_id),
+            department_name=dept.name if dept else "",
+            status=doc.status,
+            content_type=doc.content_type or "",
+            uploaded_by=str(doc.uploaded_by),
+        )
 
     audit.log_action(
         "edit_document", user=user, request=request,
