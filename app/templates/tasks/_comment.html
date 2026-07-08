@@ -1,0 +1,16 @@
+<div class="flex gap-3 px-6 py-4">
+  <div class="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 text-xs font-bold shrink-0">
+    {{ comment.user.email[0].upper() if comment.user else "?" }}
+  </div>
+  <div class="flex-1 min-w-0">
+    <div class="flex items-center gap-2 mb-1">
+      <span class="text-xs font-medium text-gray-700">
+        {{ comment.user.name or comment.user.email if comment.user else "Usuario" }}
+      </span>
+      <span class="text-xs text-gray-400">
+        {{ comment.created_at.strftime('%d/%m/%Y %H:%M') }}
+      </span>
+    </div>
+    <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content }}</p>
+  </div>
+</div>

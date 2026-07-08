@@ -84,6 +84,29 @@ def can_manage_user(actor: "User", target: "User") -> bool:
     return False
 
 
+def visible_tasks_query(user: "User", db):
+    """SQLAlchemy query for tasks visible to this user, with eager loads."""
+    from sqlalchemy import or_
+    from sqlalchemy.orm import joinedload
+    from app.models import Task, ROLE_SUPERADMIN
+
+    q = db.query(Task).options(
+        joinedload(Task.assignee),
+        joinedload(Task.created_by_user),
+        joinedload(Task.department),
+        joinedload(Task.project),
+    )
+    if user.role == ROLE_SUPERADMIN:
+        return q
+    conditions = [
+        Task.created_by == user.id,
+        Task.assigned_to == user.id,
+    ]
+    if user.department_id:
+        conditions.append(Task.department_id == user.department_id)
+    return q.filter(or_(*conditions))
+
+
 def can_manage_doc_dict(user: "User | None", doc_dict: dict) -> bool:
     """Same logic but for OpenSearch result dicts (used in list view)."""
     from app.models import ROLE_SUPERADMIN, ROLE_ADMIN

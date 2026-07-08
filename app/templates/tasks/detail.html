@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} — Tareas{% endblock %}
+
+{% macro priority_label(p) %}
+  {% if p == "urgent" %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">🔴 Urgente</span>
+  {% elif p == "high" %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">🟠 Alta</span>
+  {% elif p == "medium" %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">🟡 Media</span>
+  {% else %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">⚪ Baja</span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+  <div class="max-w-3xl mx-auto">
+
+    <!-- Breadcrumb -->
+    <a href="/tasks/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Volver a Tareas
+    </a>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+
+      <!-- Task header -->
+      <div class="px-6 py-5 border-b border-gray-100">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <h1 class="text-xl font-bold text-gray-900 leading-snug {% if task.status == 'done' %}line-through text-gray-400{% endif %}">
+              {{ task.title }}
+            </h1>
+            {% if task.project %}
+            <p class="text-xs text-gray-400 mt-1">📁 {{ task.project.name }}</p>
+            {% endif %}
+          </div>
+          {% if can_edit %}
+          <button hx-delete="/tasks/{{ task.id }}"
+                  hx-confirm="¿Eliminar esta tarea y sus comentarios?"
+                  hx-target="body"
+                  class="shrink-0 text-red-400 hover:text-red-600 text-xs px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+            Eliminar
+          </button>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Meta grid -->
+      <div class="grid grid-cols-2 gap-0 divide-y divide-gray-100 sm:grid-cols-4 sm:divide-y-0 sm:divide-x border-b border-gray-100">
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Estado</p>
+          {% if can_update_status %}
+          <form hx-post="/tasks/{{ task.id }}/status" hx-target="body">
+            <select name="status" onchange="this.form.dispatchEvent(new Event('submit',{bubbles:true}))"
+                    class="text-sm font-medium bg-transparent border-none outline-none cursor-pointer text-gray-800 -ml-0.5">
+              <option value="pending" {% if task.status == "pending" %}selected{% endif %}>Pendiente</option>
+              <option value="in_progress" {% if task.status == "in_progress" %}selected{% endif %}>En progreso</option>
+              <option value="review" {% if task.status == "review" %}selected{% endif %}>Revisión</option>
+              <option value="done" {% if task.status == "done" %}selected{% endif %}>Listo</option>
+            </select>
+          </form>
+          {% else %}
+          <p class="text-sm font-medium text-gray-800">
+            {% if task.status == "pending" %}Pendiente
+            {% elif task.status == "in_progress" %}En progreso
+            {% elif task.status == "review" %}Revisión
+            {% else %}Listo{% endif %}
+          </p>
+          {% endif %}
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Prioridad</p>
+          {{ priority_label(task.priority) }}
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Creado por</p>
+          <p class="text-sm font-medium text-gray-800">
+            {{ task.created_by_user.name or task.created_by_user.email if task.created_by_user else "—" }}
+          </p>
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Fecha límite</p>
+          <p class="text-sm font-medium {% if task.due_date and task.due_date.isoformat() < today %}text-red-500{% else %}text-gray-800{% endif %}">
+            {{ task.due_date.strftime('%d/%m/%Y') if task.due_date else "—" }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Description -->
+      {% if task.description %}
+      <div class="px-6 py-5 border-b border-gray-100">
+        <p class="text-xs text-gray-400 mb-2">Descripción</p>
+        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ task.description }}</p>
+      </div>
+      {% endif %}
+
+      <!-- Assignment panel -->
+      <div class="px-6 py-5 {% if task.description %}{% else %}border-t border-gray-100{% endif %}">
+        <div class="flex flex-wrap items-start gap-6">
+
+          <div class="min-w-0">
+            <p class="text-xs text-gray-400 mb-1">Departamento</p>
+            <p class="text-sm font-medium text-gray-800">{{ task.department.name if task.department else "—" }}</p>
+          </div>
+
+          <div class="min-w-0">
+            <p class="text-xs text-gray-400 mb-1">Asignado a</p>
+            <p class="text-sm font-medium text-gray-800">
+              {{ task.assignee.name or task.assignee.email if task.assignee else "Sin asignar" }}
+            </p>
+          </div>
+
+          {% if can_edit %}
+          <div class="ml-auto">
+            <button onclick="document.getElementById('panel-assign').classList.toggle('hidden')"
+                    class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              Reasignar
+            </button>
+          </div>
+          {% endif %}
+        </div>
+
+        {% if can_edit %}
+        <div id="panel-assign" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <form hx-post="/tasks/{{ task.id }}/assign" hx-target="body" class="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">Departamento</label>
+              <select name="department_id"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                <option value="">— Sin cambio —</option>
+                {% for dept in departments %}
+                <option value="{{ dept.id }}" {% if task.department_id and dept.id == task.department_id %}selected{% endif %}>{{ dept.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">Persona</label>
+              <select name="assigned_to"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                <option value="">— Sin asignar —</option>
+                {% for u in users %}
+                <option value="{{ u.id }}" {% if task.assigned_to and u.id == task.assigned_to %}selected{% endif %}>{{ u.name or u.email }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-span-2 flex justify-end">
+              <button type="submit"
+                      class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+                Guardar asignación
+              </button>
+            </div>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Comments -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100">
+        <h2 class="text-sm font-semibold text-gray-700">Comentarios</h2>
+      </div>
+
+      <div class="divide-y divide-gray-100" id="comments-list">
+        {% if task.comments %}
+          {% for comment in task.comments %}
+          {% include "tasks/_comment.html" %}
+          {% endfor %}
+        {% else %}
+        <div class="px-6 py-6 text-center text-sm text-gray-400 italic" id="no-comments">
+          Sin comentarios aún.
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Add comment -->
+      <div class="px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <form hx-post="/tasks/{{ task.id }}/comments"
+              hx-target="#comments-list"
+              hx-swap="beforeend"
+              hx-on::after-request="this.reset(); document.getElementById('no-comments')?.remove()"
+              class="flex gap-3 items-end">
+          <div class="flex-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Agregar comentario</label>
+            <textarea name="content" rows="2" required
+                      placeholder="Escribe un comentario..."
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"></textarea>
+          </div>
+          <button type="submit"
+                  class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors shrink-0">
+            Enviar
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const today = new Date().toISOString().split('T')[0];
+</script>
+{% endblock %}

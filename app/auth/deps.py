@@ -36,3 +36,11 @@ def require_role(*roles: str):
         return user
 
     return dep
+
+
+def require_superadmin(user: User | None = Depends(get_current_user)) -> User:
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Superadmin required")
+    return user

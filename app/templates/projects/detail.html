@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} — Proyectos{% endblock %}
+
+{% macro task_status_badge(s) %}
+  {% if s == "pending" %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Pendiente</span>
+  {% elif s == "in_progress" %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">En progreso</span>
+  {% elif s == "review" %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Revisión</span>
+  {% elif s == "done" %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Listo</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro priority_dot(p) %}
+  {% if p == "urgent" %}<span class="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Urgente"></span>
+  {% elif p == "high" %}<span class="w-2 h-2 rounded-full bg-orange-400 shrink-0" title="Alta"></span>
+  {% elif p == "medium" %}<span class="w-2 h-2 rounded-full bg-yellow-400 shrink-0" title="Media"></span>
+  {% else %}<span class="w-2 h-2 rounded-full bg-gray-300 shrink-0" title="Baja"></span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+  <div class="max-w-4xl mx-auto">
+
+    <!-- Breadcrumb -->
+    <a href="/projects/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Proyectos
+    </a>
+
+    <!-- Project card -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+
+      <!-- Header -->
+      <div class="px-6 py-5 border-b border-gray-100">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <h1 class="text-xl font-bold text-gray-900 leading-snug">{{ project.name }}</h1>
+            {% if project.description %}
+            <p class="text-sm text-gray-500 mt-1">{{ project.description }}</p>
+            {% endif %}
+          </div>
+          {% if can_edit %}
+          <button hx-delete="/projects/{{ project.id }}"
+                  hx-confirm="¿Eliminar proyecto '{{ project.name }}'? Las tareas existentes quedarán sin proyecto."
+                  hx-target="body"
+                  class="shrink-0 text-red-400 hover:text-red-600 text-xs px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+            Eliminar
+          </button>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Meta row -->
+      <div class="grid grid-cols-2 gap-0 divide-y divide-gray-100 sm:grid-cols-4 sm:divide-y-0 sm:divide-x border-b border-gray-100">
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Estado</p>
+          {% if can_edit %}
+          <form hx-post="/projects/{{ project.id }}/status" hx-target="body">
+            <select name="status" onchange="this.form.dispatchEvent(new Event('submit',{bubbles:true}))"
+                    class="text-sm font-medium bg-transparent border-none outline-none cursor-pointer text-gray-800 -ml-0.5">
+              <option value="draft" {% if project.status == "draft" %}selected{% endif %}>Borrador</option>
+              <option value="active" {% if project.status == "active" %}selected{% endif %}>Activo</option>
+              <option value="on_hold" {% if project.status == "on_hold" %}selected{% endif %}>En pausa</option>
+              <option value="completed" {% if project.status == "completed" %}selected{% endif %}>Completado</option>
+            </select>
+          </form>
+          {% else %}
+          <p class="text-sm font-medium text-gray-800">
+            {% if project.status == "draft" %}Borrador
+            {% elif project.status == "active" %}Activo
+            {% elif project.status == "on_hold" %}En pausa
+            {% else %}Completado{% endif %}
+          </p>
+          {% endif %}
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Alcance</p>
+          <p class="text-sm font-medium text-gray-800">
+            {% if project.department %}{{ project.department.name }}
+            {% elif project.branch %}{{ project.branch.name }}
+            {% elif project.zone %}{{ project.zone.name }}
+            {% else %}General{% endif %}
+          </p>
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Inicio / Límite</p>
+          <p class="text-sm font-medium text-gray-800">
+            {% if project.start_date %}{{ project.start_date.strftime('%d/%m/%Y') }}{% else %}—{% endif %}
+            {% if project.end_date %} → <span class="{% if project.end_date.isoformat() < today and project.status != 'completed' %}text-red-500{% endif %}">{{ project.end_date.strftime('%d/%m/%Y') }}</span>{% endif %}
+          </p>
+        </div>
+
+        <div class="px-5 py-4">
+          <p class="text-xs text-gray-400 mb-1">Creado por</p>
+          <p class="text-sm font-medium text-gray-800 truncate">
+            {{ project.created_by_user.name or project.created_by_user.email if project.created_by_user else "—" }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="px-6 py-4">
+        <div class="flex justify-between text-xs text-gray-500 mb-2">
+          <span class="font-medium">Progreso general</span>
+          <span>{{ stats.get("done", 0) }} / {{ total }} tareas completadas</span>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-2 mb-3">
+          <div class="bg-orange-500 h-2 rounded-full transition-all" style="width: {{ done_pct }}%"></div>
+        </div>
+        <!-- Status breakdown -->
+        <div class="flex gap-4 text-xs text-gray-500">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span>{{ stats.get("pending", 0) }} pendientes</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>{{ stats.get("in_progress", 0) }} en progreso</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span>{{ stats.get("review", 0) }} revisión</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>{{ stats.get("done", 0) }} listos</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tasks section -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <h2 class="text-sm font-semibold text-gray-700">Tareas del proyecto</h2>
+          <!-- Status filter tabs -->
+          <div class="flex gap-1">
+            <a href="/projects/{{ project.id }}"
+               class="px-2 py-0.5 rounded text-xs transition-colors {% if not filter_task_status %}bg-gray-100 text-gray-700 font-medium{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+              Todas
+            </a>
+            <a href="/projects/{{ project.id }}?task_status=pending"
+               class="px-2 py-0.5 rounded text-xs transition-colors {% if filter_task_status == 'pending' %}bg-gray-100 text-gray-700 font-medium{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+              Pendientes
+            </a>
+            <a href="/projects/{{ project.id }}?task_status=in_progress"
+               class="px-2 py-0.5 rounded text-xs transition-colors {% if filter_task_status == 'in_progress' %}bg-blue-100 text-blue-700 font-medium{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+              En progreso
+            </a>
+            <a href="/projects/{{ project.id }}?task_status=done"
+               class="px-2 py-0.5 rounded text-xs transition-colors {% if filter_task_status == 'done' %}bg-green-100 text-green-700 font-medium{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+              Listas
+            </a>
+          </div>
+        </div>
+        <button onclick="document.getElementById('modal-task').classList.remove('hidden')"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-500 transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Nueva Tarea
+        </button>
+      </div>
+
+      {% if tasks %}
+      <div class="divide-y divide-gray-100">
+        {% for task in tasks %}
+        <a href="/tasks/{{ task.id }}"
+           class="flex items-center gap-4 px-6 py-3.5 hover:bg-gray-50 transition-colors group">
+          {{ priority_dot(task.priority) }}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <p class="text-sm font-medium text-gray-800 truncate {% if task.status == 'done' %}line-through text-gray-400{% endif %}">{{ task.title }}</p>
+              {{ task_status_badge(task.status) }}
+            </div>
+            {% if task.assignee %}
+            <p class="text-xs text-gray-400 mt-0.5">→ {{ task.assignee.name or task.assignee.email }}</p>
+            {% elif task.department %}
+            <p class="text-xs text-gray-400 mt-0.5">→ {{ task.department.name }}</p>
+            {% endif %}
+          </div>
+          <svg class="w-4 h-4 text-gray-300 group-hover:text-gray-500 shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="px-6 py-10 text-center">
+        <p class="text-sm text-gray-400 italic">Sin tareas{% if filter_task_status %} con ese estado{% endif %}.</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal: Nueva Tarea en este proyecto -->
+<div id="modal-task" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-lg font-semibold text-gray-900">Nueva Tarea</h2>
+      <button onclick="document.getElementById('modal-task').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <form method="post" action="/tasks/" class="space-y-4">
+      <!-- Hidden fields: bind task to project and redirect back here -->
+      <input type="hidden" name="project_id" value="{{ project.id }}"/>
+      <input type="hidden" name="next_url" value="/projects/{{ project.id }}"/>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
+        <input type="text" name="title" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+        <textarea name="description" rows="2"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
+          <select name="priority"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+            <option value="low">Baja</option>
+            <option value="medium" selected>Media</option>
+            <option value="high">Alta</option>
+            <option value="urgent">Urgente</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Fecha límite</label>
+          <input type="date" name="due_date"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a departamento</label>
+        <select name="department_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          <option value="">— Sin departamento —</option>
+          {% for dept in departments %}
+          <option value="{{ dept.id }}" {% if project.department_id and dept.id == project.department_id %}selected{% endif %}>{{ dept.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a persona</label>
+        <select name="assigned_to"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          <option value="">— Sin asignar —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="flex gap-3 justify-end pt-2">
+        <button type="button" onclick="document.getElementById('modal-task').classList.add('hidden')"
+                class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
+        <button type="submit"
+                class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+          Crear Tarea
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>const today = new Date().toISOString().split('T')[0];</script>
+{% endblock %}
