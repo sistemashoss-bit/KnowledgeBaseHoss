@@ -11,3 +11,10 @@ def _avatar_url(key: str | None) -> str | None:
 
 
 templates.env.globals["avatar_url"] = _avatar_url
+
+
+def _evidence_url(key: str, filename: str) -> str:
+    return _storage.get_evidence_url(key, filename)
+
+
+templates.env.globals["evidence_url"] = _evidence_url

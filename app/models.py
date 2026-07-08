@@ -240,7 +240,8 @@ class Task(Base):
     department = relationship("Department", back_populates="tasks")
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_to])
     created_by_user = relationship("User", back_populates="created_tasks", foreign_keys=[created_by])
-    comments = relationship("TaskComment", back_populates="task")
+    comments = relationship("TaskComment", back_populates="task", order_by="TaskComment.created_at")
+    evidences = relationship("TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at")
 
 
 class TaskComment(Base):
@@ -254,6 +255,22 @@ class TaskComment(Base):
 
     task = relationship("Task", back_populates="comments")
     user = relationship("User", back_populates="task_comments")
+
+
+class TaskEvidence(Base):
+    __tablename__ = "task_evidences"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id"), nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_key = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", back_populates="evidences")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
 # ── Internal communication ────────────────────────────────────────────────────

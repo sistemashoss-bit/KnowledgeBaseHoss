@@ -158,6 +158,85 @@
       </div>
     </div>
 
+    <!-- Evidences -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-700">Evidencias</h2>
+        <span class="text-xs text-gray-400">{{ task.evidences | length }} archivo(s)</span>
+      </div>
+
+      {% if task.evidences %}
+      <div class="divide-y divide-gray-100">
+        {% for ev in task.evidences %}
+        <div class="flex items-center justify-between px-6 py-3 gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <!-- Icon by type -->
+            {% if ev.content_type.startswith('image/') %}
+            <svg class="w-8 h-8 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            {% elif 'pdf' in ev.content_type %}
+            <svg class="w-8 h-8 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+            {% else %}
+            <svg class="w-8 h-8 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+            </svg>
+            {% endif %}
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-800 truncate">{{ ev.filename }}</p>
+              <p class="text-xs text-gray-400">
+                {{ (ev.file_size / 1024) | round(1) }} KB
+                · {{ ev.uploader.name or ev.uploader.email if ev.uploader else "—" }}
+                · {{ ev.created_at.strftime('%d/%m/%Y %H:%M') }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <a href="/tasks/{{ task.id }}/evidences/{{ ev.id }}/download"
+               class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+              Descargar
+            </a>
+            {% if can_edit or ev.uploaded_by|string == current_user.id|string %}
+            <form method="post" action="/tasks/{{ task.id }}/evidences/{{ ev.id }}/delete"
+                  onsubmit="return confirm('¿Eliminar evidencia?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit"
+                      class="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition-colors">
+                Eliminar
+              </button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="px-6 py-6 text-center text-sm text-gray-400 italic">Sin evidencias subidas.</div>
+      {% endif %}
+
+      <!-- Upload form -->
+      <div class="px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <form method="post" action="/tasks/{{ task.id }}/evidences" enctype="multipart/form-data"
+              class="flex flex-col gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label class="block text-xs font-medium text-gray-600 mb-1">Subir evidencias (máx 50 MB por archivo)</label>
+          <div class="flex items-center gap-3">
+            <input type="file" name="files" multiple
+                   class="block text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer flex-1" />
+            <button type="submit"
+                    class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-medium transition-colors shrink-0">
+              Subir
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Comments -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div class="px-6 py-4 border-b border-gray-100">

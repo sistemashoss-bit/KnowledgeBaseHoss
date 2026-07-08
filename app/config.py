@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     wasabi_secret_key: str
     wasabi_bucket_name: str
     wasabi_avatar_bucket_name: str
+    wasabi_evidence_bucket_name: str = "hossevidences"
     wasabi_region: str = "us-east-1"
     wasabi_endpoint_url: str = "https://s3.wasabisys.com"
 

@@ -56,3 +56,30 @@ def get_avatar_signed_url(key: str, expiry: int = 3600) -> str:
         Params={"Bucket": settings.wasabi_avatar_bucket_name, "Key": key},
         ExpiresIn=expiry,
     )
+
+
+# ── Evidence bucket ───────────────────────────────────────────────────────────
+
+def upload_evidence(key: str, content: bytes, content_type: str) -> None:
+    _client().put_object(
+        Bucket=settings.wasabi_evidence_bucket_name,
+        Key=key,
+        Body=content,
+        ContentType=content_type,
+    )
+
+
+def get_evidence_url(key: str, filename: str, expiry: int = 900) -> str:
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.wasabi_evidence_bucket_name,
+            "Key": key,
+            "ResponseContentDisposition": f'attachment; filename="{filename}"',
+        },
+        ExpiresIn=expiry,
+    )
+
+
+def delete_evidence(key: str) -> None:
+    _client().delete_object(Bucket=settings.wasabi_evidence_bucket_name, Key=key)

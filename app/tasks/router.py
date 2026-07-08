@@ -1,8 +1,9 @@
+import re
 import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
@@ -10,12 +11,20 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
+from app import storage
 from app.models import (
-    Department, Project, Task, TaskComment, User,
+    Department, Project, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     TASK_STATUSES, TASK_PRIORITIES,
 )
 from app.templating import templates
+
+MAX_EVIDENCE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _safe_filename(name: str) -> str:
+    name = re.sub(r"[^\w.\-]", "_", name)
+    return name[:200] or "file"
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -106,7 +115,7 @@ def list_tasks(
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("/")
-def create_task(
+async def create_task(
     title: str = Form(...),
     description: str = Form(""),
     priority: str = Form("medium"),
@@ -116,6 +125,7 @@ def create_task(
     due_date: str = Form(""),
     next_url: str = Form(""),
     csrf_token: str = Form(...),
+    evidences: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -136,6 +146,27 @@ def create_task(
         due_date=date.fromisoformat(due_date) if due_date else None,
     )
     db.add(task)
+    db.flush()
+
+    for f in evidences:
+        if not f.filename:
+            continue
+        content = await f.read()
+        if len(content) > MAX_EVIDENCE_BYTES:
+            continue
+        safe = _safe_filename(f.filename)
+        key = f"tasks/{task.id}/{uuid.uuid4()}_{safe}"
+        storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
+        db.add(TaskEvidence(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            uploaded_by=current_user.id,
+            filename=f.filename,
+            file_key=key,
+            content_type=f.content_type or "application/octet-stream",
+            file_size=len(content),
+        ))
+
     db.commit()
     redirect = next_url if next_url and next_url.startswith("/") else "/tasks/"
     return RedirectResponse(redirect, status_code=302)
@@ -161,6 +192,7 @@ def task_detail(
             joinedload(Task.department),
             joinedload(Task.project),
             joinedload(Task.comments).joinedload(TaskComment.user),
+            joinedload(Task.evidences).joinedload(TaskEvidence.uploader),
         )
         .filter(Task.id == task_id)
         .first()
@@ -189,8 +221,112 @@ def task_detail(
             "can_edit": _can_edit_task(current_user, task),
             "can_update_status": _can_update_status(current_user, task),
             "today": date.today().isoformat(),
+            "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
+
+
+# ── Evidences ─────────────────────────────────────────────────────────────────
+
+@router.post("/{task_id}/evidences")
+async def upload_evidences(
+    task_id: str,
+    files: list[UploadFile] = File(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404)
+    if not _tasks_query(current_user, db).filter(Task.id == task_id).first():
+        raise HTTPException(403)
+
+    errors = []
+    for f in files:
+        if not f.filename:
+            continue
+        content = await f.read()
+        if len(content) > MAX_EVIDENCE_BYTES:
+            errors.append(f"{f.filename}: excede 50 MB")
+            continue
+        safe = _safe_filename(f.filename)
+        key = f"tasks/{task_id}/{uuid.uuid4()}_{safe}"
+        storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
+        db.add(TaskEvidence(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            uploaded_by=current_user.id,
+            filename=f.filename,
+            file_key=key,
+            content_type=f.content_type or "application/octet-stream",
+            file_size=len(content),
+        ))
+    db.commit()
+    return RedirectResponse(f"/tasks/{task_id}", status_code=302)
+
+
+@router.post("/{task_id}/evidences/{evidence_id}/delete")
+def delete_evidence(
+    task_id: str,
+    evidence_id: str,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    ev = db.query(TaskEvidence).filter(
+        TaskEvidence.id == evidence_id,
+        TaskEvidence.task_id == task_id,
+    ).first()
+    if not ev:
+        raise HTTPException(404)
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    is_uploader = str(ev.uploaded_by) == str(current_user.id)
+    if not is_uploader and not _can_edit_task(current_user, task):
+        raise HTTPException(403)
+
+    try:
+        storage.delete_evidence(ev.file_key)
+    except Exception:
+        pass
+    db.delete(ev)
+    db.commit()
+    return RedirectResponse(f"/tasks/{task_id}", status_code=302)
+
+
+@router.get("/{task_id}/evidences/{evidence_id}/download")
+def download_evidence(
+    task_id: str,
+    evidence_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not _tasks_query(current_user, db).filter(Task.id == task_id).first():
+        raise HTTPException(403)
+
+    ev = db.query(TaskEvidence).filter(
+        TaskEvidence.id == evidence_id,
+        TaskEvidence.task_id == task_id,
+    ).first()
+    if not ev:
+        raise HTTPException(404)
+
+    url = storage.get_evidence_url(ev.file_key, ev.filename)
+    from fastapi.responses import RedirectResponse as RR
+    return RR(url, status_code=302)
 
 
 # ── Update status (HTMX) ──────────────────────────────────────────────────────

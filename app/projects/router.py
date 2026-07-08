@@ -206,6 +206,7 @@ def project_detail(
             "filter_task_status": task_status,
             "can_edit": _can_edit_project(current_user, project),
             "today": date.today().isoformat(),
+            "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
 
