@@ -19,7 +19,8 @@ def _get():
         return None
     try:
         import redis
-        _client = redis.from_url(settings.valkey_url, decode_responses=True, socket_timeout=2)
+        url = settings.valkey_url.replace("valkeys://", "rediss://", 1)
+        _client = redis.from_url(url, decode_responses=True, socket_timeout=2)
         _client.ping()
     except Exception as exc:
         logger.warning("Valkey unavailable: %s — caching disabled", exc)
