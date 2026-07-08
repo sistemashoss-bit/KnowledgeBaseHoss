@@ -128,11 +128,35 @@
          open: false,
          loading: false,
          msgs: 0,
+         init() {
+           try {
+             const saved = localStorage.getItem('kb_chat');
+             if (saved) {
+               const { html, ts } = JSON.parse(saved);
+               if (Date.now() - ts < 86400000 && html) {
+                 this.$nextTick(() => {
+                   const el = this.$refs.messages;
+                   if (el) { el.innerHTML = html; this.msgs = el.children.length; this.scrollBottom(); }
+                 });
+               } else { localStorage.removeItem('kb_chat'); }
+             }
+           } catch(e) { localStorage.removeItem('kb_chat'); }
+         },
+         saveChat() {
+           const el = this.$refs.messages;
+           if (el) localStorage.setItem('kb_chat', JSON.stringify({ html: el.innerHTML, ts: Date.now() }));
+         },
+         clearChat() {
+           const el = this.$refs.messages;
+           if (el) el.innerHTML = '';
+           this.msgs = 0;
+           localStorage.removeItem('kb_chat');
+         },
          toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
          scrollBottom() { this.$nextTick(() => { const el = this.$refs.feed; if (el) el.scrollTop = el.scrollHeight; }); }
        }"
        @htmx:before-request="loading = true"
-       @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset()"
+       @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
        class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
 
     <!-- Chat panel -->
@@ -158,17 +182,22 @@
           <p class="text-white font-semibold text-sm leading-tight">Asistente IA</p>
           <p class="text-indigo-200 text-xs">Busca en los documentos</p>
         </div>
-        <button @click="open = false" class="text-white/70 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        <div class="flex items-center gap-1">
+          <button x-show="msgs > 0" @click="clearChat()"
+                  class="text-white/50 hover:text-white/90 text-xs px-2 py-0.5 rounded transition-colors" title="Limpiar conversación">
+            Limpiar
+          </button>
+          <button @click="open = false" class="text-white/70 hover:text-white transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- Messages feed -->
       <div x-ref="feed"
-           class="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0"
-           id="widget-chat-feed">
+           class="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         <template x-if="msgs === 0">
           <div class="text-center py-6">
             <div class="w-12 h-12 mx-auto rounded-full bg-indigo-50 flex items-center justify-center mb-3">
@@ -181,6 +210,7 @@
             <p class="text-xs text-gray-400 mt-1">Pregunta sobre políticas, procesos o cualquier documento</p>
           </div>
         </template>
+        <div x-ref="messages" id="widget-messages"></div>
       </div>
 
       <!-- Thinking indicator (inside feed area) -->
@@ -199,7 +229,7 @@
       <div class="border-t border-gray-100 px-3 py-3 shrink-0 bg-white">
         <form x-ref="form"
               hx-post="/chat/?mode=widget"
-              hx-target="#widget-chat-feed"
+              hx-target="#widget-messages"
               hx-swap="beforeend"
               class="flex gap-2 items-end">
           <textarea x-ref="input"
