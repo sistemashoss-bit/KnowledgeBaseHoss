@@ -15,6 +15,40 @@
     }
     .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   </style>
+  <script>
+    function chatWidget(userId) {
+      const key = userId ? `kb_chat_${userId}` : 'kb_chat_anon';
+      return {
+        open: false, loading: false, msgs: 0,
+        init() {
+          try {
+            const saved = localStorage.getItem(key);
+            if (saved) {
+              const { html, ts } = JSON.parse(saved);
+              if (Date.now() - ts < 86400000 && html) {
+                this.$nextTick(() => {
+                  const el = this.$refs.messages;
+                  if (el) { el.innerHTML = html; this.msgs = el.children.length; this.scrollBottom(); }
+                });
+              } else { localStorage.removeItem(key); }
+            }
+          } catch(e) { localStorage.removeItem(key); }
+        },
+        saveChat() {
+          const el = this.$refs.messages;
+          if (el) localStorage.setItem(key, JSON.stringify({ html: el.innerHTML, ts: Date.now() }));
+        },
+        clearChat() {
+          const el = this.$refs.messages;
+          if (el) el.innerHTML = '';
+          this.msgs = 0;
+          localStorage.removeItem(key);
+        },
+        toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
+        scrollBottom() { this.$nextTick(() => { const el = this.$refs.feed; if (el) el.scrollTop = el.scrollHeight; }); }
+      };
+    }
+  </script>
 </head>
 <body class="bg-stone-50 min-h-screen flex flex-col">
 
@@ -310,37 +344,7 @@
   </footer>
 
   <!-- ── Floating AI chat widget ─────────────────────────────────────────── -->
-  <div x-data="{
-         open: false,
-         loading: false,
-         msgs: 0,
-         init() {
-           try {
-             const saved = localStorage.getItem('kb_chat');
-             if (saved) {
-               const { html, ts } = JSON.parse(saved);
-               if (Date.now() - ts < 86400000 && html) {
-                 this.$nextTick(() => {
-                   const el = this.$refs.messages;
-                   if (el) { el.innerHTML = html; this.msgs = el.children.length; this.scrollBottom(); }
-                 });
-               } else { localStorage.removeItem('kb_chat'); }
-             }
-           } catch(e) { localStorage.removeItem('kb_chat'); }
-         },
-         saveChat() {
-           const el = this.$refs.messages;
-           if (el) localStorage.setItem('kb_chat', JSON.stringify({ html: el.innerHTML, ts: Date.now() }));
-         },
-         clearChat() {
-           const el = this.$refs.messages;
-           if (el) el.innerHTML = '';
-           this.msgs = 0;
-           localStorage.removeItem('kb_chat');
-         },
-         toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
-         scrollBottom() { this.$nextTick(() => { const el = this.$refs.feed; if (el) el.scrollTop = el.scrollHeight; }); }
-       }"
+  <div x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
        @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
        class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
