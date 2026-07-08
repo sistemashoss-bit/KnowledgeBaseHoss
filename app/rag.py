@@ -383,7 +383,7 @@ def answer_question(
 
     # ── Merge with RRF → Voyage Rerank ───────────────────────────────────────
     rrf_chunks = _rrf_merge(bm25_hits, knn_hits, top_k=20)
-    top_chunks = rerank_chunks(question, rrf_chunks, top_k=6)
+    top_chunks = rerank_chunks(question, rrf_chunks, top_k=3)
 
     if not top_chunks:
         return {
