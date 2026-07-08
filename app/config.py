@@ -32,9 +32,14 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 480
     csrf_secret: str
 
-    # OpenRouter
+    # OpenRouter (LLM for Q&A)
     openrouter_api_key: str
     openrouter_model: str = "anthropic/claude-3.5-haiku"
+
+    # Voyage AI (embeddings + rerank)
+    voyage_api_key: str
+    voyage_embedding_model: str = "voyage-4-large"
+    voyage_rerank_model: str = "rerank-2.5"
 
 
     @property

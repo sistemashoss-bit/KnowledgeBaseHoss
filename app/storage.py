@@ -23,12 +23,11 @@ def upload_file(file_key: str, content: bytes, content_type: str) -> None:
     )
 
 
-def get_signed_url(file_key: str, expiry: int = 900) -> str:
-    return _client().generate_presigned_url(
-        "get_object",
-        Params={"Bucket": settings.wasabi_bucket_name, "Key": file_key},
-        ExpiresIn=expiry,
-    )
+def get_signed_url(file_key: str, expiry: int = 900, filename: str | None = None) -> str:
+    params: dict = {"Bucket": settings.wasabi_bucket_name, "Key": file_key}
+    if filename:
+        params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
+    return _client().generate_presigned_url("get_object", Params=params, ExpiresIn=expiry)
 
 
 def delete_file(file_key: str) -> None:

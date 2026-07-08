@@ -25,7 +25,8 @@
       {% if sources %}
       <div class="flex flex-wrap gap-1 px-1">
         {% for source in sources %}
-        <a href="/documents/{{ source.id }}/download"
+        <a href="/documents/{{ source.id }}/view"
+           target="_blank" rel="noopener"
            class="text-xs text-indigo-600 bg-white border border-indigo-200 hover:bg-indigo-50 px-2 py-0.5 rounded-full transition-colors truncate max-w-[140px]">
           {{ source.title }}
         </a>

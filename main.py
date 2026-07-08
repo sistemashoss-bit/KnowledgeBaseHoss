@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
 
 
 @asynccontextmanager
@@ -29,6 +30,11 @@ from app.departments.router import router as departments_router
 from app.users.router import api_router as users_api_router, mgmt_router as users_mgmt_router
 from app.chat.router import router as chat_router
 from app.logs.router import router as logs_router
+from app.auth.deps import get_current_user
+from app.database import get_db
+from app.permissions import build_access_filter
+from app import rag
+from app.templating import templates
 
 app.include_router(auth_router)
 app.include_router(documents_router)
@@ -39,6 +45,15 @@ app.include_router(chat_router)
 app.include_router(logs_router)
 
 
-@app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse("/documents/")
+@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+def home(
+    request: Request,
+    q: str = "",
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    documents = rag.search_documents(q, build_access_filter(user)) if q else []
+    return templates.TemplateResponse(
+        request, "home.html",
+        {"current_user": user, "query": q, "documents": documents},
+    )

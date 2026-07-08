@@ -5,6 +5,7 @@ _client: OpenSearch | None = None
 
 DOCUMENTS_INDEX = "kb_documents"
 CHUNKS_INDEX = "kb_chunks"
+EMBEDDING_DIM = 2048  # voyage-4-large, máxima precisión
 
 
 def get_client() -> OpenSearch:
@@ -37,20 +38,37 @@ def ensure_indices() -> None:
             },
         )
 
-    if not client.indices.exists(index=CHUNKS_INDEX):
-        client.indices.create(
-            index=CHUNKS_INDEX,
-            body={
-                "mappings": {
-                    "properties": {
-                        "document_id": {"type": "keyword"},
-                        "document_title": {"type": "text"},
-                        "department_id": {"type": "keyword"},
-                        "department_name": {"type": "keyword"},
-                        "status": {"type": "keyword"},
-                        "chunk_index": {"type": "integer"},
-                        "content": {"type": "text"},
-                    }
+    _ensure_chunks_index(client)
+
+
+def _ensure_chunks_index(client: OpenSearch) -> None:
+    if client.indices.exists(index=CHUNKS_INDEX):
+        # Migrate if index lacks the embedding field (pre-hybrid schema)
+        try:
+            mapping = client.indices.get_mapping(index=CHUNKS_INDEX)
+            props = mapping[CHUNKS_INDEX]["mappings"].get("properties", {})
+            if "embedding" not in props:
+                client.indices.delete(index=CHUNKS_INDEX)
+            else:
+                return
+        except Exception:
+            return
+
+    client.indices.create(
+        index=CHUNKS_INDEX,
+        body={
+            "settings": {"index": {"knn": True}},
+            "mappings": {
+                "properties": {
+                    "document_id": {"type": "keyword"},
+                    "document_title": {"type": "text"},
+                    "department_id": {"type": "keyword"},
+                    "department_name": {"type": "keyword"},
+                    "status": {"type": "keyword"},
+                    "chunk_index": {"type": "integer"},
+                    "content": {"type": "text"},
+                    "embedding": {"type": "knn_vector", "dimension": EMBEDDING_DIM},
                 }
             },
-        )
+        },
+    )

@@ -241,6 +241,25 @@ async def edit_document(
     return RedirectResponse("/documents/", status_code=302)
 
 
+@router.get("/{doc_id}/view")
+def view_document(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    if not can_access_document(user, doc):
+        raise HTTPException(403 if user else 401, "Access denied")
+
+    audit.log_action(
+        "view_document", user=user,
+        resource_type="document", resource_id=doc_id, resource_name=doc.title,
+    )
+    return RedirectResponse(storage.get_signed_url(doc.file_key))
+
+
 @router.get("/{doc_id}/download")
 def download_document(
     doc_id: str,
@@ -257,7 +276,7 @@ def download_document(
         "download_document", user=user,
         resource_type="document", resource_id=doc_id, resource_name=doc.title,
     )
-    return RedirectResponse(storage.get_signed_url(doc.file_key))
+    return RedirectResponse(storage.get_signed_url(doc.file_key, filename=doc.filename))
 
 
 @router.post("/{doc_id}/delete")

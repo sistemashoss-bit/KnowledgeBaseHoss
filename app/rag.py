@@ -10,6 +10,17 @@ from app.config import settings
 from app import search as search_module
 
 
+# ── Clients ───────────────────────────────────────────────────────────────────
+
+def _llm_client() -> OpenAI:
+    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=settings.openrouter_api_key)
+
+
+def _voyage_client():
+    import voyageai
+    return voyageai.Client(api_key=settings.voyage_api_key)
+
+
 # ── Text extraction ───────────────────────────────────────────────────────────
 
 _TEXT_EXTS = {"txt", "md", "csv", "json", "xml", "html", "htm", "rst"}
@@ -29,7 +40,6 @@ def extract_text(content: bytes, filename: str) -> str:
         try:
             result = MarkItDown().convert(tmp_path)
             text = (result.text_content or "").strip()
-            # Reject if result looks like raw binary (common PDF header pattern)
             if text and not text.startswith("%PDF") and len(text) > 30:
                 return text
         finally:
@@ -37,7 +47,7 @@ def extract_text(content: bytes, filename: str) -> str:
     except Exception:
         pass
 
-    # 2. pypdf fallback for PDFs (catches scanned/unusual PDFs MarkItDown misses)
+    # 2. pypdf fallback for PDFs
     if ext == "pdf":
         try:
             import io as _io
@@ -50,7 +60,7 @@ def extract_text(content: bytes, filename: str) -> str:
         except Exception:
             pass
 
-    # 3. Plain-text files only — never decode binary formats
+    # 3. Plain-text files only
     if ext in _TEXT_EXTS:
         try:
             return content.decode("utf-8", errors="ignore").strip()
@@ -69,6 +79,44 @@ def chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
         chunks.append(" ".join(words[i : i + size]))
         i += size - overlap
     return chunks
+
+
+# ── Embeddings (Voyage AI) ────────────────────────────────────────────────────
+
+def embed_texts(texts: list[str]) -> list[list[float]] | None:
+    """Batch-embed via Voyage AI. Returns None on failure."""
+    if not texts:
+        return []
+    try:
+        vo = _voyage_client()
+        result = vo.embed(texts, model=settings.voyage_embedding_model, input_type="document")
+        return result.embeddings
+    except Exception:
+        return None
+
+
+def embed_text(text: str) -> list[float] | None:
+    try:
+        vo = _voyage_client()
+        result = vo.embed([text], model=settings.voyage_embedding_model, input_type="query")
+        return result.embeddings[0]
+    except Exception:
+        return None
+
+
+# ── Reranking (Voyage AI) ─────────────────────────────────────────────────────
+
+def rerank_chunks(question: str, chunks: list[dict], top_k: int = 6) -> list[dict]:
+    """Rerank chunk dicts by relevance to question. Falls back to original order."""
+    if not chunks:
+        return chunks
+    try:
+        vo = _voyage_client()
+        docs = [c["content"] for c in chunks]
+        result = vo.rerank(question, docs, model=settings.voyage_rerank_model, top_k=top_k)
+        return [chunks[r.index] for r in result.results]
+    except Exception:
+        return chunks[:top_k]
 
 
 # ── OpenSearch indexing ───────────────────────────────────────────────────────
@@ -101,22 +149,33 @@ def index_document(
         },
     )
 
-    actions = [
-        {
+    chunks = chunk_text(text)
+    if not chunks:
+        return
+
+    # Batch-generate embeddings for all chunks in one API call
+    embeddings = embed_texts(chunks)
+
+    actions = []
+    for i, chunk in enumerate(chunks):
+        source: dict = {
+            "document_id": doc_id,
+            "document_title": title,
+            "department_id": department_id or "",
+            "department_name": department_name or "",
+            "status": status,
+            "chunk_index": i,
+            "content": chunk,
+        }
+        if embeddings is not None:
+            source["embedding"] = embeddings[i]
+
+        actions.append({
             "_index": search_module.CHUNKS_INDEX,
             "_id": f"{doc_id}_{i}",
-            "_source": {
-                "document_id": doc_id,
-                "document_title": title,
-                "department_id": department_id or "",
-                "department_name": department_name or "",
-                "status": status,
-                "chunk_index": i,
-                "content": chunk,
-            },
-        }
-        for i, chunk in enumerate(chunk_text(text))
-    ]
+            "_source": source,
+        })
+
     if actions:
         bulk(client, actions)
 
@@ -136,7 +195,7 @@ def delete_document_from_index(doc_id: str) -> None:
         pass
 
 
-# ── Search ────────────────────────────────────────────────────────────────────
+# ── Document search (BM25 — listing/filtering, not Q&A) ──────────────────────
 
 def search_documents(
     query: str,
@@ -165,13 +224,52 @@ def search_documents(
         return []
 
 
-# ── Q&A via OpenRouter ────────────────────────────────────────────────────────
+# ── Q&A: hybrid search (BM25 + kNN) with RRF merge ───────────────────────────
 
-def answer_question(question: str, access_filter: dict, *, role: str = "anon", dept_id: str | None = None) -> dict:
+_RRF_K = 60  # standard RRF constant
+
+
+def _rrf_merge(
+    bm25_hits: list[dict],
+    knn_hits: list[dict],
+    top_k: int = 6,
+) -> list[dict]:
+    """Reciprocal Rank Fusion of two ranked hit lists."""
+    scores: dict[str, float] = {}
+    sources: dict[str, dict] = {}
+
+    for rank, hit in enumerate(bm25_hits):
+        cid = hit["_id"]
+        scores[cid] = scores.get(cid, 0.0) + 1.0 / (_RRF_K + rank + 1)
+        sources[cid] = hit["_source"]
+
+    for rank, hit in enumerate(knn_hits):
+        cid = hit["_id"]
+        scores[cid] = scores.get(cid, 0.0) + 1.0 / (_RRF_K + rank + 1)
+        sources[cid] = hit["_source"]
+
+    top_ids = sorted(scores, key=lambda x: scores[x], reverse=True)[:top_k]
+    return [sources[cid] for cid in top_ids]
+
+
+def answer_question(
+    question: str,
+    access_filter: dict,
+    *,
+    role: str = "anon",
+    dept_id: str | None = None,
+) -> dict:
+    from app import valkey_client as vk
+
+    cached = vk.get_cached_rag(question, role, dept_id)
+    if cached:
+        return {"answer": cached, "sources": []}
+
     client = search_module.get_client()
 
+    # ── BM25 search ──────────────────────────────────────────────────────────
     try:
-        res = client.search(
+        bm25_res = client.search(
             index=search_module.CHUNKS_INDEX,
             body={
                 "query": {
@@ -185,14 +283,46 @@ def answer_question(question: str, access_filter: dict, *, role: str = "anon", d
                         "filter": [access_filter],
                     }
                 },
-                "size": 6,
+                "size": 10,
             },
         )
+        bm25_hits = bm25_res["hits"]["hits"]
     except Exception:
-        return {"answer": "Error al buscar documentos.", "sources": []}
+        bm25_hits = []
 
-    hits = res["hits"]["hits"]
-    if not hits:
+    # ── kNN search (skipped gracefully if embeddings unavailable) ─────────────
+    knn_hits: list[dict] = []
+    query_embedding = embed_text(question)
+    if query_embedding is not None:
+        try:
+            knn_res = client.search(
+                index=search_module.CHUNKS_INDEX,
+                body={
+                    "query": {
+                        "bool": {
+                            "must": {
+                                "knn": {
+                                    "embedding": {
+                                        "vector": query_embedding,
+                                        "k": 10,
+                                    }
+                                }
+                            },
+                            "filter": [access_filter],
+                        }
+                    },
+                    "size": 10,
+                },
+            )
+            knn_hits = knn_res["hits"]["hits"]
+        except Exception:
+            knn_hits = []
+
+    # ── Merge with RRF → Voyage Rerank ───────────────────────────────────────
+    rrf_chunks = _rrf_merge(bm25_hits, knn_hits, top_k=20)
+    top_chunks = rerank_chunks(question, rrf_chunks, top_k=6)
+
+    if not top_chunks:
         return {
             "answer": "No encontré documentos relevantes para tu pregunta.",
             "sources": [],
@@ -200,8 +330,7 @@ def answer_question(question: str, access_filter: dict, *, role: str = "anon", d
 
     context_parts: list[str] = []
     seen: dict[str, dict] = {}
-    for hit in hits:
-        src = hit["_source"]
+    for src in top_chunks:
         doc_id = src["document_id"]
         if doc_id not in seen:
             seen[doc_id] = {
@@ -219,15 +348,7 @@ def answer_question(question: str, access_filter: dict, *, role: str = "anon", d
         f"Pregunta: {question}\n\nDocumentos:\n{context}\n\nRespuesta:"
     )
 
-    from app import valkey_client as vk
-    cached = vk.get_cached_rag(question, role, dept_id)
-    if cached:
-        return {"answer": cached, "sources": [{"id": k, **v} for k, v in seen.items()]}
-
-    llm = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.openrouter_api_key,
-    )
+    llm = _llm_client()
     completion = llm.chat.completions.create(
         model=settings.openrouter_model,
         messages=[{"role": "user", "content": prompt}],
