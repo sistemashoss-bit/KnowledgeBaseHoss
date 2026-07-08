@@ -14,7 +14,7 @@
         <h2 class="text-sm font-semibold text-gray-800">Mensajes</h2>
         <div class="flex gap-1">
           <!-- New DM -->
-          <button onclick="document.getElementById('modal-dm').classList.remove('hidden')"
+          <button onclick="document.getElementById('modal-dm').classList.remove('hidden'); var s=document.getElementById('dm-search'); if(s){s.value=''; dmFilter(); s.focus();}"
                   title="Nuevo mensaje directo"
                   class="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -289,9 +289,22 @@
     </div>
 
     {% if contacts %}
-    <div class="space-y-1 max-h-72 overflow-y-auto">
+    <!-- Search -->
+    <div class="relative mb-3">
+      <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+      </svg>
+      <input id="dm-search" type="text" placeholder="Buscar por nombre o correo…"
+             oninput="dmFilter()"
+             class="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400" />
+    </div>
+
+    <div class="space-y-1 max-h-64 overflow-y-auto">
       {% for contact in contacts %}
-      <form method="post" action="/messaging/direct/{{ contact.id }}">
+      <form class="dm-contact" method="post" action="/messaging/direct/{{ contact.id }}"
+            data-search="{{ ((contact.name or '') + ' ' + contact.email) | lower }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button type="submit"
                 class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-orange-50 text-left transition-colors">
@@ -309,7 +322,22 @@
         </button>
       </form>
       {% endfor %}
+      <p id="dm-empty" class="hidden text-sm text-gray-400 text-center py-4">Sin resultados.</p>
     </div>
+
+    <script>
+    function dmFilter() {
+      var q = document.getElementById('dm-search').value.toLowerCase().trim();
+      var rows = document.querySelectorAll('.dm-contact');
+      var visible = 0;
+      rows.forEach(function (r) {
+        var match = !q || r.dataset.search.indexOf(q) !== -1;
+        r.style.display = match ? '' : 'none';
+        if (match) visible++;
+      });
+      document.getElementById('dm-empty').classList.toggle('hidden', visible > 0);
+    }
+    </script>
     {% else %}
     <p class="text-sm text-gray-400 text-center py-4">No hay contactos disponibles en tu organización.</p>
     {% endif %}
