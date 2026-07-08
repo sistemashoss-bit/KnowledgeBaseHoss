@@ -321,3 +321,20 @@ class Message(Base):
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="sent_messages")
+    attachments = relationship("MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at")
+
+
+class MessageAttachment(Base):
+    __tablename__ = "message_attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"), nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_key = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    message = relationship("Message", back_populates="attachments")
+    uploader = relationship("User", foreign_keys=[uploaded_by])

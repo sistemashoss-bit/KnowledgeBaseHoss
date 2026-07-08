@@ -163,6 +163,7 @@
     {% block content %}{% endblock %}
   </main>
 
+  {% block ai_widget %}
   <!-- ── Floating AI chat widget ─────────────────────────────────────────── -->
   <div x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
@@ -317,6 +318,7 @@
       };
     }
   </script>
+  {% endblock %}
 
 </body>
 </html>

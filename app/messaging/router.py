@@ -1,20 +1,39 @@
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
-from app.database import get_db
+from app.database import get_db, SessionLocal
+from app import storage, valkey_client as vk
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
-    Message, User, UserZone, Zone,
+    Message, MessageAttachment, User, UserZone, Zone,
     ROLE_SUPERADMIN, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
+
+MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _safe_filename(name: str) -> str:
+    name = re.sub(r"[^\w.\-]", "_", name)
+    return name[:200] or "file"
+
+
+def _cleanup_old_messages_bg():
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=30)
+        db.query(Message).filter(Message.created_at < cutoff).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
 
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 
@@ -168,11 +187,15 @@ def _mark_read(conv_id, user_id, db: Session):
 @router.get("/", response_class=HTMLResponse)
 def messaging_index(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
+
+    if vk.try_acquire_daily_lock("msg_cleanup_30d"):
+        background_tasks.add_task(_cleanup_old_messages_bg)
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
@@ -227,7 +250,7 @@ def conversation_view(
 
     messages = (
         db.query(Message)
-        .options(joinedload(Message.sender))
+        .options(joinedload(Message.sender), joinedload(Message.attachments))
         .filter(Message.conversation_id == conv_id)
         .order_by(Message.created_at.asc())
         .limit(200)
@@ -284,7 +307,7 @@ def poll_messages(
 
     messages = (
         db.query(Message)
-        .options(joinedload(Message.sender))
+        .options(joinedload(Message.sender), joinedload(Message.attachments))
         .filter(Message.conversation_id == conv_id)
         .order_by(Message.created_at.asc())
         .limit(200)
@@ -300,9 +323,10 @@ def poll_messages(
 
 
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
-def send_message(
+async def send_message(
     conv_id: str,
-    content: str = Form(...),
+    content: str = Form(default=""),
+    files: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -321,7 +345,8 @@ def send_message(
         raise HTTPException(403)
 
     content = content.strip()
-    if not content:
+    valid_files = [f for f in files if f.filename]
+    if not content and not valid_files:
         raise HTTPException(400)
 
     msg = Message(
@@ -331,11 +356,63 @@ def send_message(
         content=content,
     )
     db.add(msg)
-    _mark_read(conv_id, current_user.id, db)  # also marks as read
+    db.flush()
+
+    for f in valid_files:
+        data = await f.read()
+        if len(data) > MAX_CHAT_FILE_BYTES:
+            continue
+        safe = _safe_filename(f.filename)
+        key = f"chats/{conv_id}/{msg.id}/{uuid.uuid4()}_{safe}"
+        storage.upload_chat_file(key, data, f.content_type or "application/octet-stream")
+        db.add(MessageAttachment(
+            id=uuid.uuid4(),
+            message_id=msg.id,
+            uploaded_by=current_user.id,
+            filename=f.filename,
+            file_key=key,
+            content_type=f.content_type or "application/octet-stream",
+            file_size=len(data),
+        ))
+
+    _mark_read(conv_id, current_user.id, db)
     db.commit()
 
-    # Trigger feed refresh via HTMX event
     return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
+
+
+@router.get("/{conv_id}/attachments/{att_id}/download")
+def download_attachment(
+    conv_id: str,
+    att_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not is_participant:
+        raise HTTPException(403)
+
+    att = db.query(MessageAttachment).filter(
+        MessageAttachment.id == att_id,
+        MessageAttachment.message_id.in_(
+            db.query(Message.id).filter(Message.conversation_id == conv_id)
+        ),
+    ).first()
+    if not att:
+        raise HTTPException(404)
+
+    url = storage.get_chat_file_url(att.file_key, att.filename)
+    return RedirectResponse(url, status_code=302)
 
 
 @router.post("/direct/{target_user_id}")
@@ -392,3 +469,79 @@ def create_group(
 
     db.commit()
     return RedirectResponse(f"/messaging/{conv.id}", status_code=302)
+
+
+@router.post("/{conv_id}/members")
+def add_member(
+    conv_id: str,
+    user_id: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    conv = db.query(Conversation).filter(
+        Conversation.id == conv_id,
+        Conversation.type == CONV_GROUP,
+    ).first()
+    if not conv:
+        raise HTTPException(404)
+
+    is_participant = any(str(p.user_id) == str(current_user.id) for p in conv.participants)
+    if not is_participant:
+        raise HTTPException(403)
+
+    already = any(str(p.user_id) == user_id for p in conv.participants)
+    if already:
+        return RedirectResponse(f"/messaging/{conv_id}", status_code=302)
+
+    target = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not target:
+        raise HTTPException(404)
+
+    db.add(ConversationParticipant(conversation_id=conv.id, user_id=target.id))
+    db.commit()
+    return RedirectResponse(f"/messaging/{conv_id}", status_code=302)
+
+
+@router.post("/{conv_id}/members/remove")
+def remove_member(
+    conv_id: str,
+    user_id: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    conv = db.query(Conversation).filter(
+        Conversation.id == conv_id,
+        Conversation.type == CONV_GROUP,
+    ).first()
+    if not conv:
+        raise HTTPException(404)
+
+    is_creator = str(conv.created_by) == str(current_user.id)
+    is_superadmin = current_user.role == ROLE_SUPERADMIN
+    removing_self = user_id == str(current_user.id)
+    if not (is_creator or is_superadmin or removing_self):
+        raise HTTPException(403)
+
+    participant = db.query(ConversationParticipant).filter(
+        ConversationParticipant.conversation_id == conv_id,
+        ConversationParticipant.user_id == user_id,
+    ).first()
+    if participant:
+        db.delete(participant)
+        db.commit()
+
+    if removing_self:
+        return RedirectResponse("/messaging/", status_code=302)
+    return RedirectResponse(f"/messaging/{conv_id}", status_code=302)

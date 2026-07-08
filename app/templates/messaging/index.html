@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mensajes — HOSS Conocimiento{% endblock %}
+{% block ai_widget %}{% endblock %}
 
 {% block content %}
 <div class="flex-1 flex overflow-hidden">
@@ -94,29 +95,100 @@
 
     {% if active_conv %}
     <!-- Chat header -->
-    <div class="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center gap-3 shrink-0">
-      <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm
-        {% if active_conv.type == 'group' %}bg-indigo-100 text-indigo-700{% else %}bg-orange-100 text-orange-700{% endif %}">
+    <div x-data="{ showMembers: false }" class="bg-white border-b border-gray-200 shrink-0">
+      <div class="px-6 py-3.5 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0
+          {% if active_conv.type == 'group' %}bg-indigo-100 text-indigo-700{% else %}bg-orange-100 text-orange-700{% endif %}">
+          {% if active_conv.type == 'group' %}
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+          {% else %}
+            {{ active_conv_name[0].upper() }}
+          {% endif %}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>
+          <p class="text-xs text-gray-400">
+            {% if active_conv.type == 'group' %}
+              {{ active_conv.participants | length }} participante(s)
+              {% if active_conv.department %}· {{ active_conv.department.name }}{% endif %}
+            {% else %}
+              Mensaje directo
+            {% endif %}
+          </p>
+        </div>
         {% if active_conv.type == 'group' %}
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button @click="showMembers = !showMembers"
+                class="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                  d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
           </svg>
-        {% else %}
-          {{ active_conv_name[0].upper() }}
+          Participantes
+        </button>
         {% endif %}
       </div>
-      <div>
-        <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>
-        <p class="text-xs text-gray-400">
-          {% if active_conv.type == 'group' %}
-            {{ active_conv.participants | length }} participante(s)
-            {% if active_conv.department %}· {{ active_conv.department.name if active_conv.department else "" }}{% endif %}
-          {% else %}
-            Mensaje directo
-          {% endif %}
-        </p>
+
+      {% if active_conv.type == 'group' %}
+      <div x-show="showMembers" x-cloak class="border-t border-gray-100 bg-gray-50 px-6 py-4 space-y-3">
+
+        <!-- Current members -->
+        <div>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Miembros</p>
+          <div class="flex flex-wrap gap-2">
+            {% for p in active_conv.participants %}
+            <div class="flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-3 py-1 text-xs">
+              <span class="font-medium text-gray-700">{{ p.user.name or p.user.email if p.user else "?" }}</span>
+              {% if p.user and p.user.id|string == current_user.id|string %}
+              <span class="text-gray-400">(tú)</span>
+              {% elif active_conv.created_by|string == current_user.id|string or current_user.role == 'superadmin' %}
+              <form method="post" action="/messaging/{{ active_conv.id }}/members/remove" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="user_id" value="{{ p.user_id }}" />
+                <button type="submit" class="text-gray-300 hover:text-red-400 transition-colors leading-none ml-0.5" title="Quitar">×</button>
+              </form>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Add member -->
+        {% set participant_ids = active_conv.participants | map(attribute='user_id') | map('string') | list %}
+        <form method="post" action="/messaging/{{ active_conv.id }}/members" class="flex gap-2 items-center">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <select name="user_id" required
+                  class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+            <option value="">— Agregar persona —</option>
+            {% for u in all_users %}
+            {% if u.id|string not in participant_ids %}
+            <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+            {% endif %}
+            {% endfor %}
+          </select>
+          <button type="submit"
+                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors shrink-0">
+            Agregar
+          </button>
+        </form>
+
+        <!-- Leave group -->
+        {% if active_conv.created_by|string != current_user.id|string %}
+        <div class="pt-1 border-t border-gray-200">
+          <form method="post" action="/messaging/{{ active_conv.id }}/members/remove"
+                onsubmit="return confirm('¿Salir de este grupo?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="user_id" value="{{ current_user.id }}" />
+            <button type="submit" class="text-xs text-red-400 hover:text-red-600 transition-colors">
+              Salir del grupo
+            </button>
+          </form>
+        </div>
+        {% endif %}
       </div>
+      {% endif %}
     </div>
 
     <!-- Message feed (polled every 3s) -->
@@ -131,28 +203,55 @@
     </div>
 
     <!-- Input bar -->
-    <div class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+    <div x-data="{ hasFiles: false }" class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
             hx-target="#send-form"
             hx-swap="none"
-            hx-on::after-request="this.reset(); document.getElementById('msg-input').focus()"
-            class="flex gap-3 items-end">
-        <textarea id="msg-input"
-                  name="content"
-                  rows="1"
-                  placeholder="Escribe un mensaje..."
-                  required
-                  @keydown.enter.prevent="if (!$event.shiftKey && $event.target.value.trim()) { $el.closest('form').dispatchEvent(new Event('submit', {bubbles:true})) }"
-                  oninput="this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'"
-                  class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 placeholder-gray-400 leading-snug"
-                  style="max-height:120px"></textarea>
-        <button type="submit"
-                class="w-10 h-10 bg-orange-500 hover:bg-orange-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
-          <svg class="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            hx-encoding="multipart/form-data"
+            hx-on::after-request="this.reset(); hasFiles = false; document.getElementById('msg-input').focus()"
+            class="flex flex-col gap-2">
+
+        <!-- File preview bar -->
+        <div x-show="hasFiles" x-cloak
+             class="flex items-center gap-2 px-1 text-xs text-gray-500">
+          <svg class="w-3.5 h-3.5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
           </svg>
-        </button>
+          <span>Archivo(s) adjunto(s) · máx 50 MB c/u</span>
+          <button type="button" @click="$refs.fileInput.value=''; hasFiles=false"
+                  class="ml-auto text-gray-400 hover:text-red-400 transition-colors">Quitar</button>
+        </div>
+
+        <div class="flex gap-2 items-end">
+          <!-- Attach button -->
+          <label class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-orange-500 hover:border-orange-300 cursor-pointer transition-colors shrink-0"
+                 title="Adjuntar archivo">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+            </svg>
+            <input x-ref="fileInput" type="file" name="files" multiple class="hidden"
+                   @change="hasFiles = $event.target.files.length > 0" />
+          </label>
+
+          <textarea id="msg-input"
+                    name="content"
+                    rows="1"
+                    placeholder="Escribe un mensaje..."
+                    @keydown.enter.prevent="if (!$event.shiftKey && ($event.target.value.trim() || hasFiles)) { $el.closest('form').dispatchEvent(new Event('submit', {bubbles:true})) }"
+                    oninput="this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'"
+                    class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 placeholder-gray-400 leading-snug"
+                    style="max-height:120px"></textarea>
+
+          <button type="submit"
+                  class="w-9 h-9 bg-orange-500 hover:bg-orange-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
+            <svg class="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            </svg>
+          </button>
+        </div>
       </form>
       <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea</p>
     </div>

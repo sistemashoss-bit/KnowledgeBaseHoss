@@ -6,16 +6,49 @@
       {{ msg.sender.name or msg.sender.email if msg.sender else "?" }}
     </p>
     {% endif %}
+
+    {% set is_mine = msg.sender_id == current_user.id %}
+
+    {% if msg.content %}
     <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed
-      {% if msg.sender_id == current_user.id %}
-        bg-orange-500 text-white rounded-br-sm
-      {% else %}
-        bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
-      {% endif %}">
+      {% if is_mine %}bg-orange-500 text-white rounded-br-sm{% else %}bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm{% endif %}
+      {% if msg.attachments %}rounded-b-sm{% endif %}">
       {{ msg.content }}
     </div>
+    {% endif %}
+
+    {% if msg.attachments %}
+    <div class="flex flex-col gap-1 {% if msg.content %}mt-1{% endif %}">
+      {% for att in msg.attachments %}
+      <a href="/messaging/{{ msg.conversation_id }}/attachments/{{ att.id }}/download"
+         class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
+           {% if is_mine %}bg-orange-400 text-white hover:bg-orange-300{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm{% endif %}
+           transition-colors">
+        {% if att.content_type.startswith('image/') %}
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        {% elif 'pdf' in att.content_type %}
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+        </svg>
+        {% else %}
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+        </svg>
+        {% endif %}
+        <span class="truncate max-w-[180px]">{{ att.filename }}</span>
+        <span class="shrink-0 opacity-70">{{ (att.file_size / 1024) | round(1) }} KB</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <p class="text-xs text-gray-400 mt-1
-      {% if msg.sender_id == current_user.id %}text-right mr-1{% else %}ml-3{% endif %}">
+      {% if is_mine %}text-right mr-1{% else %}ml-3{% endif %}">
       {{ msg.created_at.strftime('%H:%M') }}
     </p>
   </div>

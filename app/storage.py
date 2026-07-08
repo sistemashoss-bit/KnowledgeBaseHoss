@@ -83,3 +83,30 @@ def get_evidence_url(key: str, filename: str, expiry: int = 900) -> str:
 
 def delete_evidence(key: str) -> None:
     _client().delete_object(Bucket=settings.wasabi_evidence_bucket_name, Key=key)
+
+
+# ── Chat attachments bucket ───────────────────────────────────────────────────
+
+def upload_chat_file(key: str, content: bytes, content_type: str) -> None:
+    _client().put_object(
+        Bucket=settings.wasabi_chats_bucket_name,
+        Key=key,
+        Body=content,
+        ContentType=content_type,
+    )
+
+
+def get_chat_file_url(key: str, filename: str, expiry: int = 900) -> str:
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.wasabi_chats_bucket_name,
+            "Key": key,
+            "ResponseContentDisposition": f'attachment; filename="{filename}"',
+        },
+        ExpiresIn=expiry,
+    )
+
+
+def delete_chat_file(key: str) -> None:
+    _client().delete_object(Bucket=settings.wasabi_chats_bucket_name, Key=key)

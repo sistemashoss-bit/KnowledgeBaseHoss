@@ -99,3 +99,16 @@ def cache_rag(query: str, role: str, dept_id: str | None, response: str) -> None
         r.setex(_rag_key(query, role, dept_id), _RAG_TTL, response)
     except Exception:
         pass
+
+
+# ── Once-daily lock ───────────────────────────────────────────────────────────
+
+def try_acquire_daily_lock(key: str) -> bool:
+    """Returns True exactly once per 24 h for a given key. Use as a daily gate."""
+    r = _get()
+    if r is None:
+        return False
+    try:
+        return bool(r.set(key, "1", ex=86400, nx=True))
+    except Exception:
+        return False
