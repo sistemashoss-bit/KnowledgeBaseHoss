@@ -121,7 +121,7 @@ def totp_verify(
 
 @router.post("/logout")
 def logout():
-    resp = RedirectResponse("/auth/login", status_code=302)
+    resp = RedirectResponse("/", status_code=302)
     resp.delete_cookie("access_token")
     resp.delete_cookie("pre_auth")
     return resp
