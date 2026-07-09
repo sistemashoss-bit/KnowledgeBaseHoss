@@ -95,6 +95,15 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 q = q.filter(Message.created_at > participant.last_read_at)
             unread = q.scalar() or 0
 
+        other_avatar_key = None
+        if conv.type == CONV_DIRECT:
+            other = next(
+                (p.user for p in conv.participants if str(p.user_id) != str(user.id)),
+                None,
+            )
+            if other:
+                other_avatar_key = other.avatar_key
+
         result.append(
             {
                 "conv": conv,
@@ -102,6 +111,7 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 "unread": unread,
                 "display_name": _conv_display_name(conv, user),
                 "avatar": _conv_avatar(conv, user),
+                "other_avatar_key": other_avatar_key,
                 "last_at": last_msg.created_at if last_msg else conv.created_at,
             }
         )

@@ -192,7 +192,7 @@
               <p class="text-xs text-gray-400">
                 {{ (ev.file_size / 1024) | round(1) }} KB
                 · {{ ev.uploader.name or ev.uploader.email if ev.uploader else "—" }}
-                · {{ ev.created_at.strftime('%d/%m/%Y %H:%M') }}
+                · <time datetime="{{ ev.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ ev.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
               </p>
             </div>
           </div>

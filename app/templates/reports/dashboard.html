@@ -170,7 +170,7 @@
               </div>
               <div class="min-w-0">
                 <p class="text-sm font-medium text-gray-800 truncate">{{ u.email }}</p>
-                <p class="text-xs text-gray-400">última: {{ u.last_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                <p class="text-xs text-gray-400">última: <time datetime="{{ u.last_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ u.last_at.strftime('%d/%m/%Y %H:%M') }}</time></p>
               </div>
             </div>
             <span class="text-sm font-semibold text-gray-700 shrink-0 ml-3">

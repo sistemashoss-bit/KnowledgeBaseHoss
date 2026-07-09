@@ -33,6 +33,17 @@
           </button>
         </div>
       </div>
+      <!-- Buscador de conversaciones -->
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+        </svg>
+        <input id="conv-search" type="text" placeholder="Buscar conversación…"
+               oninput="convFilter()"
+               class="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 bg-gray-50" />
+      </div>
     </div>
 
     <!-- Conv list -->
@@ -40,27 +51,32 @@
       {% if conv_list %}
         {% for item in conv_list %}
         <a href="/messaging/{{ item.conv.id }}"
+           data-conv-search="{{ item.display_name | lower }}"
            class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50
              {% if active_conv and active_conv.id == item.conv.id %}bg-orange-50 border-l-2 border-l-orange-500{% endif %}">
 
           <!-- Avatar -->
-          <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-sm font-bold
-            {% if item.conv.type == 'group' %}bg-indigo-100 text-indigo-700{% else %}bg-orange-100 text-orange-700{% endif %}">
-            {% if item.conv.type == 'group' %}
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-              </svg>
-            {% else %}
-              {{ item.avatar }}
-            {% endif %}
+          {% if item.conv.type == 'group' %}
+          <div class="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 text-sm font-bold">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
           </div>
+          {% elif item.other_avatar_key %}
+          <img src="{{ avatar_url(item.other_avatar_key) }}" alt=""
+               class="w-9 h-9 rounded-full object-cover shrink-0" />
+          {% else %}
+          <div class="w-9 h-9 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center shrink-0 text-sm font-bold">
+            {{ item.avatar }}
+          </div>
+          {% endif %}
 
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
               <p class="text-sm font-medium text-gray-800 truncate">{{ item.display_name }}</p>
               {% if item.last_msg %}
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ item.last_at.strftime('%H:%M') }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2"><time datetime="{{ item.last_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="time">{{ item.last_at.strftime('%H:%M') }}</time></span>
               {% endif %}
             </div>
             <div class="flex items-center justify-between mt-0.5">
@@ -81,6 +97,8 @@
           </div>
         </a>
         {% endfor %}
+      <p id="conv-empty-search" style="display:none"
+         class="text-xs text-gray-400 text-center px-4 py-8">Sin resultados.</p>
       {% else %}
       <div class="px-4 py-8 text-center">
         <p class="text-sm text-gray-400">Sin conversaciones todavía.</p>
@@ -97,17 +115,29 @@
     <!-- Chat header -->
     <div x-data="{ showMembers: false }" class="bg-white border-b border-gray-200 shrink-0">
       <div class="px-6 py-3.5 flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0
-          {% if active_conv.type == 'group' %}bg-indigo-100 text-indigo-700{% else %}bg-orange-100 text-orange-700{% endif %}">
-          {% if active_conv.type == 'group' %}
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-            </svg>
-          {% else %}
-            {{ active_conv_name[0].upper() }}
-          {% endif %}
+        {% if active_conv.type == 'group' %}
+        <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+          </svg>
         </div>
+        {% else %}
+          {% set ns = namespace(ak=None) %}
+          {% for p in active_conv.participants %}
+            {% if p.user_id|string != current_user.id|string and p.user and p.user.avatar_key %}
+              {% set ns.ak = p.user.avatar_key %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.ak %}
+        <img src="{{ avatar_url(ns.ak) }}" alt=""
+             class="w-8 h-8 rounded-full object-cover shrink-0" />
+          {% else %}
+        <div class="w-8 h-8 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-sm shrink-0">
+          {{ active_conv_name[0].upper() }}
+        </div>
+          {% endif %}
+        {% endif %}
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>
           <p class="text-xs text-gray-400">
@@ -446,6 +476,21 @@
     </form>
   </div>
 </div>
+
+<script>
+function convFilter() {
+  var q = document.getElementById('conv-search').value.toLowerCase().trim();
+  var items = document.querySelectorAll('[data-conv-search]');
+  var visible = 0;
+  items.forEach(function(el) {
+    var match = !q || el.dataset.convSearch.indexOf(q) !== -1;
+    el.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  var empty = document.getElementById('conv-empty-search');
+  if (empty) empty.style.display = (items.length > 0 && visible === 0) ? '' : 'none';
+}
+</script>
 
 <script>
 (function () {

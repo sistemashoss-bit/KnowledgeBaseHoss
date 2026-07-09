@@ -41,7 +41,7 @@
           {% for log in logs %}
           <tr class="hover:bg-gray-50">
             <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-              {{ log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else '—' }}
+              {% if log.created_at %}<time datetime="{{ log.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime-iso">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</time>{% else %}—{% endif %}
             </td>
             <td class="px-4 py-3 text-xs">
               {{ log.user_email or '<span class="text-gray-400">anónimo</span>'|safe }}

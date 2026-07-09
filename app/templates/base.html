@@ -474,6 +474,32 @@
   </script>
   {% endblock %}
 
+  <script>
+    /* Convierte <time datetime="UTC-ISO" data-fmt="..."> a hora local del browser */
+    (function () {
+      var pad = function(n) { return String(n).padStart(2, '0'); };
+      function fmtLocal(el) {
+        var iso = el.getAttribute('datetime');
+        if (!iso) return;
+        var d = new Date(iso);
+        if (isNaN(d)) return;
+        var fmt = el.dataset.fmt;
+        if (fmt === 'time') {
+          el.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
+        } else if (fmt === 'datetime') {
+          el.textContent = pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear()
+                         + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        } else if (fmt === 'datetime-iso') {
+          el.textContent = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+                         + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+      }
+      function run(root) { (root || document).querySelectorAll('time[data-fmt]').forEach(fmtLocal); }
+      document.addEventListener('DOMContentLoaded', function() { run(); });
+      document.addEventListener('htmx:afterSwap', function(e) { run(e.detail.target); });
+    })();
+  </script>
+
   {% if current_user %}
   <script>
     function notifSystem(userId) {

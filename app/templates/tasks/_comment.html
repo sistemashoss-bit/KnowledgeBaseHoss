@@ -8,7 +8,7 @@
         {{ comment.user.name or comment.user.email if comment.user else "Usuario" }}
       </span>
       <span class="text-xs text-gray-400">
-        {{ comment.created_at.strftime('%d/%m/%Y %H:%M') }}
+        <time datetime="{{ comment.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ comment.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
       </span>
     </div>
     <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content }}</p>
