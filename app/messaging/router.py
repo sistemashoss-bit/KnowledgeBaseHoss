@@ -22,6 +22,31 @@ from app.templating import templates
 
 MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024  # 50 MB
 
+_ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
+
+
+def _format_last_seen(iso_str: str | None) -> str | None:
+    if not iso_str:
+        return None
+    try:
+        from datetime import timezone
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        diff = int((datetime.now(timezone.utc) - dt).total_seconds())
+        if diff < _ONLINE_THRESHOLD:
+            return "En línea"
+        if diff < 3600:
+            m = diff // 60
+            return f"Visto hace {m} min"
+        if diff < 86400:
+            h = diff // 3600
+            return f"Visto hace {h} h"
+        d = diff // 86400
+        return f"Visto hace {d} día{'s' if d > 1 else ''}"
+    except Exception:
+        return None
+
 
 def _safe_filename(name: str) -> str:
     name = re.sub(r"[^\w.\-]", "_", name)
@@ -76,6 +101,17 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
         .all()
     )
 
+    # Batch-fetch last_seen for all DM other-users in one MGET
+    dm_other_ids = []
+    for conv in convs:
+        if conv.type == CONV_DIRECT:
+            other = next(
+                (p.user for p in conv.participants if str(p.user_id) != str(user.id)), None
+            )
+            if other:
+                dm_other_ids.append(other.id)
+    lastseen_map = vk.get_last_seen_many(dm_other_ids) if dm_other_ids else {}
+
     result = []
     for conv in convs:
         last_msg = (
@@ -98,13 +134,16 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
             unread = q.scalar() or 0
 
         other_avatar_key = None
+        is_online = False
+        last_seen_text = None
         if conv.type == CONV_DIRECT:
             other = next(
-                (p.user for p in conv.participants if str(p.user_id) != str(user.id)),
-                None,
+                (p.user for p in conv.participants if str(p.user_id) != str(user.id)), None
             )
             if other:
                 other_avatar_key = other.avatar_key
+                last_seen_text = _format_last_seen(lastseen_map.get(str(other.id)))
+                is_online = last_seen_text == "En línea"
 
         result.append(
             {
@@ -115,6 +154,8 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 "avatar": _conv_avatar(conv, user),
                 "other_avatar_key": other_avatar_key,
                 "last_at": last_msg.created_at if last_msg else conv.created_at,
+                "is_online": is_online,
+                "last_seen_text": last_seen_text,
             }
         )
 
@@ -276,6 +317,14 @@ def conversation_view(
     branches = db.query(Branch).order_by(Branch.name).all()
     all_users = db.query(User).filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
 
+    other_last_seen = None
+    if conv.type == CONV_DIRECT:
+        other = next(
+            (p.user for p in conv.participants if str(p.user_id) != str(current_user.id)), None
+        )
+        if other:
+            other_last_seen = _format_last_seen(vk.get_last_seen(other.id))
+
     return templates.TemplateResponse(
         request,
         "messaging/index.html",
@@ -284,6 +333,7 @@ def conversation_view(
             "conv_list": conv_list,
             "active_conv": conv,
             "active_conv_name": _conv_display_name(conv, current_user),
+            "other_last_seen": other_last_seen,
             "messages": messages,
             "contacts": contacts,
             "departments": departments,

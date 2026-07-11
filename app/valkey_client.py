@@ -1,10 +1,11 @@
 """
 Valkey (Redis-compatible) client.
-Used for: login rate limiting + RAG response cache.
+Used for: login rate limiting + RAG response cache + user presence.
 Falls back gracefully if VALKEY_URL is not configured.
 """
 import hashlib
 import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 _client = None
@@ -112,3 +113,44 @@ def try_acquire_daily_lock(key: str) -> bool:
         return bool(r.set(key, "1", ex=86400, nx=True))
     except Exception:
         return False
+
+
+# ── User presence ─────────────────────────────────────────────────────────────
+
+_LASTSEEN_TTL = 86400 * 30   # 30 days
+_PRESENCE_THROTTLE = 60      # write at most once per minute per user
+
+
+def update_last_seen(user_id) -> None:
+    r = _get()
+    if r is None:
+        return
+    try:
+        sid = str(user_id)
+        if r.set(f"user:lsact:{sid}", "1", ex=_PRESENCE_THROTTLE, nx=True):
+            r.setex(f"user:lastseen:{sid}", _LASTSEEN_TTL, datetime.now(timezone.utc).isoformat())
+    except Exception:
+        pass
+
+
+def get_last_seen(user_id) -> str | None:
+    r = _get()
+    if r is None:
+        return None
+    try:
+        return r.get(f"user:lastseen:{str(user_id)}")
+    except Exception:
+        return None
+
+
+def get_last_seen_many(user_ids: list) -> dict:
+    """Returns {str(user_id): iso_str | None} for a list of user ids (single MGET)."""
+    r = _get()
+    if r is None:
+        return {}
+    try:
+        ids = [str(i) for i in user_ids]
+        values = r.mget([f"user:lastseen:{i}" for i in ids])
+        return {ids[n]: values[n] for n in range(len(ids))}
+    except Exception:
+        return {}

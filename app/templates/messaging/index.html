@@ -63,12 +63,19 @@
                     d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
             </svg>
           </div>
-          {% elif item.other_avatar_key %}
-          <img src="{{ avatar_url(item.other_avatar_key) }}" alt=""
-               class="w-9 h-9 rounded-full object-cover shrink-0" />
           {% else %}
-          <div class="w-9 h-9 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center shrink-0 text-sm font-bold">
-            {{ item.avatar }}
+          <div class="relative shrink-0">
+            {% if item.other_avatar_key %}
+            <img src="{{ avatar_url(item.other_avatar_key) }}" alt=""
+                 class="w-9 h-9 rounded-full object-cover" />
+            {% else %}
+            <div class="w-9 h-9 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-bold">
+              {{ item.avatar }}
+            </div>
+            {% endif %}
+            {% if item.is_online %}
+            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white"></span>
+            {% endif %}
           </div>
           {% endif %}
 
@@ -84,6 +91,8 @@
                 {% if item.last_msg %}
                   {% if item.last_msg.sender_id == current_user.id %}Tú: {% endif %}
                   {{ item.last_msg.content[:40] }}{% if item.last_msg.content | length > 40 %}…{% endif %}
+                {% elif item.last_seen_text %}
+                  <span class="{% if item.is_online %}text-green-500{% endif %}">{{ item.last_seen_text }}</span>
                 {% else %}
                   Sin mensajes aún
                 {% endif %}
@@ -140,10 +149,15 @@
         {% endif %}
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>
-          <p class="text-xs text-gray-400">
+          <p class="text-xs text-gray-400 flex items-center gap-1.5">
             {% if active_conv.type == 'group' %}
               {{ active_conv.participants | length }} participante(s)
               {% if active_conv.department %}· {{ active_conv.department.name }}{% endif %}
+            {% elif other_last_seen %}
+              {% if other_last_seen == 'En línea' %}
+              <span class="w-2 h-2 rounded-full bg-green-400 inline-block shrink-0"></span>
+              {% endif %}
+              {{ other_last_seen }}
             {% else %}
               Mensaje directo
             {% endif %}
@@ -730,19 +744,27 @@ function convFilter() {
   window.startCall = async function (convId, convName, withVideo) {
     if (_room) return;
 
+    // 1. Get token from backend
     let data;
     try {
       const r = await fetch('/messaging/' + convId + '/call/token');
-      if (!r.ok) throw new Error('token error');
+      if (!r.ok) {
+        const txt = await r.text();
+        console.error('LiveKit token error:', r.status, txt);
+        alert('Error al obtener token de llamada (' + r.status + ').');
+        return;
+      }
       data = await r.json();
+      console.log('LiveKit token OK, room:', data.room, 'url:', data.url);
     } catch (e) {
-      alert('No se pudo iniciar la llamada.');
+      console.error('LiveKit token fetch failed:', e);
+      alert('No se pudo contactar al servidor de llamadas.');
       return;
     }
 
     document.getElementById('lk-modal').classList.remove('hidden');
     document.getElementById('lk-title').textContent = convName;
-    document.getElementById('lk-status').textContent = 'Conectando…';
+    document.getElementById('lk-status').textContent = 'Conectando a la sala…';
     document.getElementById('lk-btn-cam').style.display = withVideo ? '' : 'none';
 
     _room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
@@ -763,30 +785,40 @@ function convFilter() {
     _room.on(LivekitClient.RoomEvent.TrackUnmuted, function () { _syncMicBtn(); _syncCamBtn(); });
     _room.on(LivekitClient.RoomEvent.Disconnected, function () { lkEndCall(); });
 
+    // 2. Connect to LiveKit room
     try {
       await _room.connect(data.url, data.token);
-      document.getElementById('lk-status').textContent = 'En llamada';
+      console.log('LiveKit connected to room:', data.room);
+    } catch (e) {
+      console.error('LiveKit room.connect() failed:', e);
+      alert('No se pudo conectar a la sala de llamadas.\n\nDetalle: ' + (e.message || e));
+      lkEndCall();
+      return;
+    }
 
-      _addTile(_room.localParticipant);
-
-      _room.remoteParticipants.forEach(function (p) {
-        _addTile(p);
-        p.trackPublications.forEach(function (pub) {
-          if (pub.track && pub.isSubscribed) _attachTrack(pub.track, p);
-        });
+    document.getElementById('lk-status').textContent = 'En llamada';
+    _addTile(_room.localParticipant);
+    _room.remoteParticipants.forEach(function (p) {
+      _addTile(p);
+      p.trackPublications.forEach(function (pub) {
+        if (pub.track && pub.isSubscribed) _attachTrack(pub.track, p);
       });
+    });
 
+    // 3. Enable local media tracks
+    document.getElementById('lk-status').textContent = 'Activando ' + (withVideo ? 'cámara y micrófono' : 'micrófono') + '…';
+    try {
       if (withVideo) {
         await _room.localParticipant.enableCameraAndMicrophone();
       } else {
         await _room.localParticipant.setMicrophoneEnabled(true);
       }
+      document.getElementById('lk-status').textContent = 'En llamada';
       _syncMicBtn(); _syncCamBtn();
-
     } catch (e) {
-      console.error('LiveKit:', e);
-      alert('No se pudo conectar. Verifica permisos de micrófono/cámara.');
-      lkEndCall();
+      console.error('LiveKit media error:', e);
+      document.getElementById('lk-status').textContent = 'En llamada (sin micrófono)';
+      alert('No se pudo acceder al micrófono/cámara.\n\nRevisa los permisos del navegador y que el sitio use HTTPS o localhost.\n\nDetalle: ' + (e.message || e));
     }
   };
 

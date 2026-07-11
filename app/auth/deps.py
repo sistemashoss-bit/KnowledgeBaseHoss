@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth.utils import decode_token
 from app.database import get_db
 from app.models import User
+from app import valkey_client as vk
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
@@ -16,7 +17,10 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
         user_id = payload.get("sub")
         if not user_id:
             return None
-        return db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
+        user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
+        if user:
+            vk.update_last_seen(user.id)
+        return user
     except JWTError:
         return None
 
