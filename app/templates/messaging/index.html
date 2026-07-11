@@ -149,6 +149,24 @@
             {% endif %}
           </p>
         </div>
+        <!-- Audio call -->
+        <button onclick="startCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, false)"
+                title="Llamada de voz"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-300 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/>
+          </svg>
+        </button>
+        <!-- Video call -->
+        <button onclick="startCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, true)"
+                title="Videollamada"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15 10l4.553-2.069A1 1 0 0121 8.869v6.262a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+        </button>
         {% if active_conv.type == 'group' %}
         <button @click="showMembers = !showMembers"
                 class="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
@@ -567,6 +585,231 @@ function convFilter() {
   }
 
   updateCount();
+})();
+</script>
+
+<!-- ── LiveKit: Call Modal ────────────────────────────────────────────────── -->
+<div id="lk-modal" class="hidden fixed inset-0 z-[60] flex flex-col bg-gray-900">
+  <!-- Header -->
+  <div class="flex items-center justify-between px-6 py-4 bg-gray-800 border-b border-gray-700 shrink-0">
+    <div>
+      <p id="lk-title" class="text-white font-semibold text-sm"></p>
+      <p id="lk-status" class="text-gray-400 text-xs mt-0.5"></p>
+    </div>
+  </div>
+
+  <!-- Participant grid -->
+  <div id="lk-grid" class="grid gap-3 p-4 flex-1 content-start overflow-auto"></div>
+
+  <!-- Controls -->
+  <div class="flex items-center justify-center gap-4 py-5 bg-gray-800 border-t border-gray-700 shrink-0">
+    <button id="lk-btn-mic" onclick="lkToggleMic()" title="Silenciar"
+            class="w-12 h-12 rounded-full bg-gray-700 hover:opacity-80 text-white flex items-center justify-center transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+      </svg>
+    </button>
+    <button id="lk-btn-cam" onclick="lkToggleCam()" title="Apagar cámara"
+            class="w-12 h-12 rounded-full bg-gray-700 hover:opacity-80 text-white flex items-center justify-center transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15 10l4.553-2.069A1 1 0 0121 8.869v6.262a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+      </svg>
+    </button>
+    <button onclick="lkEndCall()" title="Terminar llamada"
+            class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center transition-colors">
+      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<script>
+(function () {
+  let _room = null;
+  const _audioEls = [];
+  const _trackEls = new Map(); // trackSid/trackId -> video element
+
+  function _tile(identity) {
+    return document.querySelector('.lk-tile[data-lk-identity="' + identity + '"]');
+  }
+
+  function _addTile(p) {
+    if (_tile(p.identity)) return;
+    const grid = document.getElementById('lk-grid');
+    const div = document.createElement('div');
+    div.className = 'lk-tile relative bg-gray-800 rounded-xl overflow-hidden flex items-center justify-center aspect-video';
+    div.dataset.lkIdentity = p.identity;
+
+    const av = document.createElement('div');
+    av.className = 'lk-av flex items-center justify-center w-full h-full';
+    const circle = document.createElement('div');
+    circle.className = 'w-20 h-20 rounded-full bg-indigo-600 flex items-center justify-center text-white text-3xl font-bold select-none';
+    circle.textContent = (p.name || p.identity || '?')[0].toUpperCase();
+    av.appendChild(circle);
+    div.appendChild(av);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'absolute bottom-2 left-2 right-2 text-white text-xs bg-black/60 px-2 py-0.5 rounded truncate text-center';
+    lbl.textContent = (p.name || p.identity || 'Participante') + (p.isLocal ? ' (tú)' : '');
+    div.appendChild(lbl);
+
+    grid.appendChild(div);
+    _updateCols();
+  }
+
+  function _removeTile(identity) {
+    const t = _tile(identity);
+    if (t) { t.remove(); _updateCols(); }
+  }
+
+  function _updateCols() {
+    const grid = document.getElementById('lk-grid');
+    const n = grid.querySelectorAll('.lk-tile').length;
+    grid.className = 'grid gap-3 p-4 flex-1 content-start overflow-auto ' +
+      (n <= 1 ? 'grid-cols-1 place-items-center' : n <= 4 ? 'grid-cols-2' : 'grid-cols-3');
+  }
+
+  function _attachTrack(track, participant) {
+    if (!track) return;
+    if (track.kind === 'video') {
+      const t = _tile(participant.identity);
+      if (!t) return;
+      const el = track.attach();
+      el.className = 'absolute inset-0 w-full h-full object-cover';
+      el.muted = true;
+      if (participant.isLocal) el.style.transform = 'scaleX(-1)';
+      t.querySelector('.lk-av').classList.add('hidden');
+      t.insertBefore(el, t.firstChild);
+      _trackEls.set(track.sid || track.id, el);
+    } else if (track.kind === 'audio' && !participant.isLocal) {
+      const el = track.attach();
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      _audioEls.push(el);
+    }
+  }
+
+  function _detachTrack(track) {
+    const key = track.sid || track.id;
+    const el = _trackEls.get(key);
+    if (el) {
+      track.detach(el);
+      if (el.parentNode) {
+        if (track.kind === 'video') {
+          const av = el.parentNode.querySelector('.lk-av');
+          if (av) av.classList.remove('hidden');
+        }
+        el.remove();
+      }
+      _trackEls.delete(key);
+    }
+  }
+
+  function _syncMicBtn() {
+    const btn = document.getElementById('lk-btn-mic');
+    if (!btn || !_room) return;
+    const on = _room.localParticipant.isMicrophoneEnabled;
+    btn.classList.toggle('bg-gray-700', on);
+    btn.classList.toggle('bg-red-600', !on);
+    btn.title = on ? 'Silenciar' : 'Activar micrófono';
+  }
+
+  function _syncCamBtn() {
+    const btn = document.getElementById('lk-btn-cam');
+    if (!btn || !_room) return;
+    const on = _room.localParticipant.isCameraEnabled;
+    btn.classList.toggle('bg-gray-700', on);
+    btn.classList.toggle('bg-red-600', !on);
+    btn.title = on ? 'Apagar cámara' : 'Activar cámara';
+  }
+
+  window.startCall = async function (convId, convName, withVideo) {
+    if (_room) return;
+
+    let data;
+    try {
+      const r = await fetch('/messaging/' + convId + '/call/token');
+      if (!r.ok) throw new Error('token error');
+      data = await r.json();
+    } catch (e) {
+      alert('No se pudo iniciar la llamada.');
+      return;
+    }
+
+    document.getElementById('lk-modal').classList.remove('hidden');
+    document.getElementById('lk-title').textContent = convName;
+    document.getElementById('lk-status').textContent = 'Conectando…';
+    document.getElementById('lk-btn-cam').style.display = withVideo ? '' : 'none';
+
+    _room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+
+    _room.on(LivekitClient.RoomEvent.ParticipantConnected,    function (p) { _addTile(p); });
+    _room.on(LivekitClient.RoomEvent.ParticipantDisconnected, function (p) { _removeTile(p.identity); });
+    _room.on(LivekitClient.RoomEvent.TrackSubscribed,   function (track, _pub, p) { _attachTrack(track, p); });
+    _room.on(LivekitClient.RoomEvent.TrackUnsubscribed, function (track) { _detachTrack(track); });
+    _room.on(LivekitClient.RoomEvent.LocalTrackPublished, function (pub) {
+      if (pub.track) _attachTrack(pub.track, _room.localParticipant);
+      _syncMicBtn(); _syncCamBtn();
+    });
+    _room.on(LivekitClient.RoomEvent.LocalTrackUnpublished, function (pub) {
+      if (pub.track) _detachTrack(pub.track);
+      _syncMicBtn(); _syncCamBtn();
+    });
+    _room.on(LivekitClient.RoomEvent.TrackMuted,   function () { _syncMicBtn(); _syncCamBtn(); });
+    _room.on(LivekitClient.RoomEvent.TrackUnmuted, function () { _syncMicBtn(); _syncCamBtn(); });
+    _room.on(LivekitClient.RoomEvent.Disconnected, function () { lkEndCall(); });
+
+    try {
+      await _room.connect(data.url, data.token);
+      document.getElementById('lk-status').textContent = 'En llamada';
+
+      _addTile(_room.localParticipant);
+
+      _room.remoteParticipants.forEach(function (p) {
+        _addTile(p);
+        p.trackPublications.forEach(function (pub) {
+          if (pub.track && pub.isSubscribed) _attachTrack(pub.track, p);
+        });
+      });
+
+      if (withVideo) {
+        await _room.localParticipant.enableCameraAndMicrophone();
+      } else {
+        await _room.localParticipant.setMicrophoneEnabled(true);
+      }
+      _syncMicBtn(); _syncCamBtn();
+
+    } catch (e) {
+      console.error('LiveKit:', e);
+      alert('No se pudo conectar. Verifica permisos de micrófono/cámara.');
+      lkEndCall();
+    }
+  };
+
+  window.lkToggleMic = async function () {
+    if (!_room) return;
+    await _room.localParticipant.setMicrophoneEnabled(!_room.localParticipant.isMicrophoneEnabled);
+    _syncMicBtn();
+  };
+
+  window.lkToggleCam = async function () {
+    if (!_room) return;
+    await _room.localParticipant.setCameraEnabled(!_room.localParticipant.isCameraEnabled);
+    _syncCamBtn();
+  };
+
+  window.lkEndCall = function () {
+    if (_room) { _room.disconnect(); _room = null; }
+    _audioEls.forEach(function (el) { if (el.parentNode) el.remove(); });
+    _audioEls.length = 0;
+    _trackEls.clear();
+    document.getElementById('lk-modal').classList.add('hidden');
+    document.getElementById('lk-grid').innerHTML = '';
+  };
 })();
 </script>
 

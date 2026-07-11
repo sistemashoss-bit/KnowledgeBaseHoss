@@ -1,9 +1,11 @@
+import os
 import re
 import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from livekit.api import AccessToken, VideoGrants
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -331,6 +333,43 @@ def poll_messages(
         "messaging/_feed.html",
         {"messages": messages, "current_user": current_user, "is_group": conv_type == CONV_GROUP},
     )
+
+
+@router.get("/{conv_id}/call/token")
+def call_token(
+    conv_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not is_participant:
+        raise HTTPException(403)
+
+    room_name = f"conv-{conv_id}"
+    token = (
+        AccessToken(
+            os.getenv("LIVEKIT_API_KEY", ""),
+            os.getenv("LIVEKIT_API_SECRET", ""),
+        )
+        .with_identity(str(current_user.id))
+        .with_name(current_user.name or current_user.email)
+        .with_grants(VideoGrants(room_join=True, room=room_name))
+        .to_jwt()
+    )
+    return JSONResponse({
+        "token": token,
+        "url": os.getenv("LIVEKIT_URL", ""),
+        "room": room_name,
+    })
 
 
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
