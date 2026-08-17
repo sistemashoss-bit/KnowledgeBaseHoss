@@ -13,7 +13,7 @@ from app.auth.utils import (
 )
 from app.config import settings
 from app.database import get_db
-from app import audit, storage, valkey_client as vk
+from app import storage, valkey_client as vk
 from app.auth import hoss
 from app.models import ROLE_EMPLOYEE, Department, User
 from app.templating import templates
@@ -54,7 +54,6 @@ async def login(
 
     if not user or not user.is_active:
         vk.record_login_failure(email)
-        audit.log_action("login_fail", request=request, details=email)
         has_users = db.query(User).count() > 0
         return templates.TemplateResponse(
             request, "login.html",
@@ -65,7 +64,6 @@ async def login(
     vk.clear_login_failures(email)
 
     token = create_access_token(str(user.id), user.role, user.department_id)
-    audit.log_action("login", user=user, request=request)
     resp = RedirectResponse("/documents/", status_code=302)
     resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=_max_age())
     return resp

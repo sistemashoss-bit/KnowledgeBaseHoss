@@ -29,6 +29,22 @@ def _get():
     return _client
 
 
+def available() -> bool:
+    """True if a Redis/Valkey connection is usable."""
+    return _get() is not None
+
+
+def publish(channel: str, message: str = "new") -> None:
+    """Best-effort publish for real-time fan-out. Never raises."""
+    r = _get()
+    if r is None:
+        return
+    try:
+        r.publish(channel, message)
+    except Exception:
+        pass
+
+
 # ── Login rate limiting ───────────────────────────────────────────────────────
 
 _MAX_ATTEMPTS = 5

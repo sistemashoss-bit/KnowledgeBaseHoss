@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -13,10 +14,20 @@ async def lifespan(app: FastAPI):
     from app.database import engine
     from app.models import Base
     from app import search as search_module
+    from app.messaging.cleanup import scheduler_loop
 
     Base.metadata.create_all(bind=engine)
     search_module.ensure_indices()
-    yield
+
+    cleanup_task = asyncio.create_task(scheduler_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 limiter = Limiter(key_func=get_remote_address)

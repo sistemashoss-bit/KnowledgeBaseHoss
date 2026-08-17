@@ -191,6 +191,21 @@
           Participantes
         </button>
         {% endif %}
+        {% if active_conv.type == 'direct' %}
+        <form method="post" action="/messaging/{{ active_conv.id }}/delete" class="shrink-0"
+              onsubmit="return confirm('¿Eliminar este chat? Se borrarán todos los mensajes y archivos para ambas personas. Esta acción no se puede deshacer.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit"
+                  class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
+                  title="Eliminar chat">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            Eliminar
+          </button>
+        </form>
+        {% endif %}
       </div>
 
       {% if active_conv.type == 'group' %}
@@ -253,11 +268,13 @@
       {% endif %}
     </div>
 
-    <!-- Message feed (polled every 3s) -->
+    <!-- Message feed (real-time via SSE; 30s poll as fallback) -->
     <div class="flex-1 overflow-hidden relative">
       <div id="message-feed"
+           hx-ext="sse"
+           sse-connect="/messaging/{{ active_conv.id }}/events"
            hx-get="/messaging/{{ active_conv.id }}/poll"
-           hx-trigger="every 3s, refreshFeed from:body"
+           hx-trigger="sse:message, refreshFeed from:body, every 30s"
            hx-swap="innerHTML scroll:bottom"
            class="absolute inset-0 overflow-y-auto px-6 py-4">
         {% include "messaging/_feed.html" %}

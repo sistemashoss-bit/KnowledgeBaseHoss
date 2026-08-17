@@ -268,10 +268,6 @@ def view_document(
     if not can_access_document(user, doc):
         raise HTTPException(403 if user else 401, "Access denied")
 
-    audit.log_action(
-        "view_document", user=user,
-        resource_type="document", resource_id=doc_id, resource_name=doc.title,
-    )
     return RedirectResponse(storage.get_signed_url(doc.file_key))
 
 

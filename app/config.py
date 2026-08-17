@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     # Valkey / Redis-compatible cache
     valkey_url: str = ""
 
+    # Chat retention
+    message_retention_days: int = 30
+    cleanup_hour_utc: int = 3  # daily purge runs at this UTC hour
+
+    # Audit / search log retention
+    audit_retention_days: int = 60
+
     # Wasabi S3-compatible
     wasabi_access_key: str
     wasabi_secret_key: str

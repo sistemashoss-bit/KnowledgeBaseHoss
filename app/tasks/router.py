@@ -70,22 +70,46 @@ def _can_update_status(user: User, task: Task) -> bool:
 @router.get("/", response_class=HTMLResponse)
 def list_tasks(
     request: Request,
-    status: str = "",
-    mine: str = "",
+    tab: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
 
-    q = _tasks_query(current_user, db)
+    is_admin = current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
 
-    if mine == "1":
-        q = q.filter(Task.assigned_to == current_user.id)
-    if status and status in TASK_STATUSES:
-        q = q.filter(Task.status == status)
+    # Available tabs — "dept" only for admins/superadmins.
+    valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else [])
+    if tab not in valid_tabs:
+        tab = "assigned"
+
+    base = db.query(Task).options(
+        joinedload(Task.assignee),
+        joinedload(Task.created_by_user),
+        joinedload(Task.department),
+        joinedload(Task.project),
+    )
+
+    if tab == "assigned":
+        q = base.filter(Task.assigned_to == current_user.id)
+        can_drag = True  # the assignee may move their own tasks between statuses
+    elif tab == "created":
+        q = base.filter(Task.created_by == current_user.id)
+        can_drag = False
+    else:  # dept
+        if current_user.role == ROLE_SUPERADMIN and not current_user.department_id:
+            q = base  # superadmin without a department sees everything
+        else:
+            q = base.filter(Task.department_id == current_user.department_id)
+        can_drag = False
 
     tasks = q.order_by(Task.created_at.desc()).all()
+
+    # Group into Kanban columns keyed by status.
+    columns = {s: [] for s in TASK_STATUSES}
+    for t in tasks:
+        columns.setdefault(t.status, []).append(t)
 
     # Data for create form
     departments = db.query(Department).order_by(Department.name).all()
@@ -98,14 +122,16 @@ def list_tasks(
         "tasks/list.html",
         {
             "current_user": current_user,
-            "tasks": tasks,
+            "columns": columns,
+            "total": len(tasks),
+            "tab": tab,
+            "is_admin": is_admin,
+            "can_drag": can_drag,
             "departments": departments,
             "users": users,
             "projects": projects,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
-            "filter_status": status,
-            "filter_mine": mine,
             "today": date.today().isoformat(),
             "csrf_token": csrf,
         },
@@ -357,6 +383,7 @@ def update_status(
     task_id: str,
     request: Request,
     status: str = Form(...),
+    mode: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -375,6 +402,9 @@ def update_status(
         resource_type="task", resource_id=task_id, resource_name=task.title,
         details=f"{prev} → {status}",
     )
+    # Kanban drag-and-drop: no redirect, the card already moved client-side.
+    if mode == "kanban":
+        return HTMLResponse(status_code=204)
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
 

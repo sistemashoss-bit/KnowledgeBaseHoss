@@ -1,18 +1,20 @@
 import os
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from jose import JWTError
 from livekit.api import AccessToken, VideoGrants
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
-from app.auth.utils import generate_csrf_token, verify_csrf_token
+from app.auth.utils import decode_token, generate_csrf_token, verify_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, storage, valkey_client as vk
+from app.messaging import realtime
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
     Message, MessageAttachment, User, UserZone, Zone,
@@ -52,15 +54,6 @@ def _safe_filename(name: str) -> str:
     name = re.sub(r"[^\w.\-]", "_", name)
     return name[:200] or "file"
 
-
-def _cleanup_old_messages_bg():
-    db = SessionLocal()
-    try:
-        cutoff = datetime.utcnow() - timedelta(days=30)
-        db.query(Message).filter(Message.created_at < cutoff).delete(synchronize_session=False)
-        db.commit()
-    finally:
-        db.close()
 
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 
@@ -240,15 +233,11 @@ def _mark_read(conv_id, user_id, db: Session):
 @router.get("/", response_class=HTMLResponse)
 def messaging_index(
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
-
-    if vk.try_acquire_daily_lock("msg_cleanup_30d"):
-        background_tasks.add_task(_cleanup_old_messages_bg)
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
@@ -385,6 +374,46 @@ def poll_messages(
     )
 
 
+@router.get("/{conv_id}/events")
+async def conversation_events(conv_id: str, request: Request):
+    """SSE stream: pushes a `message` event when the conversation gets a new message.
+
+    Authenticated from the cookie directly (not via Depends(get_db)) so no DB
+    connection is held for the lifetime of the stream.
+    """
+    token = request.cookies.get("access_token")
+    user_id = None
+    if token:
+        try:
+            user_id = decode_token(token).get("sub")
+        except JWTError:
+            user_id = None
+    if not user_id:
+        raise HTTPException(401)
+
+    db = SessionLocal()
+    try:
+        is_participant = (
+            db.query(ConversationParticipant)
+            .filter(
+                ConversationParticipant.conversation_id == conv_id,
+                ConversationParticipant.user_id == user_id,
+            )
+            .first()
+            is not None
+        )
+    finally:
+        db.close()
+    if not is_participant:
+        raise HTTPException(403)
+
+    return StreamingResponse(
+        realtime.event_stream(conv_id, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/{conv_id}/call/token")
 def call_token(
     conv_id: str,
@@ -425,6 +454,7 @@ def call_token(
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
 async def send_message(
     conv_id: str,
+    request: Request,
     content: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
@@ -477,6 +507,9 @@ async def send_message(
 
     _mark_read(conv_id, current_user.id, db)
     db.commit()
+
+    # Real-time fan-out to every open client in this conversation.
+    vk.publish(realtime.channel(conv_id))
 
     if valid_files:
         audit.log_action(
@@ -672,3 +705,69 @@ def remove_member(
     if removing_self:
         return RedirectResponse("/messaging/", status_code=302)
     return RedirectResponse(f"/messaging/{conv_id}", status_code=302)
+
+
+@router.post("/{conv_id}/delete")
+def delete_conversation(
+    conv_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete a direct chat for both parties: messages, attachment rows and files."""
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    conv = db.query(Conversation).filter(Conversation.id == conv_id).first()
+    if not conv:
+        raise HTTPException(404)
+    if conv.type != CONV_DIRECT:
+        raise HTTPException(400, "Solo se pueden eliminar chats directos")
+
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+        is not None
+    )
+    if not is_participant and current_user.role != ROLE_SUPERADMIN:
+        raise HTTPException(403)
+
+    # Delete attachment files from object storage first — the DB cascade never
+    # touches storage, so this is the only chance to grab their keys.
+    keys = (
+        db.query(MessageAttachment.file_key)
+        .join(Message, MessageAttachment.message_id == Message.id)
+        .filter(Message.conversation_id == conv_id)
+        .all()
+    )
+    for (key,) in keys:
+        try:
+            storage.delete_chat_file(key)
+        except Exception:
+            pass
+
+    # Explicit ordered delete so it works regardless of DB-level cascade state.
+    msg_ids = [m_id for (m_id,) in db.query(Message.id).filter(Message.conversation_id == conv_id).all()]
+    if msg_ids:
+        db.query(MessageAttachment).filter(MessageAttachment.message_id.in_(msg_ids)).delete(synchronize_session=False)
+        db.query(Message).filter(Message.id.in_(msg_ids)).delete(synchronize_session=False)
+    db.query(ConversationParticipant).filter(ConversationParticipant.conversation_id == conv_id).delete(synchronize_session=False)
+    db.query(Conversation).filter(Conversation.id == conv_id).delete(synchronize_session=False)
+    db.commit()
+
+    # Wake up the other party's open view so it stops polling a dead chat.
+    vk.publish(realtime.channel(conv_id), "deleted")
+
+    audit.log_action(
+        "conversation_delete", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id,
+        details=f"messages={len(msg_ids)} files={len(keys)}",
+    )
+    return RedirectResponse("/messaging/", status_code=302)
