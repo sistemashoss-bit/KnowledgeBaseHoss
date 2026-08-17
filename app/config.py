@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # OpenRouter (LLM for Q&A)
     openrouter_api_key: str
-    openrouter_model: str = "anthropic/claude-3.5-haiku"
+    openrouter_model: str = "deepseek/deepseek-v4-flash-0731"
 
     # Voyage AI (embeddings + rerank)
     voyage_api_key: str

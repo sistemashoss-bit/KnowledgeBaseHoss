@@ -14,8 +14,9 @@ ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE]
 # ── Document status constants ─────────────────────────────────────────────────
 STATUS_PUBLIC = "public"
 STATUS_EMPLOYEE = "employee"
+STATUS_DEPARTMENT = "department"
 STATUS_ADMIN = "admin"
-STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_ADMIN]
+STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_DEPARTMENT, STATUS_ADMIN]
 
 # ── Project status constants ──────────────────────────────────────────────────
 PROJECT_DRAFT = "draft"

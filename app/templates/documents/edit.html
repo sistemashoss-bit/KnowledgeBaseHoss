@@ -129,8 +129,9 @@
           {% for s in statuses %}
           <option value="{{ s }}" {{ 'selected' if s == doc.status }}>
             {% if s == "public" %}Público (sin login)
-            {% elif s == "employee" %}Empleados
-            {% else %}Solo admins{% endif %}
+            {% elif s == "employee" %}Empleados (toda la empresa)
+            {% elif s == "department" %}Departamento (mismo depto.)
+            {% else %}Solo admins (del depto.){% endif %}
           </option>
           {% endfor %}
         </select>

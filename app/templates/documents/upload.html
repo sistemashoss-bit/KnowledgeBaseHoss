@@ -138,8 +138,9 @@
             {% for s in statuses %}
             <option value="{{ s }}">
               {% if s == "public" %}Público (sin login)
-              {% elif s == "employee" %}Empleados
-              {% else %}Solo admins{% endif %}
+              {% elif s == "employee" %}Empleados (toda la empresa)
+              {% elif s == "department" %}Departamento (mismo depto.)
+              {% else %}Solo admins (del depto.){% endif %}
             </option>
             {% endfor %}
           </select>
@@ -147,18 +148,22 @@
       </div>
 
       <!-- Visibility legend -->
-      <div class="grid grid-cols-3 gap-2 text-xs">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
         <div class="flex items-start gap-1.5 p-2 bg-green-50 rounded-lg border border-green-200">
           <span class="mt-0.5 w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
-          <span class="text-green-700"><strong>Público</strong> — Clientes y externos sin login</span>
+          <span class="text-green-700"><strong>Público</strong> — Cualquiera, sin necesidad de iniciar sesión</span>
         </div>
         <div class="flex items-start gap-1.5 p-2 bg-blue-50 rounded-lg border border-blue-200">
           <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
-          <span class="text-blue-700"><strong>Empleados</strong> — Solo empleados de este departamento</span>
+          <span class="text-blue-700"><strong>Empleados</strong> — Cualquier empleado de la empresa (todos los departamentos)</span>
+        </div>
+        <div class="flex items-start gap-1.5 p-2 bg-indigo-50 rounded-lg border border-indigo-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-indigo-500 shrink-0"></span>
+          <span class="text-indigo-700"><strong>Departamento</strong> — Solo personas del departamento seleccionado</span>
         </div>
         <div class="flex items-start gap-1.5 p-2 bg-red-50 rounded-lg border border-red-200">
           <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
-          <span class="text-red-700"><strong>Admin</strong> — Solo admins de este departamento</span>
+          <span class="text-red-700"><strong>Admin</strong> — Solo admins del departamento seleccionado</span>
         </div>
       </div>
 

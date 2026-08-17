@@ -63,6 +63,8 @@
             <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">público</span>
             {% elif doc.status == "employee" %}
             <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">empleado</span>
+            {% elif doc.status == "department" %}
+            <span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium">departamento</span>
             {% else %}
             <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">admin</span>
             {% endif %}
