@@ -69,7 +69,7 @@ class Branch(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
-    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id"), nullable=True)
+    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     zone = relationship("Zone", back_populates="branches")
@@ -83,8 +83,8 @@ class UserZone(Base):
     """Many-to-many: users that manage one or more zones."""
     __tablename__ = "user_zones"
 
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
-    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), primary_key=True)
     assigned_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="user_zones")
@@ -99,7 +99,7 @@ class Department(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
-    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     branch = relationship("Branch", back_populates="departments")
@@ -120,8 +120,8 @@ class User(Base):
     name = Column(String(150), nullable=True)
     # Credenciales y MFA viven en hoss-api (full SSO): knowledge no las almacena.
     role = Column(String(20), nullable=False, default=ROLE_EMPLOYEE)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
     avatar_key = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -153,9 +153,9 @@ class Document(Base):
     file_key = Column(String(500), nullable=False)
     content_type = Column(String(100), nullable=True)
     file_size = Column(BigInteger, nullable=True)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
-    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -201,11 +201,11 @@ class Project(Base):
     status = Column(String(20), nullable=False, default=PROJECT_DRAFT)
 
     # Scope — any combination is valid
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
-    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -227,10 +227,10 @@ class Task(Base):
     status = Column(String(20), nullable=False, default=TASK_PENDING)
     priority = Column(String(10), nullable=False, default=PRIORITY_MEDIUM)
 
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -248,8 +248,8 @@ class TaskComment(Base):
     __tablename__ = "task_comments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -261,8 +261,8 @@ class TaskEvidence(Base):
     __tablename__ = "task_evidences"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id"), nullable=False)
-    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String(255), nullable=False)
     file_key = Column(String(500), nullable=False)
     content_type = Column(String(100), nullable=False)
@@ -283,11 +283,11 @@ class Conversation(Base):
     name = Column(String(150), nullable=True)
 
     # Scope for group conversations
-    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id"), nullable=True)
-    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
+    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
 
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     zone = relationship("Zone", back_populates="conversations")
@@ -301,8 +301,8 @@ class Conversation(Base):
 class ConversationParticipant(Base):
     __tablename__ = "conversation_participants"
 
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), primary_key=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     last_read_at = Column(DateTime, nullable=True)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
@@ -314,8 +314,8 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, index=True)
-    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -328,8 +328,8 @@ class MessageAttachment(Base):
     __tablename__ = "message_attachments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"), nullable=False)
-    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String(255), nullable=False)
     file_key = Column(String(500), nullable=False)
     content_type = Column(String(100), nullable=False)
