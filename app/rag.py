@@ -415,10 +415,23 @@ def answer_question(
     completion = llm.chat.completions.create(
         model=settings.openrouter_model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1000,
+        max_tokens=1500,
+        # Los modelos de razonamiento gastan el presupuesto de tokens "pensando"
+        # y dejan `content` vacío; para RAG queremos la respuesta directa.
+        extra_body={"reasoning": {"enabled": False}},
     )
-    answer = completion.choices[0].message.content
-    vk.cache_rag(question, role, dept_id, answer)
+
+    msg = completion.choices[0].message
+    answer = (msg.content or "").strip()
+    if not answer:
+        # Respaldo: algunos modelos de razonamiento devuelven el texto en `reasoning`.
+        extra = getattr(msg, "model_extra", None) or {}
+        answer = (extra.get("reasoning") or "").strip()
+
+    if answer:
+        vk.cache_rag(question, role, dept_id, answer)
+    else:
+        answer = "No pude generar una respuesta con los documentos disponibles. Intenta reformular la pregunta."
 
     return {
         "answer": answer,

@@ -26,11 +26,12 @@ class Settings(BaseSettings):
     # Audit / search log retention
     audit_retention_days: int = 60
 
-    # Wasabi S3-compatible
+    # Wasabi S3-compatible — solo las credenciales son secretas (van en .env).
+    # Los nombres de bucket, región y endpoint son estables y viven aquí.
     wasabi_access_key: str
     wasabi_secret_key: str
-    wasabi_bucket_name: str
-    wasabi_avatar_bucket_name: str
+    wasabi_bucket_name: str = "knowledgehoss"
+    wasabi_avatar_bucket_name: str = "hossavatars"
     wasabi_evidence_bucket_name: str = "hossevidences"
     wasabi_chats_bucket_name: str = "hosschats"
     wasabi_region: str = "us-east-1"
@@ -47,7 +48,7 @@ class Settings(BaseSettings):
 
     # OpenRouter (LLM for Q&A)
     openrouter_api_key: str
-    openrouter_model: str = "deepseek/deepseek-v4-flash-0731"
+    openrouter_model: str = "qwen/qwen3.7-flash"
 
     # Voyage AI (embeddings + rerank)
     voyage_api_key: str
