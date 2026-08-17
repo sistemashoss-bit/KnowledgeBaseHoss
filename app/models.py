@@ -154,6 +154,8 @@ class Document(Base):
     file_key = Column(String(500), nullable=False)
     content_type = Column(String(100), nullable=True)
     file_size = Column(BigInteger, nullable=True)
+    # Rich-text source when the document was authored in-app (TipTap). Null for uploads.
+    content_html = Column(Text, nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
