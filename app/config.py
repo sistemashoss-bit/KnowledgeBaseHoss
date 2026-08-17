@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 480
     csrf_secret: str
 
+    # SSO con hoss-api (proveedor de identidad del staff).
+    # Si queda vacío, knowledge usa solo autenticación local.
+    hoss_api_url: str = ""
+
     # OpenRouter (LLM for Q&A)
     openrouter_api_key: str
     openrouter_model: str = "anthropic/claude-3.5-haiku"

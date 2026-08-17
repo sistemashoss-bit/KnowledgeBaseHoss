@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import require_role
-from app.auth.utils import generate_csrf_token, hash_password, verify_csrf_token
+from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserZone, Zone
 from app.permissions import can_manage_user
@@ -23,15 +23,14 @@ api_router = APIRouter(prefix="/api/users", tags=["users-api"])
 
 
 class UserCreate(BaseModel):
+    # Pre-aprovisionamiento: sin password (la credencial vive en hoss-api).
     email: EmailStr
-    password: str
     role: str = "employee"
     department_id: str | None = None
 
 
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
-    password: str | None = None
     role: str | None = None
     department_id: str | None = None
     is_active: bool | None = None
@@ -65,7 +64,6 @@ def create_user_api(
     u = User(
         id=uuid.uuid4(),
         email=data.email,
-        password_hash=hash_password(data.password),
         role=data.role,
         department_id=data.department_id,
     )
@@ -95,8 +93,6 @@ def update_user_api(
         raise HTTPException(404)
     if data.email is not None:
         u.email = data.email
-    if data.password is not None:
-        u.password_hash = hash_password(data.password)
     if data.role is not None:
         if data.role not in ROLES:
             raise HTTPException(400, f"role must be one of {ROLES}")
@@ -167,7 +163,6 @@ def user_management(
 @mgmt_router.post("/create")
 def create_user_html(
     email: str = Form(...),
-    password: str = Form(...),
     role: str = Form(...),
     name: str = Form(default=""),
     department_id: str = Form(default=""),
@@ -187,16 +182,15 @@ def create_user_html(
     elif role not in ROLES:
         raise HTTPException(400, "Invalid role")
 
-    if len(password) < 8:
-        raise HTTPException(400, "Password must be at least 8 characters")
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(400, "Email already registered")
 
+    # Pre-aprovisionamiento: se crea sin credencial. Al entrar por hoss (SSO) se
+    # enlaza por email y conserva este rol/depto. corporate_id queda null hasta entonces.
     new_user = User(
         id=uuid.uuid4(),
         email=email,
         name=name.strip() or None,
-        password_hash=hash_password(password),
         role=role,
         department_id=department_id or None,
         branch_id=branch_id or None,
@@ -225,45 +219,6 @@ def toggle_user(
     if not target or not can_manage_user(actor, target):
         raise HTTPException(403, "Access denied")
     target.is_active = not target.is_active
-    db.commit()
-    return RedirectResponse("/users/", status_code=302)
-
-
-@mgmt_router.post("/{user_id}/reset-password")
-def reset_password(
-    user_id: str,
-    new_password: str = Form(...),
-    csrf_token: str = Form(...),
-    db: Session = Depends(get_db),
-    actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
-):
-    if not verify_csrf_token(csrf_token, str(actor.id)):
-        raise HTTPException(403, "Invalid CSRF token")
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target or not can_manage_user(actor, target):
-        raise HTTPException(403, "Access denied")
-    if len(new_password) < 8:
-        raise HTTPException(400, "Password must be at least 8 characters")
-    target.password_hash = hash_password(new_password)
-    db.commit()
-    return RedirectResponse("/users/", status_code=302)
-
-
-@mgmt_router.post("/{user_id}/toggle-otp")
-def toggle_otp(
-    user_id: str,
-    csrf_token: str = Form(...),
-    db: Session = Depends(get_db),
-    actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
-):
-    if not verify_csrf_token(csrf_token, str(actor.id)):
-        raise HTTPException(403, "Invalid CSRF token")
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target or not can_manage_user(actor, target):
-        raise HTTPException(403, "Access denied")
-    # Toggling OTP means resetting it — user must re-setup from their profile
-    target.totp_enabled = False
-    target.totp_secret = None
     db.commit()
     return RedirectResponse("/users/", status_code=302)
 

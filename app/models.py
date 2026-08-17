@@ -114,14 +114,14 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Identidad global del staff en hoss-api (SSO). Null hasta el primer login.
+    corporate_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(150), nullable=True)
-    password_hash = Column(String(255), nullable=False)
+    # Credenciales y MFA viven en hoss-api (full SSO): knowledge no las almacena.
     role = Column(String(20), nullable=False, default=ROLE_EMPLOYEE)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
-    totp_secret = Column(String(255), nullable=True)
-    totp_enabled = Column(Boolean, default=False)
     avatar_key = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
