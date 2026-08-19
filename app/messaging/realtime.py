@@ -6,6 +6,7 @@ Redis is unavailable the SSE stream degrades to keepalives and the template's
 slow fallback poll keeps things working.
 """
 import asyncio
+import json
 import logging
 
 from app.config import settings
@@ -39,8 +40,27 @@ def channel(conv_id) -> str:
     return f"chat:conv:{conv_id}"
 
 
-async def event_stream(conv_id: str, request):
-    """Yield SSE frames for a conversation until the client disconnects."""
+def user_channel(user_id) -> str:
+    """Per-user signalling channel (call rings, etc.), independent of any conversation."""
+    return f"user:{user_id}:signals"
+
+
+def notify_user(user_id) -> None:
+    """Push a lightweight 'refresh your notifications' signal to a user.
+
+    The client re-fetches /api/notifications on receipt. No-op (falls back to the
+    client's slow poll) when Valkey is unavailable.
+    """
+    from app import valkey_client as vk
+    vk.publish(user_channel(user_id), json.dumps({"type": "notify"}))
+
+
+async def _channel_stream(chan: str, request, event_name: str):
+    """Yield SSE frames from a Pub/Sub channel until the client disconnects.
+
+    Each published payload is forwarded as `event: <event_name>` with the raw
+    payload as data. Degrades to keepalives when Redis is unavailable.
+    """
     yield ": connected\n\n"
 
     r = await _aget()
@@ -52,19 +72,32 @@ async def event_stream(conv_id: str, request):
         return
 
     pubsub = r.pubsub()
-    await pubsub.subscribe(channel(conv_id))
+    await pubsub.subscribe(chan)
     try:
         while not await request.is_disconnected():
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=_KEEPALIVE)
             if msg is None:
                 yield ": keepalive\n\n"
                 continue
-            yield f"event: message\ndata: {msg.get('data', 'new')}\n\n"
+            data = msg.get("data", "new")
+            yield f"event: {event_name}\ndata: {data}\n\n"
     except asyncio.CancelledError:
         raise
     finally:
         try:
-            await pubsub.unsubscribe(channel(conv_id))
+            await pubsub.unsubscribe(chan)
             await pubsub.aclose()
         except Exception:
             pass
+
+
+async def event_stream(conv_id: str, request):
+    """Yield SSE frames for a conversation until the client disconnects."""
+    async for frame in _channel_stream(channel(conv_id), request, "message"):
+        yield frame
+
+
+async def user_event_stream(user_id: str, request):
+    """Yield SSE frames on the user's personal channel (call rings, etc.)."""
+    async for frame in _channel_stream(user_channel(user_id), request, "signal"):
+        yield frame

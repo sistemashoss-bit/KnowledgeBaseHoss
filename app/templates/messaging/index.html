@@ -164,7 +164,7 @@
           </p>
         </div>
         <!-- Audio call -->
-        <button onclick="startCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, false)"
+        <button onclick="initiateCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, false)"
                 title="Llamada de voz"
                 class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-300 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -173,7 +173,7 @@
           </svg>
         </button>
         <!-- Video call -->
-        <button onclick="startCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, true)"
+        <button onclick="initiateCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, true)"
                 title="Videollamada"
                 class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -661,6 +661,8 @@ function convFilter() {
 <script>
 (function () {
   let _room = null;
+  let _ringing = false;      // true while we called and nobody has joined yet
+  let _ringConvId = null;    // conversation we rang, for the cancel signal
   const _audioEls = [];
   const _trackEls = new Map(); // trackSid/trackId -> video element
 
@@ -758,6 +760,21 @@ function convFilter() {
     btn.title = on ? 'Apagar cámara' : 'Activar cámara';
   }
 
+  // Called by the caller from the header buttons: rings the other participants,
+  // then opens the call. The auto-join path (from "Unirse") calls startCall
+  // directly so it does NOT ring again.
+  window.initiateCall = async function (convId, convName, withVideo) {
+    if (_room) return;
+    _ringConvId = convId;
+    _ringing = true;
+    try {
+      const fd = new FormData();
+      fd.append('video', withVideo ? 'true' : 'false');
+      fetch('/messaging/' + convId + '/call/ring', { method: 'POST', body: fd }).catch(function () {});
+    } catch (e) {}
+    await window.startCall(convId, convName, withVideo);
+  };
+
   window.startCall = async function (convId, convName, withVideo) {
     if (_room) return;
 
@@ -786,7 +803,7 @@ function convFilter() {
 
     _room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
 
-    _room.on(LivekitClient.RoomEvent.ParticipantConnected,    function (p) { _addTile(p); });
+    _room.on(LivekitClient.RoomEvent.ParticipantConnected,    function (p) { _ringing = false; _addTile(p); });
     _room.on(LivekitClient.RoomEvent.ParticipantDisconnected, function (p) { _removeTile(p.identity); });
     _room.on(LivekitClient.RoomEvent.TrackSubscribed,   function (track, _pub, p) { _attachTrack(track, p); });
     _room.on(LivekitClient.RoomEvent.TrackUnsubscribed, function (track) { _detachTrack(track); });
@@ -852,6 +869,14 @@ function convFilter() {
   };
 
   window.lkEndCall = function () {
+    // If we hung up before anyone joined, retract the ring on the other side.
+    if (_ringing && _ringConvId) {
+      try {
+        fetch('/messaging/' + _ringConvId + '/call/cancel', { method: 'POST' }).catch(function () {});
+      } catch (e) {}
+    }
+    _ringing = false;
+    _ringConvId = null;
     if (_room) { _room.disconnect(); _room = null; }
     _audioEls.forEach(function (el) { if (el.parentNode) el.remove(); });
     _audioEls.length = 0;
@@ -859,6 +884,17 @@ function convFilter() {
     document.getElementById('lk-modal').classList.add('hidden');
     document.getElementById('lk-grid').innerHTML = '';
   };
+
+  // Auto-join when arriving from an "Unirse" ring: /messaging/{id}?call=video|audio
+  {% if active_conv %}
+  (function () {
+    var mode = new URLSearchParams(window.location.search).get('call');
+    if (mode === 'video' || mode === 'audio') {
+      try { history.replaceState({}, '', window.location.pathname); } catch (e) {}
+      window.startCall('{{ active_conv.id }}', {{ active_conv_name | tojson }}, mode === 'video');
+    }
+  })();
+  {% endif %}
 })();
 </script>
 

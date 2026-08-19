@@ -12,6 +12,7 @@ from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app import audit, storage
+from app.messaging import realtime
 from app.models import (
     Branch, Department, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
@@ -207,6 +208,8 @@ async def create_task(
         ))
 
     db.commit()
+    if task.assigned_to and str(task.assigned_to) != str(current_user.id):
+        realtime.notify_user(task.assigned_to)
     audit.log_action(
         "task_create", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
@@ -409,6 +412,10 @@ def update_status(
     prev = task.status
     task.status = status
     db.commit()
+    # Notify the other party (assignee/creator) that the status changed.
+    for uid in {task.assigned_to, task.created_by}:
+        if uid and str(uid) != str(current_user.id):
+            realtime.notify_user(uid)
     audit.log_action(
         "task_status_change", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
@@ -439,6 +446,8 @@ def assign_task(
     task.assigned_to = assigned_to if assigned_to else None
     task.department_id = department_id if department_id else task.department_id
     db.commit()
+    if task.assigned_to and str(task.assigned_to) != str(current_user.id):
+        realtime.notify_user(task.assigned_to)
     assignee = db.query(User).filter(User.id == assigned_to).first() if assigned_to else None
     audit.log_action(
         "task_assign", user=current_user, request=request,

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import uuid
@@ -264,6 +265,31 @@ def messaging_index(
     )
 
 
+@router.get("/signals")
+async def user_signals(request: Request):
+    """Per-user SSE stream for call rings and other push signals.
+
+    Registered before GET /{conv_id} so it isn't captured by that catch-all.
+    Authenticated from the cookie directly (like conversation_events) so no DB
+    connection is held for the lifetime of the stream.
+    """
+    token = request.cookies.get("access_token")
+    user_id = None
+    if token:
+        try:
+            user_id = decode_token(token).get("sub")
+        except JWTError:
+            user_id = None
+    if not user_id:
+        raise HTTPException(401)
+
+    return StreamingResponse(
+        realtime.user_event_stream(user_id, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/{conv_id}", response_class=HTMLResponse)
 def conversation_view(
     conv_id: str,
@@ -451,6 +477,82 @@ def call_token(
     })
 
 
+# ── Call signalling (ring / cancel) ───────────────────────────────────────────
+
+def _other_participant_ids(conv_id: str, exclude_user_id, db: Session) -> list:
+    rows = (
+        db.query(ConversationParticipant.user_id)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id != exclude_user_id,
+        )
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+@router.post("/{conv_id}/call/ring")
+def call_ring(
+    conv_id: str,
+    video: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Notify the other participants that the caller started a call."""
+    if not current_user:
+        raise HTTPException(401)
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not is_participant:
+        raise HTTPException(403)
+
+    payload = json.dumps({
+        "type": "call",
+        "conv_id": str(conv_id),
+        "room": f"conv-{conv_id}",
+        "caller_id": str(current_user.id),
+        "caller_name": current_user.name or current_user.email,
+        "video": bool(video),
+        "call_id": str(uuid.uuid4()),
+        "ts": datetime.utcnow().isoformat(),
+    })
+    for uid in _other_participant_ids(conv_id, current_user.id, db):
+        vk.publish(realtime.user_channel(uid), payload)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/{conv_id}/call/cancel")
+def call_cancel(
+    conv_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Retract the ring on the callee side when the caller hangs up unanswered."""
+    if not current_user:
+        raise HTTPException(401)
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not is_participant:
+        raise HTTPException(403)
+
+    payload = json.dumps({"type": "call_cancel", "conv_id": str(conv_id)})
+    for uid in _other_participant_ids(conv_id, current_user.id, db):
+        vk.publish(realtime.user_channel(uid), payload)
+    return JSONResponse({"ok": True})
+
+
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
 async def send_message(
     conv_id: str,
@@ -510,6 +612,9 @@ async def send_message(
 
     # Real-time fan-out to every open client in this conversation.
     vk.publish(realtime.channel(conv_id))
+    # Poke each recipient's notification bell (SSE refresh trigger).
+    for uid in _other_participant_ids(conv_id, current_user.id, db):
+        realtime.notify_user(uid)
 
     if valid_files:
         audit.log_action(
