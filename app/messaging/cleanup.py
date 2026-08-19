@@ -107,17 +107,33 @@ def _seconds_until(hour: int) -> float:
     return (nxt - now).total_seconds()
 
 
+def run_recurring_generation() -> int | None:
+    """Materialize recurring task templates due today, honouring a daily lock.
+
+    Returns the number of tasks created, or None if another instance claimed
+    today's run.
+    """
+    from app.tasks.recurring import generate_due_tasks
+
+    if vk.available() and not vk.try_acquire_daily_lock("recurring_task_gen"):
+        return None
+    return generate_due_tasks()
+
+
 async def scheduler_loop() -> None:
-    """Fire run_cleanup once a day at settings.cleanup_hour_utc. Never raises out."""
+    """Fire the daily jobs once a day at settings.cleanup_hour_utc. Never raises out."""
     while True:
         try:
             await asyncio.sleep(_seconds_until(settings.cleanup_hour_utc))
             result = await asyncio.to_thread(run_cleanup)
             if result is not None:
                 logger.info("daily cleanup: %s", result)
+            generated = await asyncio.to_thread(run_recurring_generation)
+            if generated is not None:
+                logger.info("recurring tasks generated: %s", generated)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("chat cleanup failed")
+            logger.exception("daily scheduler job failed")
             # Avoid a hot loop if the clock math / DB keeps failing.
             await asyncio.sleep(3600)

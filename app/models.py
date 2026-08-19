@@ -38,6 +38,12 @@ PRIORITY_HIGH = "high"
 PRIORITY_URGENT = "urgent"
 TASK_PRIORITIES = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_URGENT]
 
+# ── Recurring task constants ──────────────────────────────────────────────────
+FREQ_DAILY = "daily"
+FREQ_WEEKLY = "weekly"
+FREQ_MONTHLY = "monthly"
+RECURRENCE_FREQUENCIES = [FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY]
+
 # ── Conversation type constants ───────────────────────────────────────────────
 CONV_DIRECT = "direct"
 CONV_GROUP = "group"
@@ -108,6 +114,7 @@ class Department(Base):
     documents = relationship("Document", back_populates="department")
     projects = relationship("Project", back_populates="department")
     tasks = relationship("Task", back_populates="department")
+    recurring_tasks = relationship("RecurringTask", back_populates="department")
     conversations = relationship("Conversation", back_populates="department")
 
 
@@ -138,6 +145,9 @@ class User(Base):
     assigned_tasks = relationship("Task", back_populates="assignee", foreign_keys="Task.assigned_to")
     created_tasks = relationship("Task", back_populates="created_by_user", foreign_keys="Task.created_by")
     task_comments = relationship("TaskComment", back_populates="user")
+    created_recurring_tasks = relationship(
+        "RecurringTask", back_populates="created_by_user", foreign_keys="RecurringTask.created_by"
+    )
 
     # Communication
     participations = relationship("ConversationParticipant", back_populates="user")
@@ -245,6 +255,40 @@ class Task(Base):
     created_by_user = relationship("User", back_populates="created_tasks", foreign_keys=[created_by])
     comments = relationship("TaskComment", back_populates="task", order_by="TaskComment.created_at")
     evidences = relationship("TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at")
+
+
+class RecurringTask(Base):
+    """Plantilla que un encargado predefine; el scheduler diario la materializa
+    como una `Task` real en la fecha que corresponde a su frecuencia."""
+    __tablename__ = "recurring_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    priority = Column(String(10), nullable=False, default=PRIORITY_MEDIUM)
+
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
+    # Asignado fijo; null → la Task generada queda sin asignar (tarea del área).
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    frequency = Column(String(10), nullable=False, default=FREQ_DAILY)
+    day_of_week = Column(Integer, nullable=True)   # 0=Lun..6=Dom, sólo weekly
+    day_of_month = Column(Integer, nullable=True)  # 1..31, sólo monthly
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    last_generated_on = Column(Date, nullable=True)  # guard anti-duplicado por día
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    department = relationship("Department", back_populates="recurring_tasks")
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    project = relationship("Project", foreign_keys=[project_id])
+    created_by_user = relationship("User", back_populates="created_recurring_tasks", foreign_keys=[created_by])
 
 
 class TaskComment(Base):

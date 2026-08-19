@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Tareas recurrentes — HOSS Conocimiento{% endblock %}
+
+{% set weekdays = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'] %}
+
+{% macro priority_dot(p) %}
+  {% if p == "urgent" %}<span class="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Urgente"></span>
+  {% elif p == "high" %}<span class="w-2 h-2 rounded-full bg-orange-400 shrink-0" title="Alta"></span>
+  {% elif p == "medium" %}<span class="w-2 h-2 rounded-full bg-yellow-400 shrink-0" title="Media"></span>
+  {% else %}<span class="w-2 h-2 rounded-full bg-gray-300 shrink-0" title="Baja"></span>
+  {% endif %}
+{% endmacro %}
+
+{% macro freq_label(rt) %}
+  {% if rt.frequency == "daily" %}Diario
+  {% elif rt.frequency == "weekly" %}Semanal · {{ weekdays[rt.day_of_week] if rt.day_of_week is not none else '—' }}
+  {% elif rt.frequency == "monthly" %}Mensual · día {{ rt.day_of_month or '—' }}
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+  <div class="max-w-5xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-1">
+      <div>
+        <a href="/tasks/" class="text-xs text-gray-400 hover:text-gray-600 inline-flex items-center gap-1 mb-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          Volver a tareas
+        </a>
+        <h1 class="text-2xl font-bold text-gray-900">Tareas recurrentes</h1>
+        <p class="text-sm text-gray-500 mt-0.5">Plantillas que se generan automáticamente ({{ items | length }})</p>
+      </div>
+      <button onclick="openRecurring()"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Nueva plantilla
+      </button>
+    </div>
+
+    <!-- List -->
+    <div class="mt-6 space-y-3">
+      {% for rt in items %}
+      <div class="bg-white rounded-lg border border-gray-200 p-4 shadow-sm flex items-start gap-4">
+        <span class="mt-1.5">{{ priority_dot(rt.priority) }}</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="text-sm font-medium text-gray-900 truncate">{{ rt.title }}</p>
+            {% if rt.is_active %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-700">Activa</span>
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500">Pausada</span>
+            {% endif %}
+          </div>
+          <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
+            <span class="inline-flex items-center gap-1 text-gray-500 font-medium">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>{{ freq_label(rt) }}
+            </span>
+            {% if rt.assignee %}<span>· {{ rt.assignee.name or rt.assignee.email }}</span>{% else %}<span class="text-amber-500">· Sin asignar (área)</span>{% endif %}
+            {% if rt.department %}<span>· {{ rt.department.name }}</span>{% endif %}
+            {% if rt.last_generated_on %}<span>· últ. generada {{ rt.last_generated_on.strftime('%d/%m/%Y') }}</span>{% endif %}
+          </div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button type="button"
+                  onclick='openRecurring({{ {
+                    "id": rt.id|string, "title": rt.title, "description": rt.description or "",
+                    "priority": rt.priority, "department_id": rt.department_id|string if rt.department_id else "",
+                    "assigned_to": rt.assigned_to|string if rt.assigned_to else "",
+                    "project_id": rt.project_id|string if rt.project_id else "",
+                    "frequency": rt.frequency, "day_of_week": rt.day_of_week if rt.day_of_week is not none else "",
+                    "day_of_month": rt.day_of_month or "",
+                    "start_date": rt.start_date.isoformat() if rt.start_date else "",
+                    "end_date": rt.end_date.isoformat() if rt.end_date else ""
+                  } | tojson }})'
+                  class="p-1.5 text-gray-400 hover:text-gray-700 rounded" title="Editar">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+          </button>
+          <button type="button"
+                  hx-post="/tasks/recurring/{{ rt.id }}/toggle"
+                  hx-vals='{"csrf_token": "{{ csrf_token }}"}'
+                  class="p-1.5 text-gray-400 hover:text-gray-700 rounded" title="{{ 'Pausar' if rt.is_active else 'Activar' }}">
+            {% if rt.is_active %}
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            {% else %}
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            {% endif %}
+          </button>
+          <button type="button"
+                  hx-post="/tasks/recurring/{{ rt.id }}/delete"
+                  hx-vals='{"csrf_token": "{{ csrf_token }}"}'
+                  hx-confirm="¿Eliminar esta plantilla recurrente? Las tareas ya generadas no se borran."
+                  class="p-1.5 text-gray-400 hover:text-red-600 rounded" title="Eliminar">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center text-sm text-gray-400 py-16 bg-white rounded-lg border border-dashed border-gray-200">
+        Aún no hay plantillas recurrentes. Crea la primera con “Nueva plantilla”.
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal: Crear / Editar plantilla -->
+<div id="modal-recurring" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h2 id="rt-modal-title" class="text-lg font-semibold text-gray-900">Nueva plantilla</h2>
+      <button onclick="document.getElementById('modal-recurring').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <form id="rt-form" method="post" action="/tasks/recurring/" class="space-y-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
+        <input type="text" name="title" id="rt-title" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+        <textarea name="description" id="rt-description" rows="2"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Frecuencia</label>
+          <select name="frequency" id="rt-frequency"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+            <option value="daily">Diario</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensual</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
+          <select name="priority" id="rt-priority"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+            <option value="low">Baja</option>
+            <option value="medium" selected>Media</option>
+            <option value="high">Alta</option>
+            <option value="urgent">Urgente</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="rt-weekly-wrap" class="hidden">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Día de la semana</label>
+        <select name="day_of_week" id="rt-day-of-week"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          {% for d in weekdays %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div id="rt-monthly-wrap" class="hidden">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Día del mes <span class="text-xs text-gray-400">(1–31; se ajusta al último día en meses cortos)</span></label>
+        <input type="number" name="day_of_month" id="rt-day-of-month" min="1" max="31"
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Departamento</label>
+        <select name="department_id" id="rt-department"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          {% if is_superadmin %}<option value="">— Sin departamento —</option>{% else %}<option value="">— Elegir —</option>{% endif %}
+          {% for dept in departments %}<option value="{{ dept.id }}">{{ dept.name }}</option>{% endfor %}
+        </select>
+        {% if not is_superadmin %}<p class="text-[11px] text-gray-400 mt-1">Elige un departamento o una persona dentro de tu alcance.</p>{% endif %}
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a persona <span class="text-xs text-gray-400">(vacío = tarea del área)</span></label>
+        <select name="assigned_to" id="rt-assigned-to"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          <option value="">— Sin asignar —</option>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email }}</option>{% endfor %}
+        </select>
+      </div>
+
+      {% if projects %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Proyecto (opcional)</label>
+        <select name="project_id" id="rt-project"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          <option value="">— Ninguno —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inicio <span class="text-xs text-gray-400">(opcional)</span></label>
+          <input type="date" name="start_date" id="rt-start-date"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Fin <span class="text-xs text-gray-400">(opcional)</span></label>
+          <input type="date" name="end_date" id="rt-end-date"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+        </div>
+      </div>
+
+      <div class="flex gap-3 justify-end pt-2">
+        <button type="button" onclick="document.getElementById('modal-recurring').classList.add('hidden')"
+                class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
+        <button type="submit"
+                class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+          Guardar
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var modal = document.getElementById('modal-recurring');
+  var form = document.getElementById('rt-form');
+  var freq = document.getElementById('rt-frequency');
+
+  function syncFreqFields() {
+    document.getElementById('rt-weekly-wrap').classList.toggle('hidden', freq.value !== 'weekly');
+    document.getElementById('rt-monthly-wrap').classList.toggle('hidden', freq.value !== 'monthly');
+  }
+  freq.addEventListener('change', syncFreqFields);
+
+  window.openRecurring = function (data) {
+    data = data || null;
+    if (data) {
+      form.setAttribute('action', '/tasks/recurring/' + data.id + '/edit');
+      document.getElementById('rt-modal-title').textContent = 'Editar plantilla';
+    } else {
+      form.setAttribute('action', '/tasks/recurring/');
+      document.getElementById('rt-modal-title').textContent = 'Nueva plantilla';
+    }
+    var map = {
+      'rt-title': 'title', 'rt-description': 'description', 'rt-priority': 'priority',
+      'rt-frequency': 'frequency', 'rt-day-of-week': 'day_of_week', 'rt-day-of-month': 'day_of_month',
+      'rt-department': 'department_id', 'rt-assigned-to': 'assigned_to', 'rt-project': 'project_id',
+      'rt-start-date': 'start_date', 'rt-end-date': 'end_date'
+    };
+    Object.keys(map).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var v = data ? data[map[id]] : '';
+      el.value = (v === null || v === undefined) ? '' : v;
+    });
+    if (!data) { document.getElementById('rt-priority').value = 'medium'; freq.value = 'daily'; }
+    syncFreqFields();
+    modal.classList.remove('hidden');
+  };
+})();
+</script>
+{% endblock %}

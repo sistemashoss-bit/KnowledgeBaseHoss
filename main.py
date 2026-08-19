@@ -19,6 +19,15 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     search_module.ensure_indices()
 
+    # Catch-up: si el server reinició pasada la hora del scheduler, genera hoy.
+    # Idempotente gracias a RecurringTask.last_generated_on.
+    try:
+        from app.tasks.recurring import generate_due_tasks
+        await asyncio.to_thread(generate_due_tasks)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("startup recurring generation failed")
+
     cleanup_task = asyncio.create_task(scheduler_loop())
     try:
         yield
@@ -42,7 +51,7 @@ from app.users.router import api_router as users_api_router, mgmt_router as user
 from app.chat.router import router as chat_router
 from app.logs.router import router as logs_router
 from app.zones.router import router as zones_router
-from app.tasks.router import router as tasks_router
+from app.tasks.router import router as tasks_router, recurring_router
 from app.projects.router import router as projects_router
 from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
@@ -61,6 +70,7 @@ app.include_router(users_mgmt_router)
 app.include_router(chat_router)
 app.include_router(logs_router)
 app.include_router(zones_router)
+app.include_router(recurring_router)  # antes de tasks_router: evita el catch-all /tasks/{task_id}
 app.include_router(tasks_router)
 app.include_router(projects_router)
 app.include_router(messaging_router)

@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import or_
+from sqlalchemy import false, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
@@ -13,9 +13,10 @@ from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app import audit, storage
 from app.models import (
-    Department, Project, Task, TaskComment, TaskEvidence, User,
+    Branch, Department, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     TASK_STATUSES, TASK_PRIORITIES,
+    RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY,
 )
 from app.templating import templates
 
@@ -496,3 +497,362 @@ def add_comment(
         "tasks/_comment.html",
         {"comment": comment, "current_user": current_user},
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Recurring task templates (predefinidas por el encargado de cada área)
+# ══════════════════════════════════════════════════════════════════════════════
+
+recurring_router = APIRouter(prefix="/tasks/recurring", tags=["recurring-tasks"])
+
+
+def _is_manager(user: User) -> bool:
+    return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+
+
+def _manager_scope(user: User, db: Session) -> dict | None:
+    """Alcance de gestión de un encargado.
+
+    - superadmin → None (sin restricción, todo).
+    - admin CON zona(s) (gerente regional) → sólo las sucursales de sus zonas
+      (`branch_ids`); no todo el departamento.
+    - admin SIN zona (jefe de departamento) → todo su departamento (`dept_ids`).
+
+    Devuelve un dict con `dept_ids` y `branch_ids` (uno de los dos vacío según el
+    caso), o None para superadmin.
+    """
+    if user.role == ROLE_SUPERADMIN:
+        return None
+
+    zone_ids = [uz.zone_id for uz in user.user_zones]
+    if zone_ids:
+        branch_ids = {
+            row[0] for row in db.query(Branch.id).filter(Branch.zone_id.in_(zone_ids)).all()
+        }
+        return {"dept_ids": set(), "branch_ids": branch_ids}
+
+    return {"dept_ids": {user.department_id} if user.department_id else set(), "branch_ids": set()}
+
+
+def _branch_user_ids(branch_ids: set, db: Session) -> set:
+    """IDs de usuarios que pertenecen a las sucursales dadas."""
+    if not branch_ids:
+        return set()
+    return {row[0] for row in db.query(User.id).filter(User.branch_id.in_(branch_ids)).all()}
+
+
+def _assignable_department_ids(user: User, db: Session) -> set | None:
+    """Departamentos que el encargado puede fijar en una plantilla.
+
+    None = sin restricción (superadmin). Para gerentes de zona son los
+    departamentos representados en sus sucursales (incluye departamentos-paraguas
+    con branch_id nulo, derivados de los usuarios de esas sucursales)."""
+    scope = _manager_scope(user, db)
+    if scope is None:
+        return None
+    dept_ids = set(scope["dept_ids"])
+    if scope["branch_ids"]:
+        dept_ids |= {
+            row[0] for row in db.query(Department.id)
+            .filter(Department.branch_id.in_(scope["branch_ids"])).all()
+        }
+        dept_ids |= {
+            row[0] for row in db.query(User.department_id)
+            .filter(User.branch_id.in_(scope["branch_ids"]), User.department_id.isnot(None))
+            .distinct().all()
+        }
+    return dept_ids
+
+
+def _recurring_query(user: User, db: Session):
+    q = db.query(RecurringTask).options(
+        joinedload(RecurringTask.assignee),
+        joinedload(RecurringTask.department),
+        joinedload(RecurringTask.project),
+        joinedload(RecurringTask.created_by_user),
+    )
+    scope = _manager_scope(user, db)
+    if scope is None:
+        return q  # superadmin ve todo
+    conditions = [RecurringTask.created_by == user.id]
+    if scope["dept_ids"]:
+        conditions.append(RecurringTask.department_id.in_(scope["dept_ids"]))
+    branch_user_ids = _branch_user_ids(scope["branch_ids"], db)
+    if branch_user_ids:
+        conditions.append(RecurringTask.assigned_to.in_(branch_user_ids))
+    return q.filter(or_(*conditions))
+
+
+def _can_manage_recurring(user: User, rt: RecurringTask, db: Session) -> bool:
+    if user.role == ROLE_SUPERADMIN:
+        return True
+    if str(rt.created_by) == str(user.id):
+        return True
+    scope = _manager_scope(user, db)
+    if scope is None:
+        return True
+    if scope["dept_ids"] and rt.department_id and rt.department_id in scope["dept_ids"]:
+        return True
+    if rt.assigned_to and rt.assigned_to in _branch_user_ids(scope["branch_ids"], db):
+        return True
+    return False
+
+
+def _assignable_users_query(user: User, db: Session):
+    """Usuarios activos que el encargado puede asignar, según su alcance."""
+    q = db.query(User).filter(User.is_active == True)
+    scope = _manager_scope(user, db)
+    if scope is None:
+        return q.order_by(User.email)
+    conds = []
+    if scope["dept_ids"]:
+        conds.append(User.department_id.in_(scope["dept_ids"]))
+    if scope["branch_ids"]:
+        conds.append(User.branch_id.in_(scope["branch_ids"]))
+    if not conds:
+        return q.filter(false())
+    return q.filter(or_(*conds)).order_by(User.email)
+
+
+def _validate_target_scope(user: User, db: Session, department_id: str, assigned_to: str) -> None:
+    """Rechaza departamento/asignado fuera del alcance del encargado.
+
+    superadmin no tiene restricción. Para el resto, la plantilla debe apuntar a
+    algo dentro de su alcance (su departamento o las sucursales de su zona)."""
+    if user.role == ROLE_SUPERADMIN:
+        return
+    if not department_id and not assigned_to:
+        raise HTTPException(400, "Elige un departamento o una persona dentro de tu alcance")
+    allowed_depts = {str(d) for d in (_assignable_department_ids(user, db) or set())}
+    if department_id and department_id not in allowed_depts:
+        raise HTTPException(403, "Departamento fuera de tu alcance")
+    if assigned_to:
+        allowed_users = {str(u.id) for u in _assignable_users_query(user, db).all()}
+        if assigned_to not in allowed_users:
+            raise HTTPException(403, "Usuario fuera de tu alcance")
+
+
+def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str):
+    """Normaliza y valida la frecuencia. Devuelve (frequency, dow, dom)."""
+    if frequency not in RECURRENCE_FREQUENCIES:
+        raise HTTPException(400, "Frecuencia inválida")
+    dow = dom = None
+    if frequency == FREQ_WEEKLY:
+        try:
+            dow = int(day_of_week)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Día de la semana inválido")
+        if not 0 <= dow <= 6:
+            raise HTTPException(400, "Día de la semana fuera de rango")
+    elif frequency == FREQ_MONTHLY:
+        try:
+            dom = int(day_of_month)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Día del mes inválido")
+        if not 1 <= dom <= 31:
+            raise HTTPException(400, "Día del mes fuera de rango")
+    return frequency, dow, dom
+
+
+@recurring_router.get("/", response_class=HTMLResponse)
+def list_recurring(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    if not _is_manager(current_user):
+        raise HTTPException(403)
+
+    items = _recurring_query(current_user, db).order_by(RecurringTask.created_at.desc()).all()
+
+    # Alcance: superadmin todo; jefe de depto → su departamento; gerente de zona
+    # → las sucursales de sus zonas.
+    dept_ids = _assignable_department_ids(current_user, db)
+    dept_q = db.query(Department).order_by(Department.name)
+    proj_q = db.query(Project).order_by(Project.name)
+    if dept_ids is not None:
+        scoped = dept_ids or {None}  # evita IN () vacío
+        dept_q = dept_q.filter(Department.id.in_(scoped))
+        proj_q = proj_q.filter(Project.department_id.in_(scoped))
+
+    departments = dept_q.all()
+    users = _assignable_users_query(current_user, db).all()
+    projects = proj_q.all()
+
+    return templates.TemplateResponse(
+        request,
+        "tasks/recurring.html",
+        {
+            "current_user": current_user,
+            "items": items,
+            "departments": departments,
+            "users": users,
+            "projects": projects,
+            "priorities": TASK_PRIORITIES,
+            "frequencies": RECURRENCE_FREQUENCIES,
+            "is_superadmin": current_user.role == ROLE_SUPERADMIN,
+            "today": date.today().isoformat(),
+            "csrf_token": generate_csrf_token(str(current_user.id)),
+        },
+    )
+
+
+@recurring_router.post("/")
+def create_recurring(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    priority: str = Form("medium"),
+    department_id: str = Form(""),
+    assigned_to: str = Form(""),
+    project_id: str = Form(""),
+    frequency: str = Form("daily"),
+    day_of_week: str = Form(""),
+    day_of_month: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not _is_manager(current_user):
+        raise HTTPException(403)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    _validate_target_scope(current_user, db, department_id, assigned_to)
+    freq, dow, dom = _parse_recurrence(frequency, day_of_week, day_of_month)
+
+    rt = RecurringTask(
+        id=uuid.uuid4(),
+        title=title.strip(),
+        description=description.strip() or None,
+        priority=priority if priority in TASK_PRIORITIES else "medium",
+        department_id=department_id if department_id else None,
+        assigned_to=assigned_to if assigned_to else None,
+        project_id=project_id if project_id else None,
+        created_by=current_user.id,
+        frequency=freq,
+        day_of_week=dow,
+        day_of_month=dom,
+        start_date=date.fromisoformat(start_date) if start_date else None,
+        end_date=date.fromisoformat(end_date) if end_date else None,
+    )
+    db.add(rt)
+    db.commit()
+    audit.log_action(
+        "recurring_create", user=current_user, request=request,
+        resource_type="recurring_task", resource_id=rt.id, resource_name=rt.title,
+        details=f"frequency={rt.frequency}",
+    )
+    return RedirectResponse("/tasks/recurring/", status_code=302)
+
+
+@recurring_router.post("/{rt_id}/edit")
+def edit_recurring(
+    rt_id: str,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    priority: str = Form("medium"),
+    department_id: str = Form(""),
+    assigned_to: str = Form(""),
+    project_id: str = Form(""),
+    frequency: str = Form("daily"),
+    day_of_week: str = Form(""),
+    day_of_month: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
+    if not rt:
+        raise HTTPException(404)
+    if not _can_manage_recurring(current_user, rt, db):
+        raise HTTPException(403)
+
+    _validate_target_scope(current_user, db, department_id, assigned_to)
+    freq, dow, dom = _parse_recurrence(frequency, day_of_week, day_of_month)
+
+    rt.title = title.strip()
+    rt.description = description.strip() or None
+    rt.priority = priority if priority in TASK_PRIORITIES else "medium"
+    rt.department_id = department_id if department_id else None
+    rt.assigned_to = assigned_to if assigned_to else None
+    rt.project_id = project_id if project_id else None
+    rt.frequency = freq
+    rt.day_of_week = dow
+    rt.day_of_month = dom
+    rt.start_date = date.fromisoformat(start_date) if start_date else None
+    rt.end_date = date.fromisoformat(end_date) if end_date else None
+    db.commit()
+    audit.log_action(
+        "recurring_update", user=current_user, request=request,
+        resource_type="recurring_task", resource_id=rt.id, resource_name=rt.title,
+    )
+    return RedirectResponse("/tasks/recurring/", status_code=302)
+
+
+@recurring_router.post("/{rt_id}/toggle", response_class=HTMLResponse)
+def toggle_recurring(
+    rt_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
+    if not rt:
+        raise HTTPException(404)
+    if not _can_manage_recurring(current_user, rt, db):
+        raise HTTPException(403)
+    rt.is_active = not rt.is_active
+    db.commit()
+    audit.log_action(
+        "recurring_toggle", user=current_user, request=request,
+        resource_type="recurring_task", resource_id=rt.id, resource_name=rt.title,
+        details=f"is_active={rt.is_active}",
+    )
+    return HTMLResponse(headers={"HX-Redirect": "/tasks/recurring/"})
+
+
+@recurring_router.post("/{rt_id}/delete", response_class=HTMLResponse)
+def delete_recurring(
+    rt_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
+    if not rt:
+        raise HTTPException(404)
+    if not _can_manage_recurring(current_user, rt, db):
+        raise HTTPException(403)
+    title = rt.title
+    db.delete(rt)
+    db.commit()
+    audit.log_action(
+        "recurring_delete", user=current_user, request=request,
+        resource_type="recurring_task", resource_id=rt_id, resource_name=title,
+    )
+    return HTMLResponse(headers={"HX-Redirect": "/tasks/recurring/"})
