@@ -99,10 +99,20 @@ def list_tasks(
         q = base.filter(Task.created_by == current_user.id)
         can_drag = False
     else:  # dept
-        if current_user.role == ROLE_SUPERADMIN and not current_user.department_id:
-            q = base  # superadmin without a department sees everything
+        # Mismo organigrama que las plantillas recurrentes:
+        # superadmin → todo; admin sin zona → su departamento; admin con zona →
+        # las tareas asignadas a personas de las sucursales de sus zonas.
+        scope = _manager_scope(current_user, db)
+        if scope is None:
+            q = base  # superadmin ve todos los departamentos
         else:
-            q = base.filter(Task.department_id == current_user.department_id)
+            conds = []
+            if scope["dept_ids"]:
+                conds.append(Task.department_id.in_(scope["dept_ids"]))
+            branch_user_ids = _branch_user_ids(scope["branch_ids"], db)
+            if branch_user_ids:
+                conds.append(Task.assigned_to.in_(branch_user_ids))
+            q = base.filter(or_(*conds)) if conds else base.filter(false())
         can_drag = False
 
     tasks = q.order_by(Task.created_at.desc()).all()
@@ -124,6 +134,7 @@ def list_tasks(
         {
             "current_user": current_user,
             "columns": columns,
+            "tasks": tasks,
             "total": len(tasks),
             "tab": tab,
             "is_admin": is_admin,

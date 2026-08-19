@@ -66,6 +66,7 @@ def generate_due_tasks(today: date | None = None) -> int:
                 description=rt.description,
                 status=TASK_PENDING,
                 priority=rt.priority,
+                is_recurring=True,
                 project_id=rt.project_id,
                 department_id=rt.department_id,
                 assigned_to=rt.assigned_to,

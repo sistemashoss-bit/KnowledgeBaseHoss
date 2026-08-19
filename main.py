@@ -85,6 +85,9 @@ def home(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    # Con sesión activa, el home redirige directo a documentos.
+    if user:
+        return RedirectResponse("/documents/", status_code=302)
     documents = rag.search_documents(q, build_access_filter(user)) if q else []
     return templates.TemplateResponse(
         request, "home.html",

@@ -239,6 +239,8 @@ class Task(Base):
     description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default=TASK_PENDING)
     priority = Column(String(10), nullable=False, default=PRIORITY_MEDIUM)
+    # True si nació de una plantilla recurrente; False si se asignó manualmente.
+    is_recurring = Column(Boolean, nullable=False, default=False)
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
