@@ -117,6 +117,33 @@
       {% endif %}
     </div>
 
+    {% if tab == 'dept' and (filter_departments or filter_users) %}
+    <form method="get" class="flex flex-wrap items-center gap-2 mb-5">
+      <input type="hidden" name="tab" value="dept" />
+      {% if filter_departments %}
+      <select name="dept_id" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+        <option value="">Todos los departamentos</option>
+        {% for d in filter_departments %}
+        <option value="{{ d.id }}" {% if filter_dept_id == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      {% if filter_users %}
+      <select name="user_id" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+        <option value="">Todas las personas</option>
+        {% for u in filter_users %}
+        <option value="{{ u.id }}" {% if filter_user_id == u.id|string %}selected{% endif %}>{{ u.name or u.email }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      {% if filter_dept_id or filter_user_id %}
+      <a href="/tasks/?tab=dept" class="px-3 py-2 text-sm text-gray-500 hover:text-gray-800">Limpiar</a>
+      {% endif %}
+    </form>
+    {% endif %}
+
     {% set pnames = {'urgent':'Urgente','high':'Alta','medium':'Media','low':'Baja'} %}
 
     <!-- Kanban view -->

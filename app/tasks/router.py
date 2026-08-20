@@ -73,6 +73,8 @@ def _can_update_status(user: User, task: Task) -> bool:
 def list_tasks(
     request: Request,
     tab: str = "",
+    dept_id: str = "",
+    user_id: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -93,6 +95,19 @@ def list_tasks(
         joinedload(Task.project),
     )
 
+    # Data for create form
+    departments = db.query(Department).order_by(Department.name).all()
+    users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
+    projects = db.query(Project).order_by(Project.name).all()
+
+    # Opciones y selección de los filtros del tab "Departamento":
+    # superadmin → filtro por departamento; admin → filtro por persona (dentro de
+    # su alcance de gestión). Vacíos en el resto de los tabs.
+    filter_departments = []
+    filter_users = []
+    filter_dept_id = ""
+    filter_user_id = ""
+
     if tab == "assigned":
         q = base.filter(Task.assigned_to == current_user.id)
         can_drag = True  # the assignee may move their own tasks between statuses
@@ -106,6 +121,11 @@ def list_tasks(
         scope = _manager_scope(current_user, db)
         if scope is None:
             q = base  # superadmin ve todos los departamentos
+            # Filtro por departamento (solo superadmin).
+            filter_departments = departments
+            if dept_id and any(str(d.id) == dept_id for d in filter_departments):
+                q = q.filter(Task.department_id == dept_id)
+                filter_dept_id = dept_id
         else:
             conds = []
             if scope["dept_ids"]:
@@ -114,6 +134,20 @@ def list_tasks(
             if branch_user_ids:
                 conds.append(Task.assigned_to.in_(branch_user_ids))
             q = base.filter(or_(*conds)) if conds else base.filter(false())
+
+            # Filtro por persona (admin de departamento / gerente de zona):
+            # las personas dentro de su alcance de gestión.
+            user_q = db.query(User).filter(User.is_active == True)
+            if scope["dept_ids"]:
+                user_q = user_q.filter(User.department_id.in_(scope["dept_ids"]))
+            elif scope["branch_ids"]:
+                user_q = user_q.filter(User.branch_id.in_(scope["branch_ids"]))
+            else:
+                user_q = user_q.filter(false())
+            filter_users = user_q.order_by(User.email).all()
+            if user_id and any(str(u.id) == user_id for u in filter_users):
+                q = q.filter(Task.assigned_to == user_id)
+                filter_user_id = user_id
         can_drag = False
 
     tasks = q.order_by(Task.created_at.desc()).all()
@@ -122,11 +156,6 @@ def list_tasks(
     columns = {s: [] for s in TASK_STATUSES}
     for t in tasks:
         columns.setdefault(t.status, []).append(t)
-
-    # Data for create form
-    departments = db.query(Department).order_by(Department.name).all()
-    users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
-    projects = db.query(Project).order_by(Project.name).all()
 
     csrf = generate_csrf_token(str(current_user.id))
     return templates.TemplateResponse(
@@ -143,6 +172,10 @@ def list_tasks(
             "departments": departments,
             "users": users,
             "projects": projects,
+            "filter_departments": filter_departments,
+            "filter_users": filter_users,
+            "filter_dept_id": filter_dept_id,
+            "filter_user_id": filter_user_id,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
             "today": date.today().isoformat(),
