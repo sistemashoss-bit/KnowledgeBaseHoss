@@ -1,10 +1,9 @@
-name: Build Docker Image
+name: Build & Deploy
 
 on:
   push:
     branches: [main]
     paths-ignore:
-      - 'Ansible/**'
       - 'Terraform/**'
 
 permissions:
@@ -52,3 +51,49 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_AUTH_TOKEN }}
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Instalar Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Instalar Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Traer llave SSH desde Doppler
+        run: |
+          mkdir -p ~/.ssh
+          { doppler secrets get SSH_PRIVATE_KEY --plain; echo; } > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Generar .env desde Doppler
+        run: |
+          doppler secrets download --no-file --format json \
+            | jq -r 'to_entries[] | select(.key | test("^(SSH_PRIVATE_KEY|DOPPLER_)") | not) | "\(.key)=\(.value)"' \
+            > Ansible/files/.env
+          chmod 600 Ansible/files/.env
+
+      - name: Verificar inventory
+        run: |
+          if [ ! -f Ansible/inventory.ini ]; then
+            echo "Error: falta Ansible/inventory.ini. Genéralo con 'terraform apply' en local y commitéalo."
+            exit 1
+          fi
+
+      - name: Ejecutar Ansible
+        run: |
+          cd Ansible
+          ansible-playbook playbook.yml \
+            -i inventory.ini \
+            --private-key ~/.ssh/id_ed25519
