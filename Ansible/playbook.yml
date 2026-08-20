@@ -1,0 +1,78 @@
+---
+- name: Configuracion inicial VM
+  hosts: all
+  become: true
+  
+  tasks:
+    - name: Actualizar paquetes
+      apt:
+        update_cache: yes
+        upgrade: safe      
+    
+    - name: Instalar dependencias
+      apt:
+        name:
+          - curl
+          - git
+          - unzip
+          - fail2ban
+          - ca-certificates
+          - gnupg
+          - docker.io
+          - docker-compose
+        state: present
+        
+    - name: Habilitar fail2ban
+      service:
+        name: fail2ban
+        enabled: true
+        state: started       
+        
+    - name: Habilitar Docker
+      service:
+        name: docker
+        enabled: true
+        state: started
+        
+    - name: Agregar usuario a Docker
+      user:
+          name: hoss
+          groups: docker
+          append: true        
+          
+    - name: Crear carpeta app
+      file:
+        path: /home/hoss/app
+        state: directory
+        owner: hoss
+        group: hoss
+        mode: '0755'
+        
+
+    - name: Copiar archivo .env al servidor
+      copy:
+        src: "files/.env"
+        dest: "/home/hoss/app/.env"
+        owner: hoss
+        group: hoss
+        mode: '0600'
+
+    - name: Copiar el resto de archivos de configuracion
+      copy:
+        src: "files/{{ item }}"
+        dest: "/home/hoss/app/{{ item }}"
+        owner: hoss
+        group: hoss
+        mode: '0644'
+      loop:
+        - docker-compose.yml
+        - Caddyfile
+
+    # Levantamos los contenedores (Mosquitto arrancará con el passwd vacío y se mantendrá estable)
+    - name: Levantar y Actualizar Contenedores
+      become_user: hoss
+      shell: >
+        docker-compose pull &&
+        docker-compose up -d --force-recreate
+      args:
+        chdir: /home/hoss/app

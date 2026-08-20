@@ -1,0 +1,4 @@
+comunicacion.hoss.com.mx {
+    encode zstd gzip
+    reverse_proxy knowledge:8080
+}
