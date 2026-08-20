@@ -4,11 +4,27 @@
   become: true
   
   tasks:
-    - name: Actualizar paquetes
+    - name: Esperar a que cloud-init/unattended-upgrades liberen el lock de apt
+      raw: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+           || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          echo "esperando lock de apt..."; sleep 5;
+        done
+      changed_when: false
+
+    - name: Actualizar cache de apt
       apt:
         update_cache: yes
-        upgrade: safe      
-    
+        cache_valid_time: 3600
+        lock_timeout: 300
+
+    # Upgrade completo del SO: pesado, solo bajo demanda con -e full_upgrade=true
+    - name: Actualizar paquetes del sistema (opcional)
+      apt:
+        upgrade: safe
+        lock_timeout: 300
+      when: full_upgrade | default(false) | bool
+
     - name: Instalar dependencias
       apt:
         name:
@@ -21,6 +37,7 @@
           - docker.io
           - docker-compose
         state: present
+        lock_timeout: 300
         
     - name: Habilitar fail2ban
       service:
