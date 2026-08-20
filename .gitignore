@@ -12,4 +12,6 @@ wheels/
 
 #Terraform files
 .terraform/
+*.tfstate
+*.tfstate.*
 
