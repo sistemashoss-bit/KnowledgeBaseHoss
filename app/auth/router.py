@@ -1,21 +1,22 @@
 import io
-import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user, require_auth
+from app.auth.provisioning import provision_from_identity
 from app.auth.utils import (
+    clear_auth_cookie,
     create_access_token,
     generate_csrf_token,
+    set_auth_cookie,
     verify_csrf_token,
 )
-from app.config import settings
 from app.database import get_db
 from app import storage, valkey_client as vk
 from app.auth import hoss
-from app.models import ROLE_EMPLOYEE, Department, User
+from app.models import Department, User
 from app.templating import templates
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -65,14 +66,38 @@ async def login(
 
     token = create_access_token(str(user.id), user.role, user.department_id)
     resp = RedirectResponse("/documents/", status_code=302)
-    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=_max_age())
+    set_auth_cookie(resp, token)
     return resp
 
 
 @router.post("/logout")
 def logout():
     resp = RedirectResponse("/", status_code=302)
-    resp.delete_cookie("access_token")
+    clear_auth_cookie(resp)
+    return resp
+
+
+# ── SSO handoff desde hoss-front ────────────────────────────────────────────────
+
+@router.post("/sso")
+async def sso_handoff(
+    token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Recibe el accessToken de hoss-api (el que NextAuth ya guarda en la sesión
+    de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
+    login. El token viaja por POST para no filtrarlo en URL/referer/logs."""
+    identity = await hoss.introspect_session(token)
+    if not identity:
+        return RedirectResponse("/auth/login", status_code=302)
+
+    user = provision_from_identity(identity, db)
+    if not user or not user.is_active:
+        return RedirectResponse("/auth/login", status_code=302)
+
+    access = create_access_token(str(user.id), user.role, user.department_id)
+    resp = RedirectResponse("/documents/", status_code=302)
+    set_auth_cookie(resp, access)
     return resp
 
 
@@ -156,47 +181,4 @@ async def _resolve_user(email: str, password: str, db: Session):
     identity = await hoss.verify_auth(email, password)
     if not identity:
         return None
-    return _provision_from_identity(identity, db)
-
-
-def _provision_from_identity(identity: dict, db: Session):
-    """JIT provisioning: encuentra al usuario por corporate_id, o lo enlaza por
-    email (pre-aprovisionamiento/backfill), o lo crea con rol genérico."""
-    corporate_id = identity["corporate_id"]
-    name = " ".join(
-        p for p in (identity.get("first_name"), identity.get("last_name")) if p
-    ) or None
-
-    user = db.query(User).filter(User.corporate_id == corporate_id).first()
-    if user:
-        if name and user.name != name:
-            user.name = name
-            db.commit()
-        return user
-
-    # Enlaza un usuario pre-aprovisionado por el admin (o preexistente) por email,
-    # conservando el rol/depto que ya tenga asignado.
-    user = db.query(User).filter(User.email == identity["email"]).first()
-    if user:
-        user.corporate_id = corporate_id
-        if name and not user.name:
-            user.name = name
-        db.commit()
-        return user
-
-    # Usuario nuevo sin pre-aprovisionar: rol genérico.
-    user = User(
-        id=uuid.uuid4(),
-        corporate_id=corporate_id,
-        email=identity["email"],
-        name=name,
-        role=ROLE_EMPLOYEE,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def _max_age() -> int:
-    return settings.jwt_expire_minutes * 60
+    return provision_from_identity(identity, db)

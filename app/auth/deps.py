@@ -2,14 +2,14 @@ from fastapi import Depends, HTTPException, Request
 from jose import JWTError
 from sqlalchemy.orm import Session
 
-from app.auth.utils import decode_token
+from app.auth.utils import AUTH_COOKIE, decode_token
 from app.database import get_db
 from app.models import User
 from app import valkey_client as vk
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
-    token = request.cookies.get("access_token")
+    token = request.cookies.get(AUTH_COOKIE)
     if not token:
         return None
     try:
