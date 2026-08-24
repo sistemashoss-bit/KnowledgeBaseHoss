@@ -204,6 +204,7 @@
                            'bg-amber-100  text-amber-600':  n.type === 'task_dept',
                            'bg-emerald-100 text-emerald-600': n.type === 'task_status',
                            'bg-blue-100  text-blue-600':   n.type === 'message',
+                           'bg-red-100   text-red-600':    n.type === 'missed_call',
                          }"
                          class="w-8 h-8 rounded-full flex items-center justify-center">
 
@@ -231,6 +232,12 @@
                                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-1-3z"/>
                         </svg>
                       </template>
+                      <template x-if="n.type === 'missed_call'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/>
+                        </svg>
+                      </template>
                     </div>
                   </div>
 
@@ -256,7 +263,7 @@
           <!-- Pie: última actualización -->
           <div class="shrink-0 px-4 py-2 border-t border-gray-100 bg-slate-50">
             <p class="text-[10px] text-slate-400 text-center">
-              Actualiza cada 45 segundos · máx. 48 h
+              Se mostrarán las últimas 48 h
             </p>
           </div>
         </div>
@@ -493,58 +500,166 @@
   {% if current_user %}
   <script>
     function notifSystem(userId) {
-      const KEY = `hoss_notifs_${userId}`;
       const TTL = 2 * 24 * 60 * 60 * 1000; // 48 h en ms
+      const DB_NAME = `hoss_kb_${userId}`;   // IDB por usuario (aislado por navegador)
+      const STORE = 'notifs';
+      const LS_KEY = `hoss_notifs_${userId}`; // fallback si IndexedDB no está disponible
+
+      // ── Persistencia: IndexedDB (48h) con fallback a localStorage ──────────────
+      let _dbP = null;
+      function _db() {
+        if (_dbP) return _dbP;
+        _dbP = new Promise((resolve, reject) => {
+          let req;
+          try { req = indexedDB.open(DB_NAME, 1); } catch (e) { reject(e); return; }
+          req.onupgradeneeded = () => {
+            const d = req.result;
+            if (!d.objectStoreNames.contains(STORE)) {
+              const os = d.createObjectStore(STORE, { keyPath: 'id' });
+              os.createIndex('ts', 'ts');
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        return _dbP;
+      }
+      // Nota: sin `await` entre operaciones dentro de una misma transacción,
+      // para no toparse con el auto-commit de IndexedDB.
+      async function _getAll() {
+        const d = await _db();
+        return new Promise((resolve) => {
+          const rq = d.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+          rq.onsuccess = () => resolve(rq.result || []);
+          rq.onerror = () => resolve([]);
+        });
+      }
+      async function _putMany(list) {
+        if (!list.length) return;
+        const d = await _db();
+        return new Promise((resolve) => {
+          const tx = d.transaction(STORE, 'readwrite');
+          const os = tx.objectStore(STORE);
+          list.forEach(r => os.put(r));
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+          tx.onabort = () => resolve();
+        });
+      }
+      async function _deleteMany(ids) {
+        if (!ids.length) return;
+        const d = await _db();
+        return new Promise((resolve) => {
+          const tx = d.transaction(STORE, 'readwrite');
+          const os = tx.objectStore(STORE);
+          ids.forEach(id => os.delete(id));
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+      }
+
+      // Fallback en memoria + localStorage (solo si IDB falla).
+      let _idbOk = true;
+      let _mem = [];
+      function _lsLoad() {
+        try { return JSON.parse(localStorage.getItem(LS_KEY) || '{"items":[]}').items || []; }
+        catch (e) { return []; }
+      }
+      function _lsSave(items) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify({ items })); } catch (e) {}
+      }
+
+      const _norm = (n, ts, dismissed) => ({
+        id: n.id, type: n.type, title: n.title, subtitle: n.subtitle,
+        url: n.url, created_at: n.created_at,
+        ts: ts, dismissed: !!dismissed,
+      });
 
       return {
         open: false,
         notifications: [],
         total: 0,
 
-        init() {
-          this._fetch();
-          // Instant refresh via the per-user SSE signal (see callSignals).
+        async init() {
+          try { await this._prune(); } catch (e) { _idbOk = false; }
+          if (_idbOk) _mem = _lsLoad();      // por si hubo fallback previo
+          await this._reload();
+          await this._fetch();
           window.addEventListener('notif:refresh', () => this._fetch());
-          // Slow poll as a fallback when Valkey/SSE is unavailable.
+          // Notificaciones generadas en el cliente (p. ej. llamadas perdidas).
+          window.addEventListener('notif:add', (e) => this._add(e.detail));
           setInterval(() => this._fetch(), 180000);
         },
 
-        _dismissed() {
-          try {
-            const raw = JSON.parse(localStorage.getItem(KEY) || '{"items":[]}');
-            const cutoff = Date.now() - TTL;
-            const fresh = (raw.items || []).filter(d => d.ts > cutoff);
-            if (fresh.length !== (raw.items || []).length)
-              localStorage.setItem(KEY, JSON.stringify({ items: fresh }));
-            return new Set(fresh.map(d => d.id));
-          } catch(e) { return new Set(); }
+        async _prune() {
+          const cutoff = Date.now() - TTL;
+          const all = await _getAll();
+          const stale = all.filter(n => !n.ts || n.ts < cutoff).map(n => n.id);
+          await _deleteMany(stale);
+        },
+
+        _render(list) {
+          const cutoff = Date.now() - TTL;
+          const fresh = list.filter(n => n.ts >= cutoff && !n.dismissed)
+                            .sort((a, b) => b.ts - a.ts);
+          this.notifications = fresh;
+          this.total = fresh.length;
+        },
+
+        async _reload() {
+          try { this._render(await _getAll()); }
+          catch (e) { _idbOk = false; this._render(_mem); }
+        },
+
+        async _store(records) {
+          if (_idbOk) {
+            try { await _putMany(records); return; } catch (e) { _idbOk = false; }
+          }
+          // fallback: fusiona en memoria + persiste ids descartados en localStorage
+          const byId = {}; _mem.forEach(n => byId[n.id] = n);
+          records.forEach(n => byId[n.id] = n);
+          _mem = Object.values(byId);
+          _lsSave(_mem.filter(n => n.dismissed).map(n => ({ id: n.id, ts: n.ts })));
         },
 
         async _fetch() {
+          let data;
           try {
             const res = await fetch('/api/notifications');
             if (!res.ok) return;
-            const data = await res.json();
-            const dismissed = this._dismissed();
-            this.notifications = data.filter(n => !dismissed.has(n.id));
-            this.total = this.notifications.length;
-          } catch(e) {}
+            data = await res.json();
+          } catch (e) { return; }
+          try {
+            const existing = {};
+            (await (_idbOk ? _getAll() : Promise.resolve(_mem))).forEach(n => existing[n.id] = n);
+            const merged = data.map(n => {
+              const prev = existing[n.id];
+              const ts = prev ? prev.ts : (Date.parse(n.created_at) || Date.now());
+              return _norm(n, ts, prev ? prev.dismissed : false);
+            });
+            await this._store(merged);
+          } catch (e) {}
+          await this._reload();
         },
 
-        dismiss(id) {
-          try {
-            const raw = JSON.parse(localStorage.getItem(KEY) || '{"items":[]}');
-            const cutoff = Date.now() - TTL;
-            const items = (raw.items || []).filter(d => d.ts > cutoff);
-            items.push({ id, ts: Date.now() });
-            localStorage.setItem(KEY, JSON.stringify({ items }));
-          } catch(e) {}
+        async _add(n) {
+          if (!n || !n.id) return;
+          await this._store([_norm(n, Date.now(), false)]);
+          await this._reload();
+        },
+
+        async dismiss(id) {
+          const cur = this.notifications.find(n => n.id === id);
+          const rec = cur ? _norm(cur, cur.ts, true)
+                          : { id, dismissed: true, ts: Date.now() };
+          await this._store([rec]);
           this.notifications = this.notifications.filter(n => n.id !== id);
           this.total = this.notifications.length;
         },
 
-        dismissAll() {
-          [...this.notifications].forEach(n => this.dismiss(n.id));
+        async dismissAll() {
+          const ids = this.notifications.map(n => n.id);
+          for (const id of ids) { await this.dismiss(id); }
           this.open = false;
         },
 
@@ -623,15 +738,37 @@
             if (this.incoming && this.incoming.call_id === d.call_id) return;
             this.incoming = d;
             clearTimeout(this._timer);
-            this._timer = setTimeout(() => { this.incoming = null; }, 30000);
+            // Sin respuesta en 30s → llamada perdida.
+            this._timer = setTimeout(() => {
+              if (this.incoming && this.incoming.call_id === d.call_id) {
+                this._miss(this.incoming);
+                this.incoming = null;
+              }
+            }, 30000);
           } else if (d.type === 'call_cancel') {
             if (this.incoming && String(this.incoming.conv_id) === String(d.conv_id)) {
-              this.dismiss();
+              // El que llama colgó sin respuesta → llamada perdida.
+              this._miss(this.incoming);
+              this.incoming = null;
+              clearTimeout(this._timer);
             }
           } else if (d.type === 'notify') {
             // Tell the notification bell to refresh instantly (shared SSE).
             window.dispatchEvent(new CustomEvent('notif:refresh'));
           }
+        },
+
+        // Emite una notificación de llamada perdida (la persiste el notifSystem en IndexedDB).
+        _miss(call) {
+          if (!call) return;
+          window.dispatchEvent(new CustomEvent('notif:add', { detail: {
+            id: 'missed_call_' + call.call_id,
+            type: 'missed_call',
+            title: 'Llamada perdida',
+            subtitle: call.caller_name || 'Llamada',
+            url: '/messaging/' + call.conv_id,
+            created_at: new Date().toISOString(),
+          }}));
         },
 
         join() {
@@ -644,6 +781,7 @@
         },
 
         dismiss() {
+          // "Descartar" = rechazo consciente; no se registra como perdida.
           this.incoming = null;
           clearTimeout(this._timer);
         },
