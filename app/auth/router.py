@@ -95,6 +95,10 @@ async def sso_handoff(
     if not user or not user.is_active:
         return RedirectResponse("/auth/login", status_code=302)
 
+    # Guardamos el accessToken de hoss para reusarlo en llamadas server-to-server
+    # (p. ej. sincronizar sucursales/regiones). hoss valida su expiración al usarlo.
+    vk.store_hoss_token(user.id, token)
+
     access = create_access_token(str(user.id), user.role, user.department_id)
     resp = RedirectResponse("/documents/", status_code=302)
     set_auth_cookie(resp, access)

@@ -60,6 +60,9 @@ class Zone(Base):
     __tablename__ = "zones"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Identidad global de la región en hoss-api (mismo nombre que allá). hoss es
+    # el dueño; se llena/actualiza al sincronizar. Null si la zona es solo local.
+    global_region_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -74,6 +77,9 @@ class Branch(Base):
     __tablename__ = "branches"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Identidad global de la sucursal en hoss-api (mismo nombre que allá). hoss es
+    # el dueño; se llena/actualiza al sincronizar. Null si la sucursal es solo local.
+    global_branch_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)

@@ -2,12 +2,15 @@ import re
 import uuid
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_superadmin
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app import audit
+from app.auth import hoss
+from app import valkey_client as vk
 from app.models import Zone, Branch
 from app.templating import templates
 
@@ -42,6 +45,19 @@ def list_zones(
     zones = db.query(Zone).order_by(Zone.name).all()
     branches_without_zone = db.query(Branch).filter(Branch.zone_id.is_(None)).order_by(Branch.name).all()
     csrf = generate_csrf_token(str(current_user.id))
+
+    # Feedback del sync (viene por query param tras el redirect).
+    sync_status = request.query_params.get("sync")
+    sync_msg = None
+    if sync_status == "ok":
+        z = request.query_params.get("z", "0")
+        b = request.query_params.get("b", "0")
+        sync_msg = ("ok", f"Sincronización completada: {z} zona(s) y {b} sucursal(es) actualizadas.")
+    elif sync_status == "notoken":
+        sync_msg = ("error", "No hay sesión de hoss activa. Vuelve a entrar por el acceso de hoss y reintenta.")
+    elif sync_status == "error":
+        sync_msg = ("error", "No se pudo sincronizar con hoss (sesión expirada o servicio no disponible).")
+
     return templates.TemplateResponse(
         request,
         "zones/list.html",
@@ -50,7 +66,110 @@ def list_zones(
             "zones": zones,
             "branches_without_zone": branches_without_zone,
             "csrf_token": csrf,
+            "sync_msg": sync_msg,
         },
+    )
+
+
+# ── Sincronización desde hoss (hoss es el dueño del catálogo) ────────────────────
+
+def _apply_org_sync(db: Session, data: dict) -> dict:
+    """Upsert de regiones→zonas y sucursales→sucursales, mapeando por el UUID
+    global de hoss (global_region_id / global_branch_id). Fallback por nombre para no duplicar en el
+    primer sync. No borra nada local (evita cascadas sobre usuarios/departamentos)."""
+    regions = data.get("regions", [])
+    branches = data.get("branches", [])
+
+    # hoss region id (int) -> global_region_id (uuid), para ligar sucursales.
+    region_global_by_hossid: dict = {}
+    zones_count = 0
+
+    for reg in regions:
+        gid = reg.get("global_region_id")
+        name = (reg.get("name") or "").strip()
+        if not gid or not name:
+            continue
+        region_global_by_hossid[reg.get("id")] = gid
+
+        zone = db.query(Zone).filter(Zone.global_region_id == gid).first()
+        if not zone:
+            # Primer sync: adopta una zona local existente con el mismo nombre.
+            zone = (
+                db.query(Zone)
+                .filter(Zone.global_region_id.is_(None), func.lower(Zone.name) == name.lower())
+                .first()
+            )
+        if zone:
+            zone.global_region_id = gid
+            zone.name = name
+        else:
+            db.add(Zone(id=uuid.uuid4(), global_region_id=gid, name=name,
+                        slug=_unique_slug(db, Zone, _slugify(name))))
+        zones_count += 1
+
+    db.flush()
+
+    branches_count = 0
+    for br in branches:
+        gid = br.get("global_branch_id")
+        name = (br.get("name") or "").strip()
+        if not gid or not name:
+            continue
+
+        # Zona destino a partir de la región de hoss.
+        zone_id = None
+        reg_gid = region_global_by_hossid.get(br.get("region_id"))
+        if reg_gid:
+            z = db.query(Zone).filter(Zone.global_region_id == reg_gid).first()
+            zone_id = z.id if z else None
+
+        branch = db.query(Branch).filter(Branch.global_branch_id == gid).first()
+        if not branch:
+            branch = (
+                db.query(Branch)
+                .filter(Branch.global_branch_id.is_(None), func.lower(Branch.name) == name.lower())
+                .first()
+            )
+        if branch:
+            branch.global_branch_id = gid
+            branch.name = name
+            branch.zone_id = zone_id
+        else:
+            db.add(Branch(id=uuid.uuid4(), global_branch_id=gid, name=name,
+                          slug=_unique_slug(db, Branch, _slugify(name)), zone_id=zone_id))
+        branches_count += 1
+
+    db.commit()
+    return {"zones": zones_count, "branches": branches_count}
+
+
+@router.post("/zones/sync")
+async def sync_org(
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_superadmin),
+):
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    token = vk.get_hoss_token(current_user.id)
+    if not token:
+        return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
+
+    data = await hoss.fetch_org(token)
+    if data is None:
+        return RedirectResponse("/org/zones/?sync=error", status_code=302)
+
+    result = _apply_org_sync(db, data)
+    audit.log_action(
+        "org_sync", user=current_user, request=request,
+        resource_type="org", resource_name="sucursales/regiones",
+        details=f"{result['zones']} zona(s), {result['branches']} sucursal(es)",
+    )
+    return RedirectResponse(
+        f"/org/zones/?sync=ok&z={result['zones']}&b={result['branches']}",
+        status_code=302,
     )
 
 

@@ -131,6 +131,33 @@ def try_acquire_daily_lock(key: str) -> bool:
         return False
 
 
+# ── Hoss SSO token (para llamadas server-to-server a hoss-api) ────────────────
+# Guardamos el accessToken de hoss del staff al hacer SSO, para reusarlo en
+# acciones que llaman a la API de hoss (p. ej. sincronizar sucursales/regiones).
+# hoss valida su propia expiración al usarlo; el TTL aquí es solo un techo.
+_HOSS_TOKEN_TTL = 8 * 3600  # 8h
+
+
+def store_hoss_token(user_id, token: str) -> None:
+    r = _get()
+    if r is None or not token:
+        return
+    try:
+        r.setex(f"hoss_token:{str(user_id)}", _HOSS_TOKEN_TTL, token)
+    except Exception:
+        pass
+
+
+def get_hoss_token(user_id) -> str | None:
+    r = _get()
+    if r is None:
+        return None
+    try:
+        return r.get(f"hoss_token:{str(user_id)}")
+    except Exception:
+        return None
+
+
 # ── User presence ─────────────────────────────────────────────────────────────
 
 _LASTSEEN_TTL = 86400 * 30   # 30 days
