@@ -136,6 +136,9 @@ class User(Base):
     role = Column(String(20), nullable=False, default=ROLE_EMPLOYEE)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    # Llave del avatar en Wasabi (bucket hossavatars), provista por hoss-api en el
+    # payload de identidad (SSO). knowledge comparte el mismo Wasabi, así que firma
+    # la URL localmente al renderizar (ver templating._avatar_url).
     avatar_key = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

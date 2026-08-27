@@ -35,19 +35,9 @@ def delete_file(file_key: str) -> None:
 
 
 # ── Avatar bucket (separate) ──────────────────────────────────────────────────
-
-def upload_avatar(key: str, content: bytes) -> None:
-    _client().put_object(
-        Bucket=settings.wasabi_avatar_bucket_name,
-        Key=key,
-        Body=content,
-        ContentType="image/jpeg",
-    )
-
-
-def delete_avatar(key: str) -> None:
-    _client().delete_object(Bucket=settings.wasabi_avatar_bucket_name, Key=key)
-
+# hoss-api es dueño del avatar (SSO) y de la subida (POST /users/me/avatar). knowledge
+# solo recibe la llave en el payload de identidad y firma la URL de lectura localmente
+# (comparte el mismo Wasabi/bucket). Por eso aquí solo queda el presign de lectura.
 
 def get_avatar_signed_url(key: str, expiry: int = 3600) -> str:
     """Presigned URL valid for 1 hour — computed locally, no network call."""

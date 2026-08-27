@@ -5,10 +5,14 @@ JWT_SECRET de hoss: valida credenciales llamando a un solo endpoint que
 devuelve la identidad verificada.
 
     POST /users/verify-auth {email, password}
-        -> {corporate_id, id, email, first_name, last_name, role}
+        -> {corporate_id, id, email, first_name, last_name, role, avatar_key, avatar_url}
 
     GET  /users/me   (Authorization: Bearer <sesion_hoss>)
-        -> {corporate_id, id, email, first_name, last_name, role}
+        -> {corporate_id, id, email, first_name, last_name, role, avatar_key, avatar_url}
+
+    avatar_key: llave del avatar en Wasabi (bucket compartido hossavatars); knowledge
+    firma la URL localmente. avatar_url: URL ya firmada por hoss (para consumidores que
+    no comparten el mismo Wasabi).
 """
 import httpx
 

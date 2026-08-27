@@ -1,6 +1,4 @@
-import io
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -14,7 +12,7 @@ from app.auth.utils import (
     verify_csrf_token,
 )
 from app.database import get_db
-from app import storage, valkey_client as vk
+from app import valkey_client as vk
 from app.auth import hoss
 from app.models import Department, User
 from app.templating import templates
@@ -125,57 +123,11 @@ def profile_page(
     )
 
 
-@router.post("/profile/name")
-def update_name(
-    name: str = Form(default=""),
-    csrf_token: str = Form(...),
-    user=Depends(require_auth),
-    db: Session = Depends(get_db),
-):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
-    user.name = name.strip() or None
-    db.commit()
-    return RedirectResponse("/auth/profile", status_code=302)
-
-
-@router.post("/profile/avatar")
-async def upload_avatar_endpoint(
-    avatar: UploadFile = File(...),
-    csrf_token: str = Form(...),
-    user=Depends(require_auth),
-    db: Session = Depends(get_db),
-):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
-
-    content = await avatar.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Imagen demasiado grande (máx 5 MB)")
-    if not avatar.content_type or not avatar.content_type.startswith("image/"):
-        raise HTTPException(400, "Solo se permiten imágenes")
-
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(content)).convert("RGB")
-        img.thumbnail((256, 256), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        img_bytes = buf.getvalue()
-    except Exception:
-        raise HTTPException(400, "No se pudo procesar la imagen")
-
-    if user.avatar_key:
-        try:
-            storage.delete_avatar(user.avatar_key)
-        except Exception:
-            pass
-
-    key = f"avatars/{user.id}.jpg"
-    storage.upload_avatar(key, img_bytes)
-    user.avatar_key = key
-    db.commit()
-    return RedirectResponse("/auth/profile", status_code=302)
+# Nombre y avatar son identidad compartida: los administra hoss-api (SSO) y se
+# sincronizan al iniciar sesión (ver provisioning.py). knowledge ya no edita el
+# nombre ni sube avatares; recibe la llave del avatar en el payload de identidad y
+# firma la URL
+# al renderizar. La subida vive en hoss-api (POST /users/me/avatar).
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
