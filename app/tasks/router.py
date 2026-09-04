@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
-from app import audit, storage
+from app import audit, rag, storage
+from app.documents.router import _preview_meta
 from app.messaging import realtime
+from app.permissions import build_access_filter, can_access_document
 from app.models import (
-    Branch, Department, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
+    Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     TASK_STATUSES, TASK_PRIORITIES,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY,
@@ -65,6 +67,30 @@ def _can_update_status(user: User, task: Task) -> bool:
     if _can_edit_task(user, task):
         return True
     return task.assigned_to and str(task.assigned_to) == str(user.id)
+
+
+# ── Document reference helpers ─────────────────────────────────────────────────
+
+def _accessible_documents(user: User) -> list[dict]:
+    """Documentos que el usuario puede referenciar en una tarea (access-filtered).
+
+    Reusa la búsqueda con el filtro de visibilidad del módulo Documentos, así que
+    respeta rol/departamento. Devuelve dicts con id/title/department_name/content_type.
+    """
+    try:
+        return rag.search_documents("", build_access_filter(user), size=500)
+    except Exception:
+        return []
+
+
+def _validated_document_id(document_id: str, user: User, db: Session) -> str | None:
+    """Devuelve el id si el documento existe y el usuario puede accederlo; si no, None."""
+    if not document_id:
+        return None
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc or not can_access_document(user, doc):
+        return None
+    return document_id
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -172,6 +198,7 @@ def list_tasks(
             "departments": departments,
             "users": users,
             "projects": projects,
+            "documents": _accessible_documents(current_user),
             "filter_departments": filter_departments,
             "filter_users": filter_users,
             "filter_dept_id": filter_dept_id,
@@ -195,6 +222,7 @@ async def create_task(
     department_id: str = Form(""),
     assigned_to: str = Form(""),
     project_id: str = Form(""),
+    document_id: str = Form(""),
     due_date: str = Form(""),
     next_url: str = Form(""),
     csrf_token: str = Form(...),
@@ -215,6 +243,7 @@ async def create_task(
         department_id=department_id if department_id else None,
         assigned_to=assigned_to if assigned_to else None,
         project_id=project_id if project_id else None,
+        document_id=_validated_document_id(document_id, current_user, db),
         created_by=current_user.id,
         due_date=date.fromisoformat(due_date) if due_date else None,
     )
@@ -273,6 +302,7 @@ def task_detail(
             joinedload(Task.project),
             joinedload(Task.comments).joinedload(TaskComment.user),
             joinedload(Task.evidences).joinedload(TaskEvidence.uploader),
+            joinedload(Task.document),
         )
         .filter(Task.id == task_id)
         .first()
@@ -288,12 +318,20 @@ def task_detail(
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     departments = db.query(Department).order_by(Department.name).all()
 
+    # Metadatos de previsualización del documento vinculado (mismo criterio que las
+    # cards de Documentos): Drive/PDF/imagen/HTML → iframe; el resto solo enlace.
+    doc_preview = (
+        _preview_meta(str(task.document.id), task.document.content_type, task.document.drive_url)
+        if task.document else None
+    )
+
     return templates.TemplateResponse(
         request,
         "tasks/detail.html",
         {
             "current_user": current_user,
             "task": task,
+            "doc_preview": doc_preview,
             "users": users,
             "departments": departments,
             "statuses": TASK_STATUSES,
@@ -404,6 +442,7 @@ def delete_evidence(
 def download_evidence(
     task_id: str,
     evidence_id: str,
+    inline: bool = False,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -419,7 +458,7 @@ def download_evidence(
     if not ev:
         raise HTTPException(404)
 
-    url = storage.get_evidence_url(ev.file_key, ev.filename)
+    url = storage.get_evidence_url(ev.file_key, ev.filename, inline=inline)
     from fastapi.responses import RedirectResponse as RR
     return RR(url, status_code=302)
 
@@ -622,6 +661,7 @@ def _recurring_query(user: User, db: Session):
         joinedload(RecurringTask.assignee),
         joinedload(RecurringTask.department),
         joinedload(RecurringTask.project),
+        joinedload(RecurringTask.document),
         joinedload(RecurringTask.created_by_user),
     )
     scope = _manager_scope(user, db)
@@ -743,6 +783,7 @@ def list_recurring(
             "departments": departments,
             "users": users,
             "projects": projects,
+            "documents": _accessible_documents(current_user),
             "priorities": TASK_PRIORITIES,
             "frequencies": RECURRENCE_FREQUENCIES,
             "is_superadmin": current_user.role == ROLE_SUPERADMIN,
@@ -761,6 +802,7 @@ def create_recurring(
     department_id: str = Form(""),
     assigned_to: str = Form(""),
     project_id: str = Form(""),
+    document_id: str = Form(""),
     frequency: str = Form("daily"),
     day_of_week: str = Form(""),
     day_of_month: str = Form(""),
@@ -788,6 +830,7 @@ def create_recurring(
         department_id=department_id if department_id else None,
         assigned_to=assigned_to if assigned_to else None,
         project_id=project_id if project_id else None,
+        document_id=_validated_document_id(document_id, current_user, db),
         created_by=current_user.id,
         frequency=freq,
         day_of_week=dow,
@@ -815,6 +858,7 @@ def edit_recurring(
     department_id: str = Form(""),
     assigned_to: str = Form(""),
     project_id: str = Form(""),
+    document_id: str = Form(""),
     frequency: str = Form("daily"),
     day_of_week: str = Form(""),
     day_of_month: str = Form(""),
@@ -844,6 +888,7 @@ def edit_recurring(
     rt.department_id = department_id if department_id else None
     rt.assigned_to = assigned_to if assigned_to else None
     rt.project_id = project_id if project_id else None
+    rt.document_id = _validated_document_id(document_id, current_user, db)
     rt.frequency = freq
     rt.day_of_week = dow
     rt.day_of_month = dom

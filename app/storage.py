@@ -59,13 +59,14 @@ def upload_evidence(key: str, content: bytes, content_type: str) -> None:
     )
 
 
-def get_evidence_url(key: str, filename: str, expiry: int = 900) -> str:
+def get_evidence_url(key: str, filename: str, expiry: int = 900, inline: bool = False) -> str:
+    disposition = "inline" if inline else "attachment"
     return _client().generate_presigned_url(
         "get_object",
         Params={
             "Bucket": settings.wasabi_evidence_bucket_name,
             "Key": key,
-            "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            "ResponseContentDisposition": f'{disposition}; filename="{filename}"',
         },
         ExpiresIn=expiry,
     )
@@ -86,13 +87,14 @@ def upload_chat_file(key: str, content: bytes, content_type: str) -> None:
     )
 
 
-def get_chat_file_url(key: str, filename: str, expiry: int = 900) -> str:
+def get_chat_file_url(key: str, filename: str, expiry: int = 900, inline: bool = False) -> str:
+    disposition = "inline" if inline else "attachment"
     return _client().generate_presigned_url(
         "get_object",
         Params={
             "Bucket": settings.wasabi_chats_bucket_name,
             "Key": key,
-            "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            "ResponseContentDisposition": f'{disposition}; filename="{filename}"',
         },
         ExpiresIn=expiry,
     )

@@ -629,6 +629,7 @@ async def send_message(
 def download_attachment(
     conv_id: str,
     att_id: str,
+    inline: bool = False,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -655,7 +656,7 @@ def download_attachment(
     if not att:
         raise HTTPException(404)
 
-    url = storage.get_chat_file_url(att.file_key, att.filename)
+    url = storage.get_chat_file_url(att.file_key, att.filename, inline=inline)
     return RedirectResponse(url, status_code=302)
 
 

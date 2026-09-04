@@ -75,6 +75,7 @@
                     "priority": rt.priority, "department_id": rt.department_id|string if rt.department_id else "",
                     "assigned_to": rt.assigned_to|string if rt.assigned_to else "",
                     "project_id": rt.project_id|string if rt.project_id else "",
+                    "document_id": rt.document_id|string if rt.document_id else "",
                     "frequency": rt.frequency, "day_of_week": rt.day_of_week if rt.day_of_week is not none else "",
                     "day_of_month": rt.day_of_month or "",
                     "start_date": rt.start_date.isoformat() if rt.start_date else "",
@@ -215,6 +216,20 @@
       </div>
       {% endif %}
 
+      {% if documents %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Documento a revisar <span class="text-xs text-gray-400">(opcional)</span>
+        </label>
+        <select name="document_id" id="rt-document"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+          <option value="">— Ninguno —</option>
+          {% for d in documents %}<option value="{{ d.id }}">{{ d.title }}{% if d.department_name %} · {{ d.department_name }}{% endif %}</option>{% endfor %}
+        </select>
+        <p class="text-[11px] text-gray-400 mt-1">Cada tarea generada apuntará a este documento o Drive.</p>
+      </div>
+      {% endif %}
+
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Inicio <span class="text-xs text-gray-400">(opcional)</span></label>
@@ -265,6 +280,7 @@
       'rt-title': 'title', 'rt-description': 'description', 'rt-priority': 'priority',
       'rt-frequency': 'frequency', 'rt-day-of-week': 'day_of_week', 'rt-day-of-month': 'day_of_month',
       'rt-department': 'department_id', 'rt-assigned-to': 'assigned_to', 'rt-project': 'project_id',
+      'rt-document': 'document_id',
       'rt-start-date': 'start_date', 'rt-end-date': 'end_date'
     };
     Object.keys(map).forEach(function (id) {

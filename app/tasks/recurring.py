@@ -70,6 +70,7 @@ def generate_due_tasks(today: date | None = None) -> int:
                 project_id=rt.project_id,
                 department_id=rt.department_id,
                 assigned_to=rt.assigned_to,
+                document_id=rt.document_id,
                 created_by=rt.created_by,
                 due_date=today,
             ))

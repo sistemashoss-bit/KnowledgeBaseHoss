@@ -169,11 +169,16 @@ class Document(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    filename = Column(String(255), nullable=False)
-    file_key = Column(String(500), nullable=False)
+    # filename/file_key son null cuando el documento es un link de Google Drive
+    # (no hay archivo en Wasabi). Un documento es archivo subido O link de Drive.
+    filename = Column(String(255), nullable=True)
+    file_key = Column(String(500), nullable=True)
     content_type = Column(String(100), nullable=True)
     file_size = Column(BigInteger, nullable=True)
+    # Link externo de Google Drive; excluyente con file_key. Null para archivos subidos.
+    drive_url = Column(String(1000), nullable=True)
     # Rich-text source when the document was authored in-app (TipTap). Null for uploads.
+    # Columna heredada: la autoría TipTap se retiró; se conserva por los docs ya creados.
     content_html = Column(Text, nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
@@ -255,6 +260,9 @@ class Task(Base):
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Documento a revisar/corregir (subido o link de Drive); opcional. SET NULL si
+    # el documento se elimina para no borrar la tarea.
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
 
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -262,6 +270,7 @@ class Task(Base):
 
     project = relationship("Project", back_populates="tasks")
     department = relationship("Department", back_populates="tasks")
+    document = relationship("Document", foreign_keys=[document_id])
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_to])
     created_by_user = relationship("User", back_populates="created_tasks", foreign_keys=[created_by])
     comments = relationship("TaskComment", back_populates="task", order_by="TaskComment.created_at")
@@ -282,6 +291,8 @@ class RecurringTask(Base):
     # Asignado fijo; null → la Task generada queda sin asignar (tarea del área).
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    # Documento a revisar/corregir; se copia a cada Task generada. SET NULL si se borra.
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     frequency = Column(String(10), nullable=False, default=FREQ_DAILY)
@@ -299,6 +310,7 @@ class RecurringTask(Base):
     department = relationship("Department", back_populates="recurring_tasks")
     assignee = relationship("User", foreign_keys=[assigned_to])
     project = relationship("Project", foreign_keys=[project_id])
+    document = relationship("Document", foreign_keys=[document_id])
     created_by_user = relationship("User", back_populates="created_recurring_tasks", foreign_keys=[created_by])
 
 

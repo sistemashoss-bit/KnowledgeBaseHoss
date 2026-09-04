@@ -790,5 +790,46 @@
   </script>
   {% endif %}
 
+  <!-- ── Lightbox global para imágenes (chat, evidencias, etc.) ────────────── -->
+  <div id="img-lightbox"
+       class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/80 p-4 cursor-zoom-out">
+    <img id="img-lightbox-img" src="" alt=""
+         class="max-w-full max-h-full rounded-lg shadow-2xl object-contain" />
+    <button type="button" aria-label="Cerrar"
+            class="absolute top-4 right-4 text-white/80 hover:text-white">
+      <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+  <script>
+    (function () {
+      var box = document.getElementById('img-lightbox');
+      var img = document.getElementById('img-lightbox-img');
+      if (!box || !img) return;
+      function open(src, alt) {
+        img.src = src; img.alt = alt || '';
+        box.classList.remove('hidden'); box.classList.add('flex');
+        document.body.style.overflow = 'hidden';
+      }
+      function close() {
+        box.classList.add('hidden'); box.classList.remove('flex');
+        img.src = ''; document.body.style.overflow = '';
+      }
+      // Delegación en document: cubre imágenes añadidas luego por SSE/HTMX.
+      document.addEventListener('click', function (e) {
+        var t = e.target.closest('img[data-lightbox]');
+        if (!t) return;
+        e.preventDefault();
+        open(t.getAttribute('data-full') || t.src, t.alt);
+      });
+      // Clic en el fondo o el botón cierra; clic en la propia imagen no.
+      box.addEventListener('click', function (e) { if (e.target !== img) close(); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !box.classList.contains('hidden')) close();
+      });
+    })();
+  </script>
+
 </body>
 </html>
