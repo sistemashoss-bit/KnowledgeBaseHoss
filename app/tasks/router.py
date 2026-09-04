@@ -395,6 +395,11 @@ async def upload_evidences(
         resource_name=task_obj.title if task_obj else task_id,
         details=f"files={len(uploaded)} names={','.join(uploaded[:5])}",
     )
+    # Notifica al asignado y al creador (menos a quien sube), solo si hubo archivos.
+    if uploaded:
+        for uid in {task.assigned_to, task.created_by}:
+            if uid and str(uid) != str(current_user.id):
+                realtime.notify_user(uid)
     return RedirectResponse(f"/tasks/{task_id}", status_code=302)
 
 
@@ -584,11 +589,100 @@ def add_comment(
     db.refresh(comment)
     comment.user = current_user  # for template rendering
 
+    # Notifica al asignado y al creador (menos a quien comenta).
+    for uid in {task.assigned_to, task.created_by}:
+        if uid and str(uid) != str(current_user.id):
+            realtime.notify_user(uid)
+    audit.log_action(
+        "task_comment", user=current_user, request=request,
+        resource_type="task", resource_id=task.id, resource_name=task.title,
+        details=(comment.content or "")[:80],
+    )
+
     return templates.TemplateResponse(
         request,
         "tasks/_comment.html",
-        {"comment": comment, "current_user": current_user},
+        {
+            "comment": comment,
+            "current_user": current_user,
+            "csrf_token": generate_csrf_token(str(current_user.id)),
+        },
     )
+
+
+@router.post("/{task_id}/comments/{comment_id}/edit", response_class=HTMLResponse)
+def edit_comment(
+    task_id: str,
+    comment_id: str,
+    request: Request,
+    content: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    comment = db.query(TaskComment).filter(
+        TaskComment.id == comment_id, TaskComment.task_id == task_id
+    ).first()
+    if not comment:
+        raise HTTPException(404)
+    # Solo el autor puede editar su comentario.
+    if str(comment.user_id) != str(current_user.id):
+        raise HTTPException(403)
+
+    new_content = content.strip()
+    if not new_content:
+        raise HTTPException(400, "El comentario no puede quedar vacío")
+    comment.content = new_content
+    comment.edited = True
+    db.commit()
+    db.refresh(comment)
+    comment.user = current_user  # for template rendering
+
+    return templates.TemplateResponse(
+        request,
+        "tasks/_comment.html",
+        {
+            "comment": comment,
+            "current_user": current_user,
+            "csrf_token": generate_csrf_token(str(current_user.id)),
+        },
+    )
+
+
+@router.post("/{task_id}/comments/{comment_id}/delete", response_class=HTMLResponse)
+def delete_comment(
+    task_id: str,
+    comment_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    comment = db.query(TaskComment).filter(
+        TaskComment.id == comment_id, TaskComment.task_id == task_id
+    ).first()
+    if not comment:
+        raise HTTPException(404)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    # Borra el autor, o quien pueda editar la tarea (creador/admin del depto/superadmin).
+    is_author = str(comment.user_id) == str(current_user.id)
+    if not (is_author or (task and _can_edit_task(current_user, task))):
+        raise HTTPException(403)
+
+    db.delete(comment)
+    db.commit()
+    # Cuerpo vacío + hx-swap="outerHTML" → HTMX elimina el comentario del DOM.
+    return HTMLResponse("")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

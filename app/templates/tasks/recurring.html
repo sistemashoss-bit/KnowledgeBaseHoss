@@ -201,7 +201,7 @@
         <select name="assigned_to" id="rt-assigned-to"
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
           <option value="">— Sin asignar —</option>
-          {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email }}</option>{% endfor %}
+          {% for u in users %}<option value="{{ u.id }}" data-dept="{{ u.department_id or '' }}">{{ u.name or u.email }}</option>{% endfor %}
         </select>
       </div>
 
@@ -211,7 +211,7 @@
         <select name="project_id" id="rt-project"
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
           <option value="">— Ninguno —</option>
-          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+          {% for p in projects %}<option value="{{ p.id }}" data-dept="{{ p.department_id or '' }}">{{ p.name }}</option>{% endfor %}
         </select>
       </div>
       {% endif %}
@@ -267,6 +267,32 @@
   }
   freq.addEventListener('change', syncFreqFields);
 
+  // Filtro por departamento (igual que el modal de tareas): elegir depto acota
+  // las personas y proyectos a ese departamento.
+  var dept = document.getElementById('rt-department');
+  var user = document.getElementById('rt-assigned-to');
+  var proj = document.getElementById('rt-project');
+  function showAllOptions() {
+    [user, proj].forEach(function (sel) {
+      if (!sel) return;
+      for (var i = 0; i < sel.options.length; i++) sel.options[i].style.display = '';
+    });
+  }
+  function applyDeptFilter() {
+    var val = dept.value;
+    [user, proj].forEach(function (sel) {
+      if (!sel) return;
+      for (var i = 0; i < sel.options.length; i++) {
+        var opt = sel.options[i];
+        if (opt.value === '') { opt.style.display = ''; continue; }
+        var match = !val || opt.dataset.dept === val;
+        opt.style.display = match ? '' : 'none';
+        if (!match && opt.selected) { sel.value = ''; }
+      }
+    });
+  }
+  dept.addEventListener('change', applyDeptFilter);
+
   window.openRecurring = function (data) {
     data = data || null;
     if (data) {
@@ -291,6 +317,10 @@
     });
     if (!data) { document.getElementById('rt-priority').value = 'medium'; freq.value = 'daily'; }
     syncFreqFields();
+    // Al abrir (nueva o edición) se muestran todas las opciones; el filtrado+limpieza
+    // solo ocurre cuando el usuario cambia el departamento (evita borrar un asignado
+    // válido de otro depto al abrir una plantilla existente).
+    showAllOptions();
     modal.classList.remove('hidden');
   };
 })();
