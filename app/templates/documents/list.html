@@ -74,6 +74,15 @@
             {% if doc.department_name %}
             <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs">{{ doc.department_name }}</span>
             {% endif %}
+
+            {% if doc.is_drive %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.156-2.828a4 4 0 015.656 0 4 4 0 010 5.656l-1.5 1.5"/>
+              </svg>
+              Drive
+            </span>
+            {% endif %}
           </div>
 
           <h3 class="font-semibold text-gray-900 text-sm mb-1 line-clamp-2">{{ doc.title }}</h3>
@@ -108,7 +117,17 @@
                   Ver
                 </a>
                 {% endif %}
-                {% if not doc.is_drive %}
+                {% if doc.is_drive %}
+                {# Abrir el Drive original en otra pestaña (/view redirige al drive_url) #}
+                <a href="/documents/{{ doc.id }}/view"
+                   target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  </svg>
+                  Abrir
+                </a>
+                {% else %}
                 <a href="/documents/{{ doc.id }}/download"
                    class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
