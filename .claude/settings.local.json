@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync *)",
+      "Bash(uv run *)",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\HOSS\\\\Desktop\\\\knowledge\\\\app\\\\logs\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType File -Force \"C:\\\\Users\\\\HOSS\\\\Desktop\\\\knowledge\\\\app\\\\logs\\\\__init__.py\")",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\HOSS\\\\Desktop\\\\knowledge\\\\app\\\\templates\\\\logs\")",
+      "Bash(python *)",
+      "Bash(uv add *)",
+      "Bash(docker build *)"
+    ]
+  }
+}

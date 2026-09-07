@@ -267,6 +267,9 @@ class Task(Base):
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Set cuando la tarea se saca del tablero (manual o por el job diario de
+    # archivado); NULL = visible en el Kanban.
+    archived_at = Column(DateTime, nullable=True)
 
     project = relationship("Project", back_populates="tasks")
     department = relationship("Department", back_populates="tasks")

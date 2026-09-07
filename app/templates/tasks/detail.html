@@ -39,19 +39,43 @@
                 Recurrente
               </span>
               {% endif %}
+              {% if task.archived_at %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500" title="Archivada">
+                Archivada
+              </span>
+              {% endif %}
             </div>
             {% if task.project %}
             <p class="text-xs text-gray-400 mt-1">📁 {{ task.project.name }}</p>
             {% endif %}
           </div>
-          {% if can_edit %}
-          <button hx-delete="/tasks/{{ task.id }}"
-                  hx-confirm="¿Eliminar esta tarea y sus comentarios?"
-                  hx-target="body"
-                  class="shrink-0 text-red-400 hover:text-red-600 text-xs px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
-            Eliminar
-          </button>
-          {% endif %}
+          <div class="flex items-center gap-2 shrink-0">
+            {% if can_update_status and task.archived_at %}
+            <form method="post" action="/tasks/{{ task.id }}/unarchive">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit"
+                      class="text-gray-500 hover:text-orange-600 text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Restaurar
+              </button>
+            </form>
+            {% elif can_update_status and task.status == 'done' %}
+            <form method="post" action="/tasks/{{ task.id }}/archive">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit"
+                      class="text-gray-500 hover:text-orange-600 text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Archivar
+              </button>
+            </form>
+            {% endif %}
+            {% if can_edit %}
+            <button hx-delete="/tasks/{{ task.id }}"
+                    hx-confirm="¿Eliminar esta tarea y sus comentarios?"
+                    hx-target="body"
+                    class="text-red-400 hover:text-red-600 text-xs px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+              Eliminar
+            </button>
+            {% endif %}
+          </div>
         </div>
       </div>
 

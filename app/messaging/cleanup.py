@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import AuditLog, Message, MessageAttachment, SearchLog
+from app.models import AuditLog, Message, MessageAttachment, SearchLog, Task, TASK_DONE
 from app import storage, valkey_client as vk
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,22 @@ def purge_old_logs(days: int) -> tuple[int, int]:
         db.close()
 
 
+def archive_done_tasks(days: int) -> int:
+    """Archive tasks sitting in DONE for `days` without changes. Returns count archived."""
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        archived = (
+            db.query(Task)
+            .filter(Task.status == TASK_DONE, Task.archived_at.is_(None), Task.updated_at < cutoff)
+            .update({Task.archived_at: datetime.utcnow()}, synchronize_session=False)
+        )
+        db.commit()
+        return archived
+    finally:
+        db.close()
+
+
 def run_cleanup() -> dict | None:
     """Run all daily purges once, honouring the cross-instance daily lock.
 
@@ -91,11 +107,13 @@ def run_cleanup() -> dict | None:
         return None
     messages, files = purge_old_messages(settings.message_retention_days)
     audit_logs, search_logs = purge_old_logs(settings.audit_retention_days)
+    tasks_archived = archive_done_tasks(settings.task_archive_after_days)
     return {
         "messages": messages,
         "chat_files": files,
         "audit_logs": audit_logs,
         "search_logs": search_logs,
+        "tasks_archived": tasks_archived,
     }
 
 

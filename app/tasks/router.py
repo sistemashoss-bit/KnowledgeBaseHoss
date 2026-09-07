@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -18,7 +18,7 @@ from app.permissions import build_access_filter, can_access_document
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
-    TASK_STATUSES, TASK_PRIORITIES,
+    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY,
 )
 from app.templating import templates
@@ -35,22 +35,24 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 # ── Visibility helpers ────────────────────────────────────────────────────────
 
-def _tasks_query(user: User, db: Session):
+def _tasks_query(user: User, db: Session, include_archived: bool = True):
     q = db.query(Task).options(
         joinedload(Task.assignee),
         joinedload(Task.created_by_user),
         joinedload(Task.department),
         joinedload(Task.project),
     )
-    if user.role == ROLE_SUPERADMIN:
-        return q
-    conditions = [
-        Task.created_by == user.id,
-        Task.assigned_to == user.id,
-    ]
-    if user.department_id:
-        conditions.append(Task.department_id == user.department_id)
-    return q.filter(or_(*conditions))
+    if user.role != ROLE_SUPERADMIN:
+        conditions = [
+            Task.created_by == user.id,
+            Task.assigned_to == user.id,
+        ]
+        if user.department_id:
+            conditions.append(Task.department_id == user.department_id)
+        q = q.filter(or_(*conditions))
+    if not include_archived:
+        q = q.filter(Task.archived_at.is_(None))
+    return q
 
 
 def _can_edit_task(user: User, task: Task) -> bool:
@@ -101,6 +103,7 @@ def list_tasks(
     tab: str = "",
     dept_id: str = "",
     user_id: str = "",
+    archived: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -108,6 +111,7 @@ def list_tasks(
         return RedirectResponse("/auth/login", status_code=302)
 
     is_admin = current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+    show_archived = archived == "1"
 
     # Available tabs — "dept" only for admins/superadmins.
     valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else [])
@@ -120,6 +124,7 @@ def list_tasks(
         joinedload(Task.department),
         joinedload(Task.project),
     )
+    base = base.filter(Task.archived_at.isnot(None)) if show_archived else base.filter(Task.archived_at.is_(None))
 
     # Data for create form
     departments = db.query(Department).order_by(Department.name).all()
@@ -176,7 +181,7 @@ def list_tasks(
                 filter_user_id = user_id
         can_drag = False
 
-    tasks = q.order_by(Task.created_at.desc()).all()
+    tasks = q.order_by(Task.updated_at.desc() if show_archived else Task.created_at.desc()).all()
 
     # Group into Kanban columns keyed by status.
     columns = {s: [] for s in TASK_STATUSES}
@@ -194,7 +199,8 @@ def list_tasks(
             "total": len(tasks),
             "tab": tab,
             "is_admin": is_admin,
-            "can_drag": can_drag,
+            "show_archived": show_archived,
+            "can_drag": can_drag and not show_archived,
             "departments": departments,
             "users": users,
             "projects": projects,
@@ -501,6 +507,61 @@ def update_status(
     # Kanban drag-and-drop: no redirect, the card already moved client-side.
     if mode == "kanban":
         return HTMLResponse(status_code=204)
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
+# ── Archive / unarchive ────────────────────────────────────────────────────────
+
+@router.post("/{task_id}/archive", response_class=HTMLResponse)
+def archive_task(
+    task_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    mode: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_update_status(current_user, task):
+        raise HTTPException(403)
+    if task.status != TASK_DONE:
+        raise HTTPException(400, "Solo se pueden archivar tareas Listo")
+    task.archived_at = datetime.utcnow()
+    db.commit()
+    audit.log_action(
+        "task_archive", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+    )
+    if mode == "kanban":
+        return HTMLResponse(status_code=204)
+    return HTMLResponse(headers={"HX-Redirect": "/tasks/"})
+
+
+@router.post("/{task_id}/unarchive", response_class=HTMLResponse)
+def unarchive_task(
+    task_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_update_status(current_user, task):
+        raise HTTPException(403)
+    task.archived_at = None
+    db.commit()
+    audit.log_action(
+        "task_unarchive", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+    )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
 
