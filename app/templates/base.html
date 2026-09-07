@@ -49,7 +49,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
-        Audit Log
+        Auditorias
       </a>
       <a href="/logs/searches"
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -309,7 +309,7 @@
         {% endif %}
         <div class="overflow-hidden">
           <p class="text-white text-xs font-medium truncate">{{ current_user.email }}</p>
-          <p class="text-slate-400 text-xs capitalize">{{ current_user.role }}</p>
+          <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
       </div>
       <form method="post" action="/auth/logout"
