@@ -118,7 +118,7 @@
           </svg>
           Archivadas
         </a>
-        <button onclick="document.getElementById('modal-create').classList.remove('hidden')"
+        <button type="button" onclick="openCreateTask('pending')"
                 class="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -199,6 +199,13 @@
             <div>{{ status_badge(s) }}</div>
             <span class="text-xs font-semibold text-gray-400" data-count-for="{{ s }}">{{ columns[s] | length }}</span>
           </div>
+          <button type="button" onclick="openCreateTask('{{ s }}')"
+                  class="mx-2 mt-2 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-orange-700 bg-white border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Nueva Tarea
+          </button>
           <div data-status="{{ s }}" data-cards
                class="flex-1 p-2 space-y-2 min-h-[140px] rounded-b-xl transition-colors">
             {% for task in columns[s] %}
@@ -277,6 +284,12 @@
     </div>
 
     <script>
+    function openCreateTask(status) {
+      document.getElementById('nt-status').value = status;
+      document.getElementById('modal-create').classList.remove('hidden');
+      document.querySelector('#modal-create input[name="title"]').focus();
+    }
+
     function setTasksView(v) {
       try { localStorage.setItem('tasks_view', v); } catch (e) {}
       document.getElementById('view-kanban').classList.toggle('hidden', v !== 'kanban');
@@ -384,6 +397,7 @@
 
     <form method="post" action="/tasks/" enctype="multipart/form-data" class="space-y-4">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" id="nt-status" name="status" value="pending" />
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
