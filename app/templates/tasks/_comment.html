@@ -33,7 +33,7 @@
     </div>
 
     <!-- Vista -->
-    <p x-show="!editing" class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content }}</p>
+    <p x-show="!editing" class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content | linkify }}</p>
 
     <!-- Edición inline (solo autor) -->
     {% if is_author %}

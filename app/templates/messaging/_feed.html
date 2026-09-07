@@ -30,14 +30,14 @@
 
     {# Text bubble #}
     {% if msg.content %}
-    <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed
+    <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
       {% if is_mine %}
-        bg-orange-500 text-white rounded-br-sm
+        bg-orange-500 text-white rounded-br-sm [&_a]:text-white
       {% else %}
         bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
       {% endif %}
       {% if msg.attachments %}rounded-b-sm{% endif %}">
-      {{ msg.content }}
+      {{ msg.content | linkify }}
     </div>
     {% endif %}
 
