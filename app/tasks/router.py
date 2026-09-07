@@ -103,7 +103,6 @@ def list_tasks(
     tab: str = "",
     dept_id: str = "",
     user_id: str = "",
-    archived: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -111,7 +110,6 @@ def list_tasks(
         return RedirectResponse("/auth/login", status_code=302)
 
     is_admin = current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
-    show_archived = archived == "1"
 
     # Available tabs — "dept" only for admins/superadmins.
     valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else [])
@@ -123,8 +121,7 @@ def list_tasks(
         joinedload(Task.created_by_user),
         joinedload(Task.department),
         joinedload(Task.project),
-    )
-    base = base.filter(Task.archived_at.isnot(None)) if show_archived else base.filter(Task.archived_at.is_(None))
+    ).filter(Task.archived_at.is_(None))
 
     # Data for create form
     departments = db.query(Department).order_by(Department.name).all()
@@ -181,7 +178,7 @@ def list_tasks(
                 filter_user_id = user_id
         can_drag = False
 
-    tasks = q.order_by(Task.updated_at.desc() if show_archived else Task.created_at.desc()).all()
+    tasks = q.order_by(Task.created_at.desc()).all()
 
     # Group into Kanban columns keyed by status.
     columns = {s: [] for s in TASK_STATUSES}
@@ -199,8 +196,7 @@ def list_tasks(
             "total": len(tasks),
             "tab": tab,
             "is_admin": is_admin,
-            "show_archived": show_archived,
-            "can_drag": can_drag and not show_archived,
+            "can_drag": can_drag,
             "departments": departments,
             "users": users,
             "projects": projects,
@@ -213,6 +209,36 @@ def list_tasks(
             "priorities": TASK_PRIORITIES,
             "today": date.today().isoformat(),
             "csrf_token": csrf,
+        },
+    )
+
+
+# ── Archived (independent, table-only view) ────────────────────────────────────
+
+@router.get("/archived", response_class=HTMLResponse)
+def list_archived_tasks(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+
+    tasks = (
+        _tasks_query(current_user, db)
+        .filter(Task.archived_at.isnot(None))
+        .order_by(Task.archived_at.desc())
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "tasks/archived.html",
+        {
+            "current_user": current_user,
+            "tasks": tasks,
+            "today": date.today().isoformat(),
+            "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
 
@@ -514,12 +540,12 @@ def update_status(
 
 # ── Archive / unarchive ────────────────────────────────────────────────────────
 
-@router.post("/{task_id}/archive", response_class=HTMLResponse)
+@router.post("/{task_id}/archive")
 def archive_task(
     task_id: str,
     request: Request,
     csrf_token: str = Form(...),
-    mode: str = Form(""),
+    next_url: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -538,16 +564,16 @@ def archive_task(
         "task_archive", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
     )
-    if mode == "kanban":
-        return HTMLResponse(status_code=204)
-    return HTMLResponse(headers={"HX-Redirect": "/tasks/"})
+    redirect = next_url if next_url and next_url.startswith("/") else "/tasks/"
+    return RedirectResponse(redirect, status_code=302)
 
 
-@router.post("/{task_id}/unarchive", response_class=HTMLResponse)
+@router.post("/{task_id}/unarchive")
 def unarchive_task(
     task_id: str,
     request: Request,
     csrf_token: str = Form(...),
+    next_url: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -564,7 +590,8 @@ def unarchive_task(
         "task_unarchive", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
     )
-    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+    redirect = next_url if next_url and next_url.startswith("/") else "/tasks/archived"
+    return RedirectResponse(redirect, status_code=302)
 
 
 # ── Assign (HTMX) ─────────────────────────────────────────────────────────────

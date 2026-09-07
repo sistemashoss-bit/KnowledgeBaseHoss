@@ -25,7 +25,7 @@
   {% endif %}
 {% endmacro %}
 
-{% macro task_card(task, can_drag, today, show_archived, csrf_token) %}
+{% macro task_card(task, can_drag, today, csrf_token) %}
 <div data-task-id="{{ task.id }}" data-status="{{ task.status }}"
      {% if can_drag %}draggable="true"{% endif %}
      onclick="location.href='/tasks/{{ task.id }}'"
@@ -34,14 +34,10 @@
     <p class="text-sm font-medium text-gray-900 flex-1 leading-snug {% if task.status == 'done' %}line-through text-gray-400{% endif %}">
       {{ task.title }}
     </p>
-    {% if show_archived %}
-    <form method="post" action="/tasks/{{ task.id }}/unarchive" onclick="event.stopPropagation()">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button type="submit" class="text-[11px] text-gray-400 hover:text-orange-600 shrink-0">Restaurar</button>
-    </form>
-    {% elif task.status == 'done' %}
+    {% if task.status == 'done' %}
     <form method="post" action="/tasks/{{ task.id }}/archive" onclick="event.stopPropagation()">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="next_url" value="/tasks/" />
       <button type="submit" class="text-[11px] text-gray-400 hover:text-orange-600 shrink-0">Archivar</button>
     </form>
     {% endif %}
@@ -84,7 +80,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between mb-5">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Tareas{% if show_archived %} · Archivadas{% endif %}</h1>
+        <h1 class="text-2xl font-bold text-gray-900">Tareas</h1>
         <p class="text-sm text-gray-500 mt-0.5">{{ total }} tarea(s) en esta vista</p>
       </div>
       <div class="flex items-center gap-3">
@@ -105,13 +101,7 @@
             Tabla
           </button>
         </div>
-        {% if show_archived %}
-        <a href="/tasks/?tab={{ tab }}"
-           class="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-          Volver al tablero
-        </a>
-        {% else %}
-        <a href="/tasks/?tab={{ tab }}&archived=1"
+        <a href="/tasks/archived"
            class="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 01-2-2V5a1 1 0 011-1h16a1 1 0 011 1v1a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/>
@@ -125,11 +115,9 @@
           </svg>
           Nueva Tarea
         </button>
-        {% endif %}
       </div>
     </div>
 
-    {% if not show_archived %}
     <!-- Tabs -->
     <div class="flex items-center gap-1 mb-5 border-b border-gray-200">
       {% set tabs = [('assigned', 'Asignadas a mí'), ('created', 'Yo asigné')] %}
@@ -150,7 +138,6 @@
       </a>
       {% endif %}
     </div>
-    {% endif %}
 
     {% if tab == 'dept' and (filter_departments or filter_users) %}
     <form method="get" class="flex flex-wrap items-center gap-2 mb-5">
@@ -209,7 +196,7 @@
           <div data-status="{{ s }}" data-cards
                class="flex-1 p-2 space-y-2 min-h-[140px] rounded-b-xl transition-colors">
             {% for task in columns[s] %}
-              {{ task_card(task, can_drag, today, show_archived, csrf_token) }}
+              {{ task_card(task, can_drag, today, csrf_token) }}
             {% endfor %}
             <div data-empty class="text-center text-xs text-gray-300 py-6 {% if columns[s] %}hidden{% endif %}">
               Sin tareas
@@ -263,14 +250,10 @@
               {{ task.due_date.strftime('%d/%m/%Y') if task.due_date else '—' }}
             </td>
             <td class="px-4 py-3 text-right">
-              {% if show_archived %}
-              <form method="post" action="/tasks/{{ task.id }}/unarchive" onclick="event.stopPropagation()">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <button type="submit" class="text-xs text-gray-400 hover:text-orange-600">Restaurar</button>
-              </form>
-              {% elif task.status == 'done' %}
+              {% if task.status == 'done' %}
               <form method="post" action="/tasks/{{ task.id }}/archive" onclick="event.stopPropagation()">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="next_url" value="/tasks/" />
                 <button type="submit" class="text-xs text-gray-400 hover:text-orange-600">Archivar</button>
               </form>
               {% endif %}
