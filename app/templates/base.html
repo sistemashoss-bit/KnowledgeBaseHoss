@@ -349,14 +349,12 @@
 
       <!-- Header -->
       <div class="bg-indigo-600 px-4 py-3 flex items-center gap-3 shrink-0">
-        <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-          </svg>
+        <div class="w-8 h-8 shrink-0 rounded-full bg-white/20 flex items-center justify-center">
+          <img src="{{ url_for('assets', path='mascota.png') }}"
+               alt="" class="w-full h-full object-contain" />
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-white font-semibold text-sm leading-tight">Asistente IA</p>
+          <p class="text-white font-semibold text-sm leading-tight">MAX</p>
           <p class="text-indigo-200 text-xs">Busca en los documentos</p>
         </div>
         <div class="flex items-center gap-1">
@@ -431,12 +429,14 @@
     </div>
 
     <!-- Toggle FAB -->
-    <button @click="toggle()"
+    <button type="button" @click="toggle()"
+            :aria-label="open ? 'Cerrar asistente de IA' : 'Abrir asistente de IA'"
+            :aria-expanded="open"
             class="w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95">
-      <svg x-show="!open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-      </svg>
+      <img x-show="!open"
+           src="{{ url_for('assets', path='mascota.png') }}"
+           alt=""
+           class="w-full h-full object-contain" />
       <svg x-show="open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
       </svg>
