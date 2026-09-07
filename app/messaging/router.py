@@ -625,6 +625,45 @@ async def send_message(
     return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
 
 
+@router.get("/{conv_id}/files", response_class=HTMLResponse)
+def conversation_files(
+    conv_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+
+    is_participant = (
+        db.query(ConversationParticipant)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not is_participant:
+        raise HTTPException(403)
+
+    attachments = (
+        db.query(MessageAttachment)
+        .options(joinedload(MessageAttachment.uploader))
+        .join(Message, MessageAttachment.message_id == Message.id)
+        .filter(Message.conversation_id == conv_id)
+        .order_by(MessageAttachment.created_at.desc())
+        .all()
+    )
+    media = [a for a in attachments if a.content_type.startswith("image/")]
+    docs = [a for a in attachments if not a.content_type.startswith("image/")]
+
+    return templates.TemplateResponse(
+        request,
+        "messaging/_files_panel.html",
+        {"conv_id": conv_id, "media": media, "docs": docs},
+    )
+
+
 @router.get("/{conv_id}/attachments/{att_id}/download")
 def download_attachment(
     conv_id: str,

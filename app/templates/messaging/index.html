@@ -183,6 +183,15 @@
                   d="M15 10l4.553-2.069A1 1 0 0121 8.869v6.262a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
           </svg>
         </button>
+        <!-- Shared files -->
+        <button onclick="openFilesPanel('{{ active_conv.id }}')"
+                title="Archivos compartidos"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-orange-600 hover:border-orange-300 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M5 8h14M5 8a2 2 0 01-2-2V5a1 1 0 011-1h16a1 1 0 011 1v1a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/>
+          </svg>
+        </button>
         {% if active_conv.type == 'group' %}
         <button @click="showMembers = !showMembers"
                 class="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
@@ -527,6 +536,37 @@
     </form>
   </div>
 </div>
+
+<!-- Shared files panel -->
+<div id="modal-files" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] flex flex-col">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+      <h2 class="text-lg font-semibold text-gray-900">Archivos compartidos</h2>
+      <button onclick="document.getElementById('modal-files').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div id="files-body" class="px-6 py-4 overflow-y-auto flex-1"></div>
+  </div>
+</div>
+
+<script>
+function openFilesPanel(convId) {
+  var modal = document.getElementById('modal-files');
+  var body = document.getElementById('files-body');
+  body.innerHTML = '<p class="text-center text-sm text-gray-400 py-10">Cargando…</p>';
+  modal.classList.remove('hidden');
+  fetch('/messaging/' + convId + '/files')
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(function (html) { body.innerHTML = html; })
+    .catch(function () {
+      body.innerHTML = '<p class="text-center text-sm text-red-400 py-10">No se pudieron cargar los archivos.</p>';
+    });
+}
+</script>
 
 <script>
 function convFilter() {
