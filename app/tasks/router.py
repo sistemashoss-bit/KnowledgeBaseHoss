@@ -128,9 +128,9 @@ def list_tasks(
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     projects = db.query(Project).order_by(Project.name).all()
 
-    # Opciones y selección de los filtros del tab "Departamento":
-    # superadmin → filtro por departamento; admin → filtro por persona (dentro de
-    # su alcance de gestión). Vacíos en el resto de los tabs.
+    # Filtro por departamento en las vistas personales y para superadmin.
+    # En la vista Departamento, los administradores filtran por persona
+    # dentro de su alcance de gestión.
     filter_departments = []
     filter_users = []
     filter_dept_id = ""
@@ -151,9 +151,6 @@ def list_tasks(
             q = base  # superadmin ve todos los departamentos
             # Filtro por departamento (solo superadmin).
             filter_departments = departments
-            if dept_id and any(str(d.id) == dept_id for d in filter_departments):
-                q = q.filter(Task.department_id == dept_id)
-                filter_dept_id = dept_id
         else:
             conds = []
             if scope["dept_ids"]:
@@ -177,6 +174,13 @@ def list_tasks(
                 q = q.filter(Task.assigned_to == user_id)
                 filter_user_id = user_id
         can_drag = False
+
+    if tab in ("assigned", "created"):
+        filter_departments = departments
+    selected_department = next((d for d in filter_departments if str(d.id) == dept_id), None)
+    if selected_department is not None:
+        q = q.filter(Task.department_id == selected_department.id)
+        filter_dept_id = dept_id
 
     tasks = q.order_by(Task.created_at.desc()).all()
 
