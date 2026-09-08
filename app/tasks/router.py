@@ -16,10 +16,11 @@ from app.documents.router import _preview_meta
 from app.messaging import realtime
 from app.permissions import build_access_filter, can_access_document
 from app.models import (
-    Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence, User,
+    Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
+    TaskStatusHistory, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE,
-    RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY,
+    RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
 )
 from app.templating import templates
 
@@ -69,6 +70,37 @@ def _can_update_status(user: User, task: Task) -> bool:
     if _can_edit_task(user, task):
         return True
     return task.assigned_to and str(task.assigned_to) == str(user.id)
+
+
+def _can_approve_task(user: User, task: Task) -> bool:
+    """Sólo quien asignó la tarea (su creador) o un superadmin puede aprobarla
+    (marcarla Lista). El asignado puede llevarla hasta Revisión, no más allá."""
+    if user.role == ROLE_SUPERADMIN:
+        return True
+    return str(task.created_by) == str(user.id)
+
+
+def _status_durations(task: Task) -> list[dict]:
+    """Tiempo acumulado en cada estado, a partir del historial de cambios.
+
+    El tramo del estado actual se cuenta hasta ahora (o hasta `archived_at` si la
+    tarea ya se archivó). Devuelve una lista en el orden de `TASK_STATUSES` con
+    entradas de duración cero omitidas.
+    """
+    history = task.status_history
+    if not history:
+        return []
+    totals = {s: 0.0 for s in TASK_STATUSES}
+    end_of_life = task.archived_at or datetime.utcnow()
+    for i, entry in enumerate(history):
+        segment_end = history[i + 1].changed_at if i + 1 < len(history) else end_of_life
+        seconds = (segment_end - entry.changed_at).total_seconds()
+        if entry.to_status in totals and seconds > 0:
+            totals[entry.to_status] += seconds
+    return [
+        {"status": s, "seconds": totals[s]}
+        for s in TASK_STATUSES if totals[s] > 0
+    ]
 
 
 # ── Document reference helpers ─────────────────────────────────────────────────
@@ -287,6 +319,14 @@ async def create_task(
     )
     db.add(task)
     db.flush()
+    db.add(TaskStatusHistory(
+        id=uuid.uuid4(),
+        task_id=task.id,
+        from_status=None,
+        to_status=task.status,
+        changed_by=current_user.id,
+        changed_at=task.created_at,
+    ))
 
     for f in evidences:
         if not f.filename:
@@ -341,6 +381,7 @@ def task_detail(
             joinedload(Task.comments).joinedload(TaskComment.user),
             joinedload(Task.evidences).joinedload(TaskEvidence.uploader),
             joinedload(Task.document),
+            joinedload(Task.status_history),
         )
         .filter(Task.id == task_id)
         .first()
@@ -369,6 +410,7 @@ def task_detail(
         {
             "current_user": current_user,
             "task": task,
+            "status_durations": _status_durations(task),
             "doc_preview": doc_preview,
             "users": users,
             "departments": departments,
@@ -376,6 +418,7 @@ def task_detail(
             "priorities": TASK_PRIORITIES,
             "can_edit": _can_edit_task(current_user, task),
             "can_update_status": _can_update_status(current_user, task),
+            "can_approve": _can_approve_task(current_user, task),
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
@@ -525,7 +568,18 @@ def update_status(
     if status not in TASK_STATUSES:
         raise HTTPException(400)
     prev = task.status
+    is_approval = status == TASK_DONE and prev != TASK_DONE
+    if is_approval and not _can_approve_task(current_user, task):
+        raise HTTPException(403, "Solo quien asignó la tarea o un superadmin puede aprobarla")
     task.status = status
+    if status != prev:
+        db.add(TaskStatusHistory(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            from_status=prev,
+            to_status=status,
+            changed_by=current_user.id,
+        ))
     db.commit()
     # Notify the other party (assignee/creator) that the status changed.
     for uid in {task.assigned_to, task.created_by}:
@@ -536,6 +590,11 @@ def update_status(
         resource_type="task", resource_id=task_id, resource_name=task.title,
         details=f"{prev} → {status}",
     )
+    if is_approval:
+        audit.log_action(
+            "task_approve", user=current_user, request=request,
+            resource_type="task", resource_id=task_id, resource_name=task.title,
+        )
     # Kanban drag-and-drop: no redirect, the card already moved client-side.
     if mode == "kanban":
         return HTMLResponse(status_code=204)
@@ -913,11 +972,11 @@ def _validate_target_scope(user: User, db: Session, department_id: str, assigned
             raise HTTPException(403, "Usuario fuera de tu alcance")
 
 
-def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str):
-    """Normaliza y valida la frecuencia. Devuelve (frequency, dow, dom)."""
+def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str, days_of_week: list[str] | None = None):
+    """Normaliza y valida la frecuencia. Devuelve (frequency, dow, dom, custom_days_csv)."""
     if frequency not in RECURRENCE_FREQUENCIES:
         raise HTTPException(400, "Frecuencia inválida")
-    dow = dom = None
+    dow = dom = custom_days = None
     if frequency == FREQ_WEEKLY:
         try:
             dow = int(day_of_week)
@@ -932,7 +991,15 @@ def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str):
             raise HTTPException(400, "Día del mes inválido")
         if not 1 <= dom <= 31:
             raise HTTPException(400, "Día del mes fuera de rango")
-    return frequency, dow, dom
+    elif frequency == FREQ_CUSTOM:
+        try:
+            days = {int(d) for d in (days_of_week or [])}
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Días de la semana inválidos")
+        if not days or not days.issubset(set(range(7))):
+            raise HTTPException(400, "Elige al menos un día válido de la semana")
+        custom_days = ",".join(str(d) for d in sorted(days))
+    return frequency, dow, dom, custom_days
 
 
 @recurring_router.get("/", response_class=HTMLResponse)
@@ -994,6 +1061,7 @@ def create_recurring(
     frequency: str = Form("daily"),
     day_of_week: str = Form(""),
     day_of_month: str = Form(""),
+    days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
     csrf_token: str = Form(...),
@@ -1008,7 +1076,7 @@ def create_recurring(
         raise HTTPException(403, "Invalid CSRF token")
 
     _validate_target_scope(current_user, db, department_id, assigned_to)
-    freq, dow, dom = _parse_recurrence(frequency, day_of_week, day_of_month)
+    freq, dow, dom, custom_days = _parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
 
     rt = RecurringTask(
         id=uuid.uuid4(),
@@ -1023,6 +1091,7 @@ def create_recurring(
         frequency=freq,
         day_of_week=dow,
         day_of_month=dom,
+        days_of_week=custom_days,
         start_date=date.fromisoformat(start_date) if start_date else None,
         end_date=date.fromisoformat(end_date) if end_date else None,
     )
@@ -1050,6 +1119,7 @@ def edit_recurring(
     frequency: str = Form("daily"),
     day_of_week: str = Form(""),
     day_of_month: str = Form(""),
+    days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
     csrf_token: str = Form(...),
@@ -1068,7 +1138,7 @@ def edit_recurring(
         raise HTTPException(403)
 
     _validate_target_scope(current_user, db, department_id, assigned_to)
-    freq, dow, dom = _parse_recurrence(frequency, day_of_week, day_of_month)
+    freq, dow, dom, custom_days = _parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
 
     rt.title = title.strip()
     rt.description = description.strip() or None
@@ -1080,6 +1150,7 @@ def edit_recurring(
     rt.frequency = freq
     rt.day_of_week = dow
     rt.day_of_month = dom
+    rt.days_of_week = custom_days
     rt.start_date = date.fromisoformat(start_date) if start_date else None
     rt.end_date = date.fromisoformat(end_date) if end_date else None
     db.commit()

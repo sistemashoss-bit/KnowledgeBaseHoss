@@ -25,8 +25,9 @@
   {% endif %}
 {% endmacro %}
 
-{% macro task_card(task, can_drag, today, csrf_token) %}
-<div data-task-id="{{ task.id }}" data-status="{{ task.status }}"
+{% macro task_card(task, can_drag, today, csrf_token, current_user) %}
+{% set can_approve = current_user.role == "superadmin" or task.created_by|string == current_user.id|string %}
+<div data-task-id="{{ task.id }}" data-status="{{ task.status }}" data-can-approve="{{ 'true' if can_approve else 'false' }}"
      {% if can_drag %}draggable="true"{% endif %}
      onclick="location.href='/tasks/{{ task.id }}'"
      class="bg-white rounded-lg border border-gray-200 p-3 shadow-sm hover:shadow hover:border-gray-300 transition-all cursor-pointer select-none {% if can_drag %}active:cursor-grabbing{% endif %}">
@@ -196,7 +197,7 @@
           <div data-status="{{ s }}" data-cards
                class="flex-1 p-2 space-y-2 min-h-[140px] rounded-b-xl transition-colors">
             {% for task in columns[s] %}
-              {{ task_card(task, can_drag, today, csrf_token) }}
+              {{ task_card(task, can_drag, today, csrf_token, current_user) }}
             {% endfor %}
             <div data-empty class="text-center text-xs text-gray-300 py-6 {% if columns[s] %}hidden{% endif %}">
               Sin tareas
@@ -342,6 +343,10 @@
       var newStatus = zone.getAttribute('data-status');
       var oldStatus = dragged.getAttribute('data-status');
       if (newStatus === oldStatus) return;
+      if (newStatus === 'done' && dragged.getAttribute('data-can-approve') !== 'true') {
+        alert('Solo quien asignó la tarea o un superadmin puede aprobarla (moverla a Listo).');
+        return;
+      }
 
       var id = dragged.getAttribute('data-task-id');
       var empty = zone.querySelector('[data-empty]');

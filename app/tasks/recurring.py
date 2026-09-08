@@ -15,8 +15,8 @@ from datetime import date
 from app import audit
 from app.database import SessionLocal
 from app.models import (
-    RecurringTask, Task,
-    FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY,
+    RecurringTask, Task, TaskStatusHistory,
+    FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
     TASK_PENDING,
 )
 
@@ -38,6 +38,9 @@ def _due_today(rt: RecurringTask, today: date) -> bool:
         return True
     if rt.frequency == FREQ_WEEKLY:
         return today.weekday() == rt.day_of_week
+    if rt.frequency == FREQ_CUSTOM:
+        days = {int(d) for d in (rt.days_of_week or "").split(",") if d != ""}
+        return today.weekday() in days
     if rt.frequency == FREQ_MONTHLY:
         last_day = calendar.monthrange(today.year, today.month)[1]
         # day_of_month puede exceder los días del mes (p.ej. 31 en febrero):
@@ -60,7 +63,7 @@ def generate_due_tasks(today: date | None = None) -> int:
         for rt in templates:
             if not _due_today(rt, today):
                 continue
-            db.add(Task(
+            task = Task(
                 id=uuid.uuid4(),
                 title=rt.title,
                 description=rt.description,
@@ -73,6 +76,16 @@ def generate_due_tasks(today: date | None = None) -> int:
                 document_id=rt.document_id,
                 created_by=rt.created_by,
                 due_date=today,
+            )
+            db.add(task)
+            db.flush()
+            db.add(TaskStatusHistory(
+                id=uuid.uuid4(),
+                task_id=task.id,
+                from_status=None,
+                to_status=task.status,
+                changed_by=rt.created_by,
+                changed_at=task.created_at,
             ))
             rt.last_generated_on = today
             created += 1

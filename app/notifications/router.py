@@ -16,9 +16,26 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 CUTOFF_HOURS = 48
 
+# Códigos internos (en inglés) de Task.status → etiqueta visible, para no mostrar
+# crudo el contenido de AuditLog.details (p.ej. "pending → done") en el dropdown.
+_STATUS_LABELS = {
+    "pending": "Pendiente",
+    "in_progress": "En progreso",
+    "review": "Revisión",
+    "done": "Listo",
+}
+
 
 def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _translate_status_change(details: str) -> str:
+    """"pending → done" (crudo) → "Pendiente → Listo"."""
+    if not details or " → " not in details:
+        return details or ""
+    prev, _, new = details.partition(" → ")
+    return f"{_STATUS_LABELS.get(prev, prev)} → {_STATUS_LABELS.get(new, new)}"
 
 
 def _names_for_ids(db: Session, ids) -> dict:
@@ -117,7 +134,7 @@ def get_notifications(
                 "id": f"task_status_{log.id}",
                 "type": "task_status",
                 "title": f"{actor} cambió el estado",
-                "subtitle": f"{log.resource_name}: {log.details}",
+                "subtitle": f"{log.resource_name}: {_translate_status_change(log.details)}",
                 "url": f"/tasks/{log.resource_id}",
                 "created_at": _fmt(log.created_at),
             })
@@ -159,6 +176,31 @@ def get_notifications(
                 "id": f"task_evidence_{log.id}",
                 "type": "task_evidence",
                 "title": f"{actor} subió evidencia",
+                "subtitle": log.resource_name or "",
+                "url": f"/tasks/{log.resource_id}",
+                "created_at": _fmt(log.created_at),
+            })
+
+    # ── 3d. Tareas asignadas a mí que fueron aprobadas ───────────────────────
+    approve_logs = db.query(AuditLog).filter(
+        AuditLog.action == "task_approve",
+        AuditLog.resource_type == "task",
+        AuditLog.user_email != current_user.email,
+        AuditLog.created_at > cutoff,
+    ).order_by(AuditLog.created_at.desc()).all()
+    if approve_logs:
+        my_assigned_ids = {
+            str(t.id) for t in db.query(Task.id).filter(Task.assigned_to == current_user.id).all()
+        }
+        approve_names = _actor_names(db, approve_logs)
+        for log in approve_logs:
+            if log.resource_id not in my_assigned_ids:
+                continue
+            actor = approve_names.get(str(log.user_id)) or log.user_email or "Alguien"
+            notifications.append({
+                "id": f"task_approved_{log.id}",
+                "type": "task_approved",
+                "title": f"{actor} aprobó tu tarea",
                 "subtitle": log.resource_name or "",
                 "url": f"/tasks/{log.resource_id}",
                 "created_at": _fmt(log.created_at),

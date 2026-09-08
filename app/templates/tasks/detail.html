@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% block title %}{{ task.title }} — Tareas{% endblock %}
 
+{% macro duration_label(seconds) %}
+  {%- set days = (seconds // 86400) | int -%}
+  {%- set hours = ((seconds % 86400) // 3600) | int -%}
+  {%- set minutes = ((seconds % 3600) // 60) | int -%}
+  {%- if days > 0 -%}{{ days }}d {{ hours }}h
+  {%- elif hours > 0 -%}{{ hours }}h {{ minutes }}m
+  {%- else -%}{{ minutes }}m
+  {%- endif -%}
+{% endmacro %}
+
+{% set status_labels = {"pending": "Pendiente", "in_progress": "En progreso", "review": "Revisión", "done": "Listo"} %}
+{% set status_dot = {"pending": "bg-gray-300", "in_progress": "bg-blue-400", "review": "bg-purple-400", "done": "bg-green-400"} %}
+
 {% macro priority_label(p) %}
   {% if p == "urgent" %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">🔴 Urgente</span>
   {% elif p == "high" %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">🟠 Alta</span>
@@ -92,9 +105,14 @@
               <option value="pending" {% if task.status == "pending" %}selected{% endif %}>Pendiente</option>
               <option value="in_progress" {% if task.status == "in_progress" %}selected{% endif %}>En progreso</option>
               <option value="review" {% if task.status == "review" %}selected{% endif %}>Revisión</option>
-              <option value="done" {% if task.status == "done" %}selected{% endif %}>Listo</option>
+              <option value="done" {% if task.status == "done" %}selected{% endif %} {% if not can_approve %}disabled{% endif %}>
+                Listo{% if not can_approve %} (requiere aprobación){% endif %}
+              </option>
             </select>
           </form>
+          {% if not can_approve and task.status != "done" %}
+          <p class="text-[11px] text-gray-400 mt-1">Solo quien asignó la tarea o un superadmin puede aprobarla.</p>
+          {% endif %}
           {% else %}
           <p class="text-sm font-medium text-gray-800">
             {% if task.status == "pending" %}Pendiente
@@ -124,6 +142,21 @@
           </p>
         </div>
       </div>
+
+      <!-- Time in status -->
+      {% if status_durations %}
+      <div class="px-6 py-4 border-b border-gray-100">
+        <p class="text-xs text-gray-400 mb-2">Tiempo por estado</p>
+        <div class="flex flex-wrap gap-2">
+          {% for d in status_durations %}
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-gray-50 border border-gray-200 text-gray-600">
+            <span class="w-1.5 h-1.5 rounded-full {{ status_dot[d.status] }}"></span>
+            {{ status_labels[d.status] }}: <span class="font-medium text-gray-800">{{ duration_label(d.seconds) }}</span>
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
 
       <!-- Description -->
       {% if task.description %}

@@ -42,7 +42,8 @@ TASK_PRIORITIES = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_URGENT
 FREQ_DAILY = "daily"
 FREQ_WEEKLY = "weekly"
 FREQ_MONTHLY = "monthly"
-RECURRENCE_FREQUENCIES = [FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY]
+FREQ_CUSTOM = "custom"  # días específicos de la semana (p.ej. lun/mié/vie)
+RECURRENCE_FREQUENCIES = [FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM]
 
 # ── Conversation type constants ───────────────────────────────────────────────
 CONV_DIRECT = "direct"
@@ -278,6 +279,26 @@ class Task(Base):
     created_by_user = relationship("User", back_populates="created_tasks", foreign_keys=[created_by])
     comments = relationship("TaskComment", back_populates="task", order_by="TaskComment.created_at")
     evidences = relationship("TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at")
+    status_history = relationship(
+        "TaskStatusHistory", back_populates="task", order_by="TaskStatusHistory.changed_at"
+    )
+
+
+class TaskStatusHistory(Base):
+    """Registro de cada cambio de estado de una `Task`; permite calcular cuánto
+    tiempo pasó en cada columna del Kanban (incluye el estado inicial al crearse,
+    con `from_status` NULL)."""
+    __tablename__ = "task_status_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    from_status = Column(String(20), nullable=True)
+    to_status = Column(String(20), nullable=False)
+    changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    task = relationship("Task", back_populates="status_history")
+    changed_by_user = relationship("User", foreign_keys=[changed_by])
 
 
 class RecurringTask(Base):
@@ -301,6 +322,8 @@ class RecurringTask(Base):
     frequency = Column(String(10), nullable=False, default=FREQ_DAILY)
     day_of_week = Column(Integer, nullable=True)   # 0=Lun..6=Dom, sólo weekly
     day_of_month = Column(Integer, nullable=True)  # 1..31, sólo monthly
+    # CSV de días 0=Lun..6=Dom (p.ej. "0,2,4"), sólo custom (días específicos).
+    days_of_week = Column(String(20), nullable=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
     start_date = Column(Date, nullable=True)

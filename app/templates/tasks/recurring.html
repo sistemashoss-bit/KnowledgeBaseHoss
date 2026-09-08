@@ -11,10 +11,16 @@
   {% endif %}
 {% endmacro %}
 
+{% set weekdays_short = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'] %}
+
 {% macro freq_label(rt) %}
   {% if rt.frequency == "daily" %}Diario
   {% elif rt.frequency == "weekly" %}Semanal · {{ weekdays[rt.day_of_week] if rt.day_of_week is not none else '—' }}
   {% elif rt.frequency == "monthly" %}Mensual · día {{ rt.day_of_month or '—' }}
+  {% elif rt.frequency == "custom" %}Días específicos ·
+    {%- if rt.days_of_week %}
+      {%- for idx in rt.days_of_week.split(',') %} {{ weekdays_short[idx | int] }}{% if not loop.last %},{% endif %}{% endfor -%}
+    {%- else %} —{% endif %}
   {% endif %}
 {% endmacro %}
 
@@ -78,6 +84,7 @@
                     "document_id": rt.document_id|string if rt.document_id else "",
                     "frequency": rt.frequency, "day_of_week": rt.day_of_week if rt.day_of_week is not none else "",
                     "day_of_month": rt.day_of_month or "",
+                    "days_of_week": rt.days_of_week.split(',') if rt.days_of_week else [],
                     "start_date": rt.start_date.isoformat() if rt.start_date else "",
                     "end_date": rt.end_date.isoformat() if rt.end_date else ""
                   } | tojson }})'
@@ -158,6 +165,7 @@
             <option value="daily">Diario</option>
             <option value="weekly">Semanal</option>
             <option value="monthly">Mensual</option>
+            <option value="custom">Días específicos</option>
           </select>
         </div>
         <div>
@@ -178,6 +186,24 @@
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
           {% for d in weekdays %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}
         </select>
+      </div>
+
+      <div id="rt-custom-wrap" class="hidden">
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-sm font-medium text-gray-700">Días de la semana</label>
+          <div class="flex gap-2 text-[11px]">
+            <button type="button" data-preset="0,1,2,3,4" class="text-orange-600 hover:underline">Lun–Vie</button>
+            <button type="button" data-preset="0,2,4" class="text-orange-600 hover:underline">Lun/Mié/Vie</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          {% for d in weekdays_short %}
+          <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs cursor-pointer has-[:checked]:bg-orange-50 has-[:checked]:border-orange-400 has-[:checked]:text-orange-700">
+            <input type="checkbox" name="days_of_week" value="{{ loop.index0 }}" class="rt-day-checkbox accent-orange-600" />
+            {{ d }}
+          </label>
+          {% endfor %}
+        </div>
       </div>
 
       <div id="rt-monthly-wrap" class="hidden">
@@ -264,8 +290,18 @@
   function syncFreqFields() {
     document.getElementById('rt-weekly-wrap').classList.toggle('hidden', freq.value !== 'weekly');
     document.getElementById('rt-monthly-wrap').classList.toggle('hidden', freq.value !== 'monthly');
+    document.getElementById('rt-custom-wrap').classList.toggle('hidden', freq.value !== 'custom');
   }
   freq.addEventListener('change', syncFreqFields);
+
+  // Checkboxes de días específicos + atajos "Lun–Vie" / "Lun/Mié/Vie".
+  var dayCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.rt-day-checkbox'));
+  document.querySelectorAll('#rt-custom-wrap button[data-preset]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var days = btn.dataset.preset.split(',');
+      dayCheckboxes.forEach(function (cb) { cb.checked = days.indexOf(cb.value) !== -1; });
+    });
+  });
 
   // Filtro por departamento (igual que el modal de tareas): elegir depto acota
   // las personas y proyectos a ese departamento.
@@ -315,6 +351,8 @@
       var v = data ? data[map[id]] : '';
       el.value = (v === null || v === undefined) ? '' : v;
     });
+    var selectedDays = (data && data.days_of_week) ? data.days_of_week.map(String) : [];
+    dayCheckboxes.forEach(function (cb) { cb.checked = selectedDays.indexOf(cb.value) !== -1; });
     if (!data) { document.getElementById('rt-priority').value = 'medium'; freq.value = 'daily'; }
     syncFreqFields();
     // Al abrir (nueva o edición) se muestran todas las opciones; el filtrado+limpieza
