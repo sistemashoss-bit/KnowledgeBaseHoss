@@ -144,11 +144,16 @@
       </div>
 
       <!-- Time in status -->
-      {% if status_durations %}
+      {% if status_durations.breakdown or status_durations.total_seconds is not none %}
       <div class="px-6 py-4 border-b border-gray-100">
-        <p class="text-xs text-gray-400 mb-2">Tiempo por estado</p>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-gray-400">Tiempo por estado</p>
+          {% if status_durations.total_seconds is not none %}
+          <p class="text-xs text-gray-400">Total: <span class="font-medium text-gray-700">{{ duration_label(status_durations.total_seconds) }}</span></p>
+          {% endif %}
+        </div>
         <div class="flex flex-wrap gap-2">
-          {% for d in status_durations %}
+          {% for d in status_durations.breakdown %}
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-gray-50 border border-gray-200 text-gray-600">
             <span class="w-1.5 h-1.5 rounded-full {{ status_dot[d.status] }}"></span>
             {{ status_labels[d.status] }}: <span class="font-medium text-gray-800">{{ duration_label(d.seconds) }}</span>

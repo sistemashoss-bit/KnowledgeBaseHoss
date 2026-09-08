@@ -159,6 +159,19 @@
 
       <div class="grid grid-cols-2 gap-4">
         <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inicio <span class="text-xs text-gray-400">(opcional)</span></label>
+          <input type="date" name="start_date" id="rt-start-date"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Fin <span class="text-xs text-gray-400">(opcional)</span></label>
+          <input type="date" name="end_date" id="rt-end-date"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Frecuencia</label>
           <select name="frequency" id="rt-frequency"
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
@@ -256,19 +269,6 @@
       </div>
       {% endif %}
 
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Inicio <span class="text-xs text-gray-400">(opcional)</span></label>
-          <input type="date" name="start_date" id="rt-start-date"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Fin <span class="text-xs text-gray-400">(opcional)</span></label>
-          <input type="date" name="end_date" id="rt-end-date"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
-        </div>
-      </div>
-
       <div class="flex gap-3 justify-end pt-2">
         <button type="button" onclick="document.getElementById('modal-recurring').classList.add('hidden')"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
@@ -321,7 +321,9 @@
       for (var i = 0; i < sel.options.length; i++) {
         var opt = sel.options[i];
         if (opt.value === '') { opt.style.display = ''; continue; }
-        var match = !val || opt.dataset.dept === val;
+        // val === "" (opción "— Sin departamento —") también debe filtrar: sólo
+        // coinciden las personas/proyectos que tampoco tienen departamento.
+        var match = opt.dataset.dept === val;
         opt.style.display = match ? '' : 'none';
         if (!match && opt.selected) { sel.value = ''; }
       }
