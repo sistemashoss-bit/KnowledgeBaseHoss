@@ -55,6 +55,34 @@ def notify_user(user_id) -> None:
     vk.publish(user_channel(user_id), json.dumps({"type": "notify"}))
 
 
+def tasks_channel() -> str:
+    """Global channel: any task board change, for everyone currently viewing it."""
+    return "tasks:changes"
+
+
+def notify_tasks() -> None:
+    """Broadcast that a task changed, so every open /tasks/ board refreshes live.
+
+    Unlike notify_user (per-user), this fans out to all viewers — the Kanban
+    board is shared across a department, not personal to one account.
+    """
+    from app import valkey_client as vk
+    vk.publish(tasks_channel(), "changed")
+
+
+def task_channel(task_id) -> str:
+    """Per-task channel: everyone with a task's detail page open."""
+    return f"tasks:task:{task_id}"
+
+
+def notify_task(task_id) -> None:
+    """Broadcast that one task's detail changed (status, assign, tags,
+    evidence, comments) so every open detail page for it refreshes live.
+    """
+    from app import valkey_client as vk
+    vk.publish(task_channel(task_id), "changed")
+
+
 async def _channel_stream(chan: str, request, event_name: str):
     """Yield SSE frames from a Pub/Sub channel until the client disconnects.
 
@@ -100,4 +128,16 @@ async def event_stream(conv_id: str, request):
 async def user_event_stream(user_id: str, request):
     """Yield SSE frames on the user's personal channel (call rings, etc.)."""
     async for frame in _channel_stream(user_channel(user_id), request, "signal"):
+        yield frame
+
+
+async def tasks_event_stream(request):
+    """Yield SSE frames on the shared tasks channel until the client disconnects."""
+    async for frame in _channel_stream(tasks_channel(), request, "task"):
+        yield frame
+
+
+async def task_event_stream(task_id: str, request):
+    """Yield SSE frames on one task's channel until the client disconnects."""
+    async for frame in _channel_stream(task_channel(task_id), request, "task"):
         yield frame

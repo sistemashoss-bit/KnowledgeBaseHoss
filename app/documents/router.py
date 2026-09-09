@@ -119,6 +119,62 @@ def list_documents(
     )
 
 
+@router.get("/mine", response_class=HTMLResponse)
+def list_my_documents(
+    request: Request,
+    q: str = "",
+    department_id: str = "",
+    db: Session = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Documentos de trabajo: solo los de visibilidad 'personas específicas' donde
+    el usuario está directamente asignado (nada público, de empleado, ni de depto)."""
+    access_filter = build_access_filter(user)
+    raw_docs = rag.search_documents(q, access_filter, department_id or None, size=200)
+
+    uid = str(user.id)
+    raw_docs = [
+        d for d in raw_docs
+        if d.get("status") == STATUS_CUSTOM and uid in (d.get("allowed_user_ids") or [])
+    ]
+
+    ids = [d["id"] for d in raw_docs if d.get("id")]
+    drive_map: dict[str, str | None] = {}
+    if ids:
+        for row in db.query(Document.id, Document.drive_url).filter(Document.id.in_(ids)).all():
+            drive_map[str(row.id)] = row.drive_url
+
+    docs = []
+    for d in raw_docs:
+        drive_url = drive_map.get(str(d.get("id")))
+        docs.append({
+            **d,
+            "can_manage": can_manage_doc_dict(user, d),
+            **_preview_meta(d.get("id"), d.get("content_type", ""), drive_url),
+        })
+
+    departments = db.query(Department).order_by(Department.name).all()
+    csrf = generate_csrf_token(str(user.id))
+
+    if q:
+        audit.log_search(q, user=user, result_count=len(docs), search_type="document")
+
+    return templates.TemplateResponse(
+        request, "documents/list.html",
+        {
+            "documents": docs,
+            "departments": departments,
+            "current_user": user,
+            "query": q,
+            "selected_dept": department_id,
+            "csrf_token": csrf,
+            "list_action": "/documents/mine",
+            "page_title": "Documentos de trabajo",
+            "empty_message": "No tienes documentos de trabajo asignados",
+        },
+    )
+
+
 @router.get("/upload", response_class=HTMLResponse)
 def upload_form(
     request: Request,

@@ -4,18 +4,13 @@
 {% block content %}
 <div class="flex-1 overflow-y-auto p-6" x-data="{ editFor: null }">
   <div class="max-w-3xl mx-auto">
-    <a href="/tasks/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-4 transition-colors">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-      </svg>
-      Volver a Tareas
-    </a>
     <h1 class="text-xl font-bold text-gray-900 mb-1">Etiquetas de tareas</h1>
     <p class="text-sm text-gray-500 mb-6">Las etiquetas son por departamento: solo se pueden usar en tareas de ese mismo departamento.</p>
 
     {% if not departments %}
     <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-sm text-gray-400">
-      No tienes un departamento asignado, así que no puedes definir etiquetas.
+      Todavía no hay departamentos creados.
+      <a href="/departments/" class="text-orange-600 hover:text-orange-500 font-medium">Crea uno</a> para poder definir etiquetas.
     </div>
     {% else %}
 

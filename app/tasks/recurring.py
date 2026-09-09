@@ -14,6 +14,7 @@ from datetime import date
 
 from app import audit
 from app.database import SessionLocal
+from app.messaging import realtime
 from app.models import (
     RecurringTask, Task, TaskStatusHistory,
     FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
@@ -98,6 +99,7 @@ def generate_due_tasks(today: date | None = None) -> int:
         db.close()
 
     if created:
+        realtime.notify_tasks()
         audit.log_action(
             "recurring_generate",
             resource_type="recurring_task",

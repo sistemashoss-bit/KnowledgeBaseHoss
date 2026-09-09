@@ -4,13 +4,14 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from jose import JWTError
 from sqlalchemy import false, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
-from app.auth.utils import generate_csrf_token, verify_csrf_token
-from app.database import get_db
+from app.auth.utils import decode_token, generate_csrf_token, verify_csrf_token
+from app.database import get_db, SessionLocal
 from app import audit, rag, storage
 from app.documents.router import _preview_meta
 from app.messaging import realtime
@@ -313,6 +314,31 @@ def list_archived_tasks(
     )
 
 
+# ── Live updates (SSE) ──────────────────────────────────────────────────────
+
+@router.get("/stream")
+async def tasks_stream(request: Request):
+    """SSE: broadcasts when any task changes, so every open board refreshes live.
+
+    Registered before GET /{task_id} so it isn't captured by that catch-all.
+    Authenticated from the cookie directly (like messaging's /signals) so no DB
+    connection is held for the lifetime of the stream.
+    """
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(401)
+    try:
+        decode_token(token)
+    except JWTError:
+        raise HTTPException(401)
+
+    return StreamingResponse(
+        realtime.tasks_event_stream(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("/")
@@ -387,6 +413,7 @@ async def create_task(
     db.commit()
     if task.assigned_to and str(task.assigned_to) != str(current_user.id):
         realtime.notify_user(task.assigned_to)
+    realtime.notify_tasks()
     audit.log_action(
         "task_create", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
@@ -470,6 +497,42 @@ def task_detail(
     )
 
 
+# ── Live updates (SSE) ──────────────────────────────────────────────────────
+
+@router.get("/{task_id}/stream")
+async def task_stream(task_id: str, request: Request):
+    """SSE: broadcasts when this task changes, so its detail page refreshes live.
+
+    Authenticated from the cookie directly (like /tasks/stream) so no DB
+    connection is held for the lifetime of the stream — visibility is checked
+    once, up front, with a short-lived session.
+    """
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(401)
+    try:
+        user_id = decode_token(token).get("sub")
+    except JWTError:
+        raise HTTPException(401)
+    if not user_id:
+        raise HTTPException(401)
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        visible = user and _tasks_query(user, db).filter(Task.id == task_id).first()
+    finally:
+        db.close()
+    if not visible:
+        raise HTTPException(403)
+
+    return StreamingResponse(
+        realtime.task_event_stream(task_id, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── Evidences ─────────────────────────────────────────────────────────────────
 
 @router.post("/{task_id}/evidences")
@@ -514,6 +577,8 @@ async def upload_evidences(
         ))
     db.commit()
     uploaded = [f.filename for f in files if f.filename]
+    if uploaded:
+        realtime.notify_task(task_id)
     task_obj = db.query(Task).filter(Task.id == task_id).first()
     audit.log_action(
         "evidence_upload", user=current_user, request=request,
@@ -562,6 +627,7 @@ def delete_evidence(
         pass
     db.delete(ev)
     db.commit()
+    realtime.notify_task(task_id)
     audit.log_action(
         "evidence_delete", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=filename,
@@ -630,6 +696,8 @@ def update_status(
     for uid in {task.assigned_to, task.created_by}:
         if uid and str(uid) != str(current_user.id):
             realtime.notify_user(uid)
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     audit.log_action(
         "task_status_change", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
@@ -668,6 +736,8 @@ def archive_task(
         raise HTTPException(400, "Solo se pueden archivar tareas Listo")
     task.archived_at = datetime.utcnow()
     db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     audit.log_action(
         "task_archive", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
@@ -694,6 +764,8 @@ def unarchive_task(
         raise HTTPException(403)
     task.archived_at = None
     db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     audit.log_action(
         "task_unarchive", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
@@ -727,6 +799,8 @@ def assign_task(
     db.commit()
     if task.assigned_to and str(task.assigned_to) != str(current_user.id):
         realtime.notify_user(task.assigned_to)
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     assignee = db.query(User).filter(User.id == assigned_to).first() if assigned_to else None
     audit.log_action(
         "task_assign", user=current_user, request=request,
@@ -757,6 +831,8 @@ def set_task_tags(
     for tid in valid_ids:
         db.add(TaskTagAssignment(task_id=task_id, tag_id=tid))
     db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     audit.log_action(
         "task_tags_update", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
@@ -782,6 +858,8 @@ def delete_task(
     title = task.title
     db.delete(task)
     db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
     audit.log_action(
         "task_delete", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=title,
@@ -824,6 +902,7 @@ def add_comment(
     for uid in {task.assigned_to, task.created_by}:
         if uid and str(uid) != str(current_user.id):
             realtime.notify_user(uid)
+    realtime.notify_task(task.id)
     audit.log_action(
         "task_comment", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
@@ -873,6 +952,7 @@ def edit_comment(
     db.commit()
     db.refresh(comment)
     comment.user = current_user  # for template rendering
+    realtime.notify_task(task_id)
 
     return templates.TemplateResponse(
         request,
@@ -912,31 +992,16 @@ def delete_comment(
 
     db.delete(comment)
     db.commit()
+    realtime.notify_task(task_id)
     # Cuerpo vacío + hx-swap="outerHTML" → HTMX elimina el comentario del DOM.
     return HTMLResponse("")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Task tags (solo admin/superadmin las crean; siempre por departamento)
+# Task tags (solo superadmin las crea; siempre por departamento)
 # ══════════════════════════════════════════════════════════════════════════════
 
 tags_router = APIRouter(prefix="/tasks/tags", tags=["task-tags"])
-
-
-def _tag_scope_departments(user: User, db: Session) -> list[Department]:
-    """Departamentos donde el usuario puede definir etiquetas.
-    superadmin → todos; admin → solo el suyo; nadie más gestiona etiquetas."""
-    if user.role == ROLE_SUPERADMIN:
-        return db.query(Department).order_by(Department.name).all()
-    if user.role == ROLE_ADMIN and user.department_id:
-        return db.query(Department).filter(Department.id == user.department_id).order_by(Department.name).all()
-    return []
-
-
-def _can_manage_tag(user: User, tag: TaskTag) -> bool:
-    if user.role == ROLE_SUPERADMIN:
-        return True
-    return user.role == ROLE_ADMIN and str(tag.department_id) == str(user.department_id)
 
 
 @tags_router.get("/", response_class=HTMLResponse)
@@ -947,17 +1012,11 @@ def list_tags(
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
-    if current_user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN):
+    if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(403)
 
-    departments = _tag_scope_departments(current_user, db)
-    dept_ids = [d.id for d in departments]
-    tags = (
-        db.query(TaskTag)
-        .filter(TaskTag.department_id.in_(dept_ids) if dept_ids else false())
-        .order_by(TaskTag.name)
-        .all()
-    )
+    departments = db.query(Department).order_by(Department.name).all()
+    tags = db.query(TaskTag).order_by(TaskTag.name).all()
     return templates.TemplateResponse(
         request, "tasks/tags.html",
         {
@@ -982,14 +1041,13 @@ def create_tag(
 ):
     if not current_user:
         raise HTTPException(401)
-    if current_user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN):
+    if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(403)
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
 
-    allowed_dept_ids = {str(d.id) for d in _tag_scope_departments(current_user, db)}
-    if department_id not in allowed_dept_ids:
-        raise HTTPException(403, "Departamento fuera de tu alcance")
+    if not db.query(Department).filter(Department.id == department_id).first():
+        raise HTTPException(404, "Department not found")
 
     name = name.strip()
     if not name:
@@ -1024,14 +1082,14 @@ def edit_tag(
 ):
     if not current_user:
         raise HTTPException(401)
+    if current_user.role != ROLE_SUPERADMIN:
+        raise HTTPException(403)
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
 
     tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
     if not tag:
         raise HTTPException(404)
-    if not _can_manage_tag(current_user, tag):
-        raise HTTPException(403)
 
     name = name.strip()
     if not name:
@@ -1062,14 +1120,14 @@ def delete_tag(
 ):
     if not current_user:
         raise HTTPException(401)
+    if current_user.role != ROLE_SUPERADMIN:
+        raise HTTPException(403)
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
 
     tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
     if not tag:
         raise HTTPException(404)
-    if not _can_manage_tag(current_user, tag):
-        raise HTTPException(403)
 
     name = tag.name
     db.delete(tag)

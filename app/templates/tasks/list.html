@@ -144,13 +144,6 @@
         </svg>
         Recurrentes
       </a>
-      <a href="/tasks/tags/"
-         class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium -mb-px border-b-2 border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5.586 5.586a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"/>
-        </svg>
-        Etiquetas
-      </a>
       {% endif %}
     </div>
 
@@ -183,6 +176,7 @@
 
     {% set pnames = {'urgent':'Urgente','high':'Alta','medium':'Media','low':'Baja'} %}
 
+    <div id="tasks-content">
     <!-- Kanban view -->
     <div id="view-kanban">
       {% if can_drag %}
@@ -283,6 +277,7 @@
         </tbody>
       </table>
     </div>
+    </div>
 
     <script>
     function openCreateTask(status) {
@@ -307,6 +302,40 @@
       try { saved = localStorage.getItem('tasks_view') || 'kanban'; } catch (e) {}
       setTasksView(saved);
     })();
+
+    // ── Live updates (SSE over Valkey pub/sub) ─────────────────────────────
+    // Any create/status/assign/archive/tag/delete change anywhere broadcasts
+    // on a shared channel; every open board (any tab, any viewer) re-fetches
+    // and swaps in the fresh HTML so everyone sees the same board live.
+    var _tasksRefreshTimer = null;
+    var _tasksRefreshing = false;
+    function refreshTasksBoard() {
+      if (_tasksRefreshing) return;
+      _tasksRefreshing = true;
+      fetch(location.pathname + location.search, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          var fresh = doc.getElementById('tasks-content');
+          var cur = document.getElementById('tasks-content');
+          if (!fresh || !cur) return;
+          cur.innerHTML = fresh.innerHTML;
+          setTasksView(localStorage.getItem('tasks_view') || 'kanban');
+          if (typeof initDragAndDrop === 'function') initDragAndDrop();
+        })
+        .catch(function () {})
+        .finally(function () { _tasksRefreshing = false; });
+    }
+    (function () {
+      try {
+        var es = new EventSource('/tasks/stream');
+        es.addEventListener('task', function () {
+          clearTimeout(_tasksRefreshTimer);
+          _tasksRefreshTimer = setTimeout(refreshTasksBoard, 400);
+        });
+        // EventSource reconnects on its own after transient errors.
+      } catch (e) {}
+    })();
     </script>
 
   </div>
@@ -314,7 +343,7 @@
 
 {% if can_drag %}
 <script>
-(function () {
+function initDragAndDrop() {
   var CSRF = "{{ csrf_token }}";
   var dragged = null;
 
@@ -383,7 +412,8 @@
         });
     });
   });
-})();
+}
+initDragAndDrop();
 </script>
 {% endif %}
 

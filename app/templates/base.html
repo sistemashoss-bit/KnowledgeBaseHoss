@@ -32,6 +32,17 @@
         Documentos
       </a>
 
+      {% if current_user %}
+      <a href="/documents/mine"
+         class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M20.25 14.15v4.25a2 2 0 01-1.872 1.996 47.9 47.9 0 01-12.756 0A2 2 0 013.75 18.4v-4.25m16.5 0a2.18 2.18 0 00.75-1.66V8.7a2.18 2.18 0 00-1.837-2.15 48 48 0 00-3.413-.386m4.5 7.986a2 2 0 01-.673.38A24 24 0 0112 15.75c-2.648 0-5.195-.43-7.577-1.22a2 2 0 01-.673-.38m0 0A2.18 2.18 0 013 12.49V8.7a2.18 2.18 0 011.837-2.15 48 48 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.913m7.5 0a49 49 0 00-7.5 0" />
+        </svg>
+        Documentos de trabajo
+      </a>
+      {% endif %}
+
       {% if current_user and current_user.role in ("superadmin", "admin") %}
       <a href="/users/"
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -116,6 +127,14 @@
                 d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
         </svg>
         Zonas y Sucursales
+      </a>
+      <a href="/tasks/tags/"
+         class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5.586 5.586a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z" />
+        </svg>
+        Etiquetas
       </a>
       {% endif %}
 

@@ -507,4 +507,28 @@
   </div>
 </div>
 
+<script>
+(function () {
+  // Live updates (SSE over Valkey pub/sub): status/assign/tags/evidence/comment
+  // changes made by anyone broadcast on this task's channel, so every open
+  // detail page for it refreshes live — same mechanism as the tasks board.
+  try {
+    var es = new EventSource('/tasks/{{ task.id }}/stream');
+    var timer = null;
+    es.addEventListener('task', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        // No perder un comentario a medio escribir (nuevo o edición inline).
+        var drafts = document.querySelectorAll('textarea[name="content"]');
+        for (var i = 0; i < drafts.length; i++) {
+          if (drafts[i].value.trim()) return;
+        }
+        location.reload();
+      }, 500);
+    });
+    // EventSource reconnects on its own after transient errors.
+  } catch (e) {}
+})();
+</script>
+
 {% endblock %}
