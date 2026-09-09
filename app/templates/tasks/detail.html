@@ -228,8 +228,27 @@
             </p>
           </div>
 
+          <div class="min-w-0">
+            <p class="text-xs text-gray-400 mb-1">Etiquetas</p>
+            {% if task.tags %}
+            <div class="flex flex-wrap gap-1">
+              {% for tt in task.tags %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700">{{ tt.tag.name }}</span>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400">—</p>
+            {% endif %}
+          </div>
+
           {% if can_edit %}
-          <div class="ml-auto">
+          <div class="ml-auto flex items-center gap-2">
+            {% if dept_tags %}
+            <button onclick="document.getElementById('panel-tags').classList.toggle('hidden')"
+                    class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              Editar etiquetas
+            </button>
+            {% endif %}
             <button onclick="document.getElementById('panel-assign').classList.toggle('hidden')"
                     class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
               Reasignar
@@ -237,6 +256,28 @@
           </div>
           {% endif %}
         </div>
+
+        {% if can_edit and dept_tags %}
+        <div id="panel-tags" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <form hx-post="/tasks/{{ task.id }}/tags" hx-target="body">
+            <div class="flex flex-wrap gap-2 mb-3">
+              {% for t in dept_tags %}
+              <label class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-{{ t.color }}-50 text-{{ t.color }}-700 border border-{{ t.color }}-200 cursor-pointer">
+                <input type="checkbox" name="tag_ids" value="{{ t.id }}" {{ 'checked' if t.id|string in selected_tag_ids }}
+                       class="rounded border-gray-300 text-orange-600 focus:ring-orange-500" />
+                {{ t.name }}
+              </label>
+              {% endfor %}
+            </div>
+            <div class="flex justify-end">
+              <button type="submit"
+                      class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+                Guardar etiquetas
+              </button>
+            </div>
+          </form>
+        </div>
+        {% endif %}
 
         {% if can_edit %}
         <div id="panel-assign" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">

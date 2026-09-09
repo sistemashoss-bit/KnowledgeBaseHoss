@@ -34,6 +34,16 @@ def build_access_filter(user: "User | None") -> dict:
         }
     })
 
+    # custom status: only the specific people picked at upload/edit time
+    should_clauses.append({
+        "bool": {
+            "must": [
+                {"term": {"status": "custom"}},
+                {"term": {"allowed_user_ids": str(user.id)}},
+            ]
+        }
+    })
+
     # admin status: only admins, and still scoped to their own department
     if user.role == ROLE_ADMIN:
         should_clauses.append({
@@ -61,6 +71,8 @@ def can_access_document(user: "User | None", doc: "Document") -> bool:
         return True  # any authenticated user, company-wide
     if doc.status == "department":
         return str(doc.department_id) == str(user.department_id)  # any role in that dept
+    if doc.status == "custom":
+        return any(str(au.user_id) == str(user.id) for au in doc.allowed_users)
     if doc.status == "admin":
         return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and str(doc.department_id) == str(user.department_id)
     return False

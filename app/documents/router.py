@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, require_auth, require_role
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
-from app.models import Department, Document, ROLE_ADMIN, ROLE_SUPERADMIN, STATUSES
+from app.models import (
+    Department, Document, DocumentAllowedUser, User,
+    ROLE_ADMIN, ROLE_SUPERADMIN, STATUSES, STATUS_CUSTOM,
+)
 from app.permissions import (
     build_access_filter,
     can_access_document,
@@ -131,12 +134,22 @@ def upload_form(
         available_depts = [d for d in all_depts if str(d.id) == str(user.department_id)]
         available_statuses = STATUSES
 
+    # Para el select de "personas específicas": se filtra en el cliente por
+    # departamento (mismo patrón que tasks/list.html con data-dept).
+    members = (
+        db.query(User)
+        .filter(User.is_active == True)  # noqa: E712
+        .order_by(User.name, User.email)
+        .all()
+    )
+
     csrf = generate_csrf_token(str(user.id))
     return templates.TemplateResponse(
         request, "documents/upload.html",
         {
             "departments": available_depts,
             "statuses": available_statuses,
+            "members": members,
             "current_user": user,
             "csrf_token": csrf,
         },
@@ -151,6 +164,7 @@ async def upload_document(
     description: str = Form(default=""),
     department_id: str = Form(...),
     status: str = Form(...),
+    allowed_user_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
     file: UploadFile = File(default=None),
@@ -167,6 +181,21 @@ async def upload_document(
     dept = db.query(Department).filter(Department.id == department_id).first()
     if not dept:
         raise HTTPException(404, "Department not found")
+
+    allowed_user_ids = [uid for uid in dict.fromkeys(allowed_user_ids) if uid]
+    if status == STATUS_CUSTOM:
+        if not allowed_user_ids:
+            raise HTTPException(400, "Selecciona al menos una persona para visibilidad 'personas específicas'.")
+        # Solo se permite elegir gente del propio departamento del documento.
+        valid_ids = {
+            str(u.id) for u in db.query(User.id).filter(
+                User.department_id == department_id, User.is_active == True  # noqa: E712
+            ).all()
+        }
+        if not all(uid in valid_ids for uid in allowed_user_ids):
+            raise HTTPException(400, "Las personas seleccionadas deben pertenecer al departamento elegido.")
+    else:
+        allowed_user_ids = []
 
     # Un documento es un archivo subido O un link de Drive, no ambos ni ninguno.
     drive_url = drive_url.strip()
@@ -214,6 +243,8 @@ async def upload_document(
         content_type_for_index = file.content_type or ""
 
     db.add(doc)
+    for uid in allowed_user_ids:
+        db.add(DocumentAllowedUser(document_id=doc_id, user_id=uid))
     db.commit()
 
     background_tasks.add_task(
@@ -227,6 +258,7 @@ async def upload_document(
         content_type=content_type_for_index,
         uploaded_by=str(user.id),
         text=text,
+        allowed_user_ids=allowed_user_ids,
     )
 
     audit.log_action(
@@ -250,6 +282,13 @@ def edit_form(
         raise HTTPException(403)
 
     depts = db.query(Department).order_by(Department.name).all()
+    dept_members = (
+        db.query(User)
+        .filter(User.department_id == doc.department_id, User.is_active == True)  # noqa: E712
+        .order_by(User.name, User.email)
+        .all()
+    )
+    selected_user_ids = {str(au.user_id) for au in doc.allowed_users}
     csrf = generate_csrf_token(str(user.id))
 
     return templates.TemplateResponse(
@@ -258,6 +297,8 @@ def edit_form(
             "doc": doc,
             "departments": depts,
             "statuses": STATUSES,
+            "dept_members": dept_members,
+            "selected_user_ids": selected_user_ids,
             "current_user": user,
             "csrf_token": csrf,
         },
@@ -272,6 +313,7 @@ async def edit_document(
     title: str = Form(...),
     description: str = Form(default=""),
     status: str = Form(...),
+    allowed_user_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
     file: UploadFile = File(default=None),
@@ -288,6 +330,24 @@ async def edit_document(
         raise HTTPException(403)
     if status not in STATUSES:
         raise HTTPException(400)
+
+    allowed_user_ids = [uid for uid in dict.fromkeys(allowed_user_ids) if uid]
+    if status == STATUS_CUSTOM:
+        if not allowed_user_ids:
+            raise HTTPException(400, "Selecciona al menos una persona para visibilidad 'personas específicas'.")
+        valid_ids = {
+            str(u.id) for u in db.query(User.id).filter(
+                User.department_id == doc.department_id, User.is_active == True  # noqa: E712
+            ).all()
+        }
+        if not all(uid in valid_ids for uid in allowed_user_ids):
+            raise HTTPException(400, "Las personas seleccionadas deben pertenecer al departamento del documento.")
+    else:
+        allowed_user_ids = []
+
+    db.query(DocumentAllowedUser).filter(DocumentAllowedUser.document_id == doc_id).delete()
+    for uid in allowed_user_ids:
+        db.add(DocumentAllowedUser(document_id=doc_id, user_id=uid))
 
     doc.title = title
     doc.description = description
@@ -332,6 +392,7 @@ async def edit_document(
             content_type=doc.content_type or "",
             uploaded_by=str(doc.uploaded_by),
             text=new_text,
+            allowed_user_ids=allowed_user_ids,
         )
     else:
         # Metadata only — update title/status/dept in existing chunks
@@ -345,6 +406,7 @@ async def edit_document(
             status=doc.status,
             content_type=doc.content_type or "",
             uploaded_by=str(doc.uploaded_by),
+            allowed_user_ids=allowed_user_ids,
         )
 
     audit.log_action(

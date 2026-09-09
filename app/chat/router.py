@@ -23,7 +23,10 @@ def ask(
     dept_id = str(user.department_id) if user and user.department_id else None
     role = user.role if user else "anon"
 
-    result = rag.answer_question(question.strip(), access_filter, role=role, dept_id=dept_id)
+    result = rag.answer_question(
+        question.strip(), access_filter, role=role, dept_id=dept_id,
+        user_id=str(user.id) if user else None,
+    )
 
     audit.log_search(question.strip(), user=user, result_count=len(result["sources"]), search_type="rag")
 

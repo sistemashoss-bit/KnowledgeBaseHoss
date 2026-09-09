@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -15,8 +15,9 @@ ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE]
 STATUS_PUBLIC = "public"
 STATUS_EMPLOYEE = "employee"
 STATUS_DEPARTMENT = "department"
+STATUS_CUSTOM = "custom"
 STATUS_ADMIN = "admin"
-STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_DEPARTMENT, STATUS_ADMIN]
+STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_DEPARTMENT, STATUS_CUSTOM, STATUS_ADMIN]
 
 # ── Project status constants ──────────────────────────────────────────────────
 PROJECT_DRAFT = "draft"
@@ -37,6 +38,9 @@ PRIORITY_MEDIUM = "medium"
 PRIORITY_HIGH = "high"
 PRIORITY_URGENT = "urgent"
 TASK_PRIORITIES = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_URGENT]
+
+# ── Task tag colors (paleta fija, mapeada a clases Tailwind en la plantilla) ───
+TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "pink"]
 
 # ── Recurring task constants ──────────────────────────────────────────────────
 FREQ_DAILY = "daily"
@@ -123,6 +127,7 @@ class Department(Base):
     tasks = relationship("Task", back_populates="department")
     recurring_tasks = relationship("RecurringTask", back_populates="department")
     conversations = relationship("Conversation", back_populates="department")
+    task_tags = relationship("TaskTag", back_populates="department", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -148,6 +153,7 @@ class User(Base):
     department = relationship("Department", back_populates="users")
     branch = relationship("Branch", back_populates="users")
     documents = relationship("Document", back_populates="uploaded_by_user")
+    document_access = relationship("DocumentAllowedUser", back_populates="user")
     user_zones = relationship("UserZone", back_populates="user")
 
     # Work
@@ -189,6 +195,23 @@ class Document(Base):
 
     department = relationship("Department", back_populates="documents")
     uploaded_by_user = relationship("User", back_populates="documents")
+    allowed_users = relationship(
+        "DocumentAllowedUser", back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class DocumentAllowedUser(Base):
+    """Many-to-many: personas específicas con acceso cuando `status` = 'custom'.
+    Se ignora para cualquier otro status (queda huérfana si se cambia de status,
+    la limpia el router al guardar)."""
+    __tablename__ = "document_allowed_users"
+
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    document = relationship("Document", back_populates="allowed_users")
+    user = relationship("User", back_populates="document_access")
 
 
 class AuditLog(Base):
@@ -282,6 +305,7 @@ class Task(Base):
     status_history = relationship(
         "TaskStatusHistory", back_populates="task", order_by="TaskStatusHistory.changed_at"
     )
+    tags = relationship("TaskTagAssignment", back_populates="task", cascade="all, delete-orphan")
 
 
 class TaskStatusHistory(Base):
@@ -299,6 +323,39 @@ class TaskStatusHistory(Base):
 
     task = relationship("Task", back_populates="status_history")
     changed_by_user = relationship("User", foreign_keys=[changed_by])
+
+
+class TaskTag(Base):
+    """Etiqueta definida por un admin/superadmin, siempre dentro de un
+    departamento (dos departamentos pueden tener etiquetas con el mismo nombre,
+    son independientes). Solo asignable a tareas de ese mismo departamento."""
+    __tablename__ = "task_tags"
+    __table_args__ = (
+        UniqueConstraint("department_id", "name", name="uq_task_tags_department_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(50), nullable=False)
+    color = Column(String(20), nullable=False, default="gray")
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    department = relationship("Department", back_populates="task_tags")
+    created_by_user = relationship("User", foreign_keys=[created_by])
+    tasks = relationship("TaskTagAssignment", back_populates="tag", cascade="all, delete-orphan")
+
+
+class TaskTagAssignment(Base):
+    """Many-to-many: etiquetas asignadas a una tarea."""
+    __tablename__ = "task_tag_assignments"
+
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    tag_id = Column(UUID(as_uuid=True), ForeignKey("task_tags.id", ondelete="CASCADE"), primary_key=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", back_populates="tags")
+    tag = relationship("TaskTag", back_populates="tasks")
 
 
 class RecurringTask(Base):

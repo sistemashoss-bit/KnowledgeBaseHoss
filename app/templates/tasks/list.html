@@ -51,6 +51,13 @@
     </span>
     {% endif %}
   </div>
+  {% if task.tags %}
+  <div class="mt-1.5 flex flex-wrap gap-1">
+    {% for tt in task.tags %}
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700">{{ tt.tag.name }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-400">
     {{ priority_badge(task.priority) }}
     {% if task.assignee %}
@@ -136,6 +143,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
         </svg>
         Recurrentes
+      </a>
+      <a href="/tasks/tags/"
+         class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium -mb-px border-b-2 border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5.586 5.586a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"/>
+        </svg>
+        Etiquetas
       </a>
       {% endif %}
     </div>
@@ -236,6 +250,9 @@
                   Recurrente
                 </span>
                 {% endif %}
+                {% for tt in task.tags %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700 shrink-0">{{ tt.tag.name }}</span>
+                {% endfor %}
               </div>
             </td>
             <td class="px-4 py-3">{{ status_badge(task.status) }}</td>
@@ -468,11 +485,30 @@
       </div>
       {% endif %}
 
+      {% if tags %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Etiquetas <span class="text-xs text-gray-400">(opcional)</span></label>
+        <div id="nt-tags" class="flex flex-wrap gap-2 p-2 border border-gray-200 rounded-lg min-h-[42px]">
+          {% for t in tags %}
+          {# Oculta por defecto: ningún departamento está preseleccionado en "nt-dept",
+             y toda etiqueta pertenece a un departamento (nunca coincide con "" inicial). #}
+          <label data-dept="{{ t.department_id }}" style="display:none" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-{{ t.color }}-50 text-{{ t.color }}-700 border border-{{ t.color }}-200 cursor-pointer">
+            <input type="checkbox" name="tag_ids" value="{{ t.id }}" class="rounded border-gray-300 text-orange-600 focus:ring-orange-500" />
+            {{ t.name }}
+          </label>
+          {% endfor %}
+          <p id="nt-tags-empty" class="text-xs text-gray-400 py-1">Elige un departamento para ver sus etiquetas.</p>
+        </div>
+      </div>
+      {% endif %}
+
       <script>
       (function () {
         var dept = document.getElementById('nt-dept');
         var user = document.getElementById('nt-user');
         var proj = document.getElementById('nt-proj');
+        var tagLabels = document.querySelectorAll('#nt-tags [data-dept]');
+        var tagsEmpty = document.getElementById('nt-tags-empty');
         function applyFilter() {
           var val = dept.value;
           [user, proj].forEach(function (sel) {
@@ -487,6 +523,15 @@
               if (!match && opt.selected) { sel.value = ''; }
             }
           });
+          var anyVisible = false;
+          tagLabels.forEach(function (label) {
+            var match = val !== '' && label.dataset.dept === val;
+            label.style.display = match ? '' : 'none';
+            if (match) anyVisible = true;
+            var box = label.querySelector('input');
+            if (!match && box.checked) box.checked = false;
+          });
+          if (tagsEmpty) tagsEmpty.style.display = anyVisible ? 'none' : '';
         }
         dept.addEventListener('change', applyFilter);
       })();

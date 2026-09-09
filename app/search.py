@@ -16,6 +16,14 @@ def get_client() -> OpenSearch:
     return _client
 
 
+def _add_field_mapping(client: OpenSearch, index: str, field: str, mapping: dict) -> None:
+    """Añade un campo al mapping de un índice existente (no-op si ya está)."""
+    try:
+        client.indices.put_mapping(index=index, body={"properties": {field: mapping}})
+    except Exception:
+        pass
+
+
 def ensure_indices() -> None:
     client = get_client()
 
@@ -33,11 +41,15 @@ def ensure_indices() -> None:
                         "status": {"type": "keyword"},
                         "content_type": {"type": "keyword"},
                         "uploaded_by": {"type": "keyword"},
+                        "allowed_user_ids": {"type": "keyword"},
                         "created_at": {"type": "date"},
                     }
                 }
             },
         )
+    else:
+        # Índice preexistente de antes de la visibilidad 'custom': agrega el campo.
+        _add_field_mapping(client, DOCUMENTS_INDEX, "allowed_user_ids", {"type": "keyword"})
 
     _ensure_chunks_index(client)
 
@@ -51,6 +63,8 @@ def _ensure_chunks_index(client: OpenSearch) -> None:
             if "embedding" not in props:
                 client.indices.delete(index=CHUNKS_INDEX)
             else:
+                if "allowed_user_ids" not in props:
+                    _add_field_mapping(client, CHUNKS_INDEX, "allowed_user_ids", {"type": "keyword"})
                 return
         except Exception:
             return
@@ -66,6 +80,7 @@ def _ensure_chunks_index(client: OpenSearch) -> None:
                     "department_id": {"type": "keyword"},
                     "department_name": {"type": "keyword"},
                     "status": {"type": "keyword"},
+                    "allowed_user_ids": {"type": "keyword"},
                     "chunk_index": {"type": "integer"},
                     "content": {"type": "text"},
                     "embedding": {"type": "knn_vector", "dimension": _embedding_dim()},

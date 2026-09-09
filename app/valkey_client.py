@@ -93,27 +93,31 @@ def clear_login_failures(email: str) -> None:
 _RAG_TTL = 600  # 10 minutes
 
 
-def _rag_key(query: str, role: str, dept_id: str | None) -> str:
-    raw = f"{role}:{dept_id}:{query}"
+def _rag_key(query: str, role: str, dept_id: str | None, user_id: str | None) -> str:
+    # user_id entra a la clave porque la visibilidad 'custom' (personas específicas)
+    # ya no es uniforme por role+dept_id: dos empleados del mismo depto pueden tener
+    # acceso distinto a documentos 'custom', y compartir cache filtraría/ocultaría
+    # contenido entre ellos.
+    raw = f"{role}:{dept_id}:{user_id}:{query}"
     return "rag:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
-def get_cached_rag(query: str, role: str, dept_id: str | None) -> str | None:
+def get_cached_rag(query: str, role: str, dept_id: str | None, user_id: str | None = None) -> str | None:
     r = _get()
     if r is None:
         return None
     try:
-        return r.get(_rag_key(query, role, dept_id))
+        return r.get(_rag_key(query, role, dept_id, user_id))
     except Exception:
         return None
 
 
-def cache_rag(query: str, role: str, dept_id: str | None, response: str) -> None:
+def cache_rag(query: str, role: str, dept_id: str | None, response: str, user_id: str | None = None) -> None:
     r = _get()
     if r is None:
         return
     try:
-        r.setex(_rag_key(query, role, dept_id), _RAG_TTL, response)
+        r.setex(_rag_key(query, role, dept_id, user_id), _RAG_TTL, response)
     except Exception:
         pass
 

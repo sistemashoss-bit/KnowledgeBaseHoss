@@ -141,8 +141,10 @@ def index_document(
     content_type: str,
     uploaded_by: str,
     text: str,
+    allowed_user_ids: list[str] | None = None,
 ) -> None:
     client = search_module.get_client()
+    allowed_user_ids = allowed_user_ids or []
 
     client.index(
         index=search_module.DOCUMENTS_INDEX,
@@ -156,6 +158,7 @@ def index_document(
             "status": status,
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
+            "allowed_user_ids": allowed_user_ids,
         },
     )
 
@@ -174,6 +177,7 @@ def index_document(
             "department_id": department_id or "",
             "department_name": department_name or "",
             "status": status,
+            "allowed_user_ids": allowed_user_ids,
             "chunk_index": i,
             "content": chunk,
         }
@@ -199,9 +203,11 @@ def update_document_metadata(
     status: str,
     content_type: str,
     uploaded_by: str,
+    allowed_user_ids: list[str] | None = None,
 ) -> None:
     """Update metadata fields in OpenSearch without touching chunk content."""
     client = search_module.get_client()
+    allowed_user_ids = allowed_user_ids or []
 
     client.index(
         index=search_module.DOCUMENTS_INDEX,
@@ -215,6 +221,7 @@ def update_document_metadata(
             "status": status,
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
+            "allowed_user_ids": allowed_user_ids,
         },
     )
 
@@ -229,12 +236,14 @@ def update_document_metadata(
                         "ctx._source.status = params.status;"
                         "ctx._source.department_id = params.department_id;"
                         "ctx._source.department_name = params.department_name;"
+                        "ctx._source.allowed_user_ids = params.allowed_user_ids;"
                     ),
                     "params": {
                         "title": title,
                         "status": status,
                         "department_id": department_id or "",
                         "department_name": department_name or "",
+                        "allowed_user_ids": allowed_user_ids,
                     },
                 },
             },
@@ -321,10 +330,11 @@ def answer_question(
     *,
     role: str = "anon",
     dept_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
     from app import valkey_client as vk
 
-    cached = vk.get_cached_rag(question, role, dept_id)
+    cached = vk.get_cached_rag(question, role, dept_id, user_id)
     if cached:
         return {"answer": cached, "sources": []}
 
@@ -429,7 +439,7 @@ def answer_question(
         answer = (extra.get("reasoning") or "").strip()
 
     if answer:
-        vk.cache_rag(question, role, dept_id, answer)
+        vk.cache_rag(question, role, dept_id, answer, user_id)
     else:
         answer = "No pude generar una respuesta con los documentos disponibles. Intenta reformular la pregunta."
 

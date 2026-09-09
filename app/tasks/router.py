@@ -17,9 +17,9 @@ from app.messaging import realtime
 from app.permissions import build_access_filter, can_access_document
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
-    TaskStatusHistory, User,
+    TaskStatusHistory, TaskTag, TaskTagAssignment, User,
     ROLE_SUPERADMIN, ROLE_ADMIN,
-    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE,
+    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
 )
 from app.templating import templates
@@ -42,6 +42,7 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True):
         joinedload(Task.created_by_user),
         joinedload(Task.department),
         joinedload(Task.project),
+        joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     )
     if user.role != ROLE_SUPERADMIN:
         conditions = [
@@ -141,6 +142,22 @@ def _validated_document_id(document_id: str, user: User, db: Session) -> str | N
     return document_id
 
 
+# ── Tag helpers ────────────────────────────────────────────────────────────────
+
+def _validated_tag_ids(tag_ids: list[str], department_id: str | None, db: Session) -> list[str]:
+    """Filtra a los ids de etiquetas que existen y pertenecen al departamento dado.
+    Una tarea sin departamento no puede llevar etiquetas (son siempre por depto)."""
+    tag_ids = [t for t in dict.fromkeys(tag_ids) if t]
+    if not tag_ids or not department_id:
+        return []
+    valid = {
+        str(row[0]) for row in db.query(TaskTag.id).filter(
+            TaskTag.department_id == department_id, TaskTag.id.in_(tag_ids)
+        ).all()
+    }
+    return [t for t in tag_ids if t in valid]
+
+
 # ── List ──────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
@@ -167,12 +184,14 @@ def list_tasks(
         joinedload(Task.created_by_user),
         joinedload(Task.department),
         joinedload(Task.project),
+        joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     ).filter(Task.archived_at.is_(None))
 
     # Data for create form
     departments = db.query(Department).order_by(Department.name).all()
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     projects = db.query(Project).order_by(Project.name).all()
+    tags = db.query(TaskTag).order_by(TaskTag.name).all()
 
     # Filtro por departamento en las vistas personales y para superadmin.
     # En la vista Departamento, los administradores filtran por persona
@@ -250,6 +269,7 @@ def list_tasks(
             "departments": departments,
             "users": users,
             "projects": projects,
+            "tags": tags,
             "documents": _accessible_documents(current_user),
             "filter_departments": filter_departments,
             "filter_users": filter_users,
@@ -308,6 +328,7 @@ async def create_task(
     document_id: str = Form(""),
     due_date: str = Form(""),
     next_url: str = Form(""),
+    tag_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     evidences: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
@@ -341,6 +362,8 @@ async def create_task(
         changed_by=current_user.id,
         changed_at=task.created_at,
     ))
+    for tid in _validated_tag_ids(tag_ids, task.department_id, db):
+        db.add(TaskTagAssignment(task_id=task.id, tag_id=tid))
 
     for f in evidences:
         if not f.filename:
@@ -396,6 +419,7 @@ def task_detail(
             joinedload(Task.evidences).joinedload(TaskEvidence.uploader),
             joinedload(Task.document),
             joinedload(Task.status_history),
+            joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
         )
         .filter(Task.id == task_id)
         .first()
@@ -410,6 +434,11 @@ def task_detail(
 
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     departments = db.query(Department).order_by(Department.name).all()
+    dept_tags = (
+        db.query(TaskTag).filter(TaskTag.department_id == task.department_id).order_by(TaskTag.name).all()
+        if task.department_id else []
+    )
+    selected_tag_ids = {str(tt.tag_id) for tt in task.tags}
 
     # Metadatos de previsualización del documento vinculado (mismo criterio que las
     # cards de Documentos): Drive/PDF/imagen/HTML → iframe; el resto solo enlace.
@@ -428,6 +457,8 @@ def task_detail(
             "doc_preview": doc_preview,
             "users": users,
             "departments": departments,
+            "dept_tags": dept_tags,
+            "selected_tag_ids": selected_tag_ids,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
             "can_edit": _can_edit_task(current_user, task),
@@ -687,8 +718,12 @@ def assign_task(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task or not _can_edit_task(current_user, task):
         raise HTTPException(403)
+    old_dept_id = task.department_id
     task.assigned_to = assigned_to if assigned_to else None
     task.department_id = department_id if department_id else task.department_id
+    if department_id and str(task.department_id) != str(old_dept_id):
+        # Las etiquetas son por departamento: si cambia, las del depto anterior dejan de aplicar.
+        db.query(TaskTagAssignment).filter(TaskTagAssignment.task_id == task_id).delete()
     db.commit()
     if task.assigned_to and str(task.assigned_to) != str(current_user.id):
         realtime.notify_user(task.assigned_to)
@@ -697,6 +732,35 @@ def assign_task(
         "task_assign", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
         details=f"assigned_to={assignee.email if assignee else 'none'}",
+    )
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
+# ── Tags (HTMX) ───────────────────────────────────────────────────────────────
+
+@router.post("/{task_id}/tags", response_class=HTMLResponse)
+def set_task_tags(
+    task_id: str,
+    request: Request,
+    tag_ids: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_edit_task(current_user, task):
+        raise HTTPException(403)
+
+    valid_ids = _validated_tag_ids(tag_ids, str(task.department_id) if task.department_id else None, db)
+    db.query(TaskTagAssignment).filter(TaskTagAssignment.task_id == task_id).delete()
+    for tid in valid_ids:
+        db.add(TaskTagAssignment(task_id=task_id, tag_id=tid))
+    db.commit()
+    audit.log_action(
+        "task_tags_update", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+        details=f"tags={len(valid_ids)}",
     )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
@@ -850,6 +914,171 @@ def delete_comment(
     db.commit()
     # Cuerpo vacío + hx-swap="outerHTML" → HTMX elimina el comentario del DOM.
     return HTMLResponse("")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Task tags (solo admin/superadmin las crean; siempre por departamento)
+# ══════════════════════════════════════════════════════════════════════════════
+
+tags_router = APIRouter(prefix="/tasks/tags", tags=["task-tags"])
+
+
+def _tag_scope_departments(user: User, db: Session) -> list[Department]:
+    """Departamentos donde el usuario puede definir etiquetas.
+    superadmin → todos; admin → solo el suyo; nadie más gestiona etiquetas."""
+    if user.role == ROLE_SUPERADMIN:
+        return db.query(Department).order_by(Department.name).all()
+    if user.role == ROLE_ADMIN and user.department_id:
+        return db.query(Department).filter(Department.id == user.department_id).order_by(Department.name).all()
+    return []
+
+
+def _can_manage_tag(user: User, tag: TaskTag) -> bool:
+    if user.role == ROLE_SUPERADMIN:
+        return True
+    return user.role == ROLE_ADMIN and str(tag.department_id) == str(user.department_id)
+
+
+@tags_router.get("/", response_class=HTMLResponse)
+def list_tags(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    if current_user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN):
+        raise HTTPException(403)
+
+    departments = _tag_scope_departments(current_user, db)
+    dept_ids = [d.id for d in departments]
+    tags = (
+        db.query(TaskTag)
+        .filter(TaskTag.department_id.in_(dept_ids) if dept_ids else false())
+        .order_by(TaskTag.name)
+        .all()
+    )
+    return templates.TemplateResponse(
+        request, "tasks/tags.html",
+        {
+            "current_user": current_user,
+            "departments": departments,
+            "tags": tags,
+            "colors": TASK_TAG_COLORS,
+            "csrf_token": generate_csrf_token(str(current_user.id)),
+        },
+    )
+
+
+@tags_router.post("/")
+def create_tag(
+    request: Request,
+    name: str = Form(...),
+    color: str = Form("gray"),
+    department_id: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if current_user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN):
+        raise HTTPException(403)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    allowed_dept_ids = {str(d.id) for d in _tag_scope_departments(current_user, db)}
+    if department_id not in allowed_dept_ids:
+        raise HTTPException(403, "Departamento fuera de tu alcance")
+
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "El nombre no puede estar vacío")
+    color = color if color in TASK_TAG_COLORS else "gray"
+
+    if db.query(TaskTag).filter(TaskTag.department_id == department_id, TaskTag.name == name).first():
+        raise HTTPException(400, "Ya existe una etiqueta con ese nombre en este departamento")
+
+    tag = TaskTag(
+        id=uuid.uuid4(), name=name, color=color,
+        department_id=department_id, created_by=current_user.id,
+    )
+    db.add(tag)
+    db.commit()
+    audit.log_action(
+        "task_tag_create", user=current_user, request=request,
+        resource_type="task_tag", resource_id=tag.id, resource_name=tag.name,
+    )
+    return RedirectResponse("/tasks/tags/", status_code=302)
+
+
+@tags_router.post("/{tag_id}/edit")
+def edit_tag(
+    tag_id: str,
+    request: Request,
+    name: str = Form(...),
+    color: str = Form("gray"),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
+    if not tag:
+        raise HTTPException(404)
+    if not _can_manage_tag(current_user, tag):
+        raise HTTPException(403)
+
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "El nombre no puede estar vacío")
+    dup = db.query(TaskTag).filter(
+        TaskTag.department_id == tag.department_id, TaskTag.name == name, TaskTag.id != tag.id,
+    ).first()
+    if dup:
+        raise HTTPException(400, "Ya existe una etiqueta con ese nombre en este departamento")
+
+    tag.name = name
+    tag.color = color if color in TASK_TAG_COLORS else "gray"
+    db.commit()
+    audit.log_action(
+        "task_tag_update", user=current_user, request=request,
+        resource_type="task_tag", resource_id=tag.id, resource_name=tag.name,
+    )
+    return RedirectResponse("/tasks/tags/", status_code=302)
+
+
+@tags_router.post("/{tag_id}/delete")
+def delete_tag(
+    tag_id: str,
+    request: Request,
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
+    if not tag:
+        raise HTTPException(404)
+    if not _can_manage_tag(current_user, tag):
+        raise HTTPException(403)
+
+    name = tag.name
+    db.delete(tag)
+    db.commit()
+    audit.log_action(
+        "task_tag_delete", user=current_user, request=request,
+        resource_type="task_tag", resource_id=tag_id, resource_name=name,
+    )
+    return RedirectResponse("/tasks/tags/", status_code=302)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

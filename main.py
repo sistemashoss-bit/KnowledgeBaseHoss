@@ -54,7 +54,7 @@ from app.users.router import api_router as users_api_router, mgmt_router as user
 from app.chat.router import router as chat_router
 from app.logs.router import router as logs_router
 from app.zones.router import router as zones_router
-from app.tasks.router import router as tasks_router, recurring_router
+from app.tasks.router import router as tasks_router, recurring_router, tags_router as task_tags_router
 from app.projects.router import router as projects_router
 from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
@@ -74,6 +74,7 @@ app.include_router(chat_router)
 app.include_router(logs_router)
 app.include_router(zones_router)
 app.include_router(recurring_router)  # antes de tasks_router: evita el catch-all /tasks/{task_id}
+app.include_router(task_tags_router)  # idem: /tasks/tags antes del catch-all /tasks/{task_id}
 app.include_router(tasks_router)
 app.include_router(projects_router)
 app.include_router(messaging_router)
