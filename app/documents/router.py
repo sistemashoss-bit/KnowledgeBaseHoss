@@ -186,14 +186,14 @@ async def upload_document(
     if status == STATUS_CUSTOM:
         if not allowed_user_ids:
             raise HTTPException(400, "Selecciona al menos una persona para visibilidad 'personas específicas'.")
-        # Solo se permite elegir gente del propio departamento del documento.
+        # Cualquier persona activa, de cualquier departamento (no solo el del documento).
         valid_ids = {
             str(u.id) for u in db.query(User.id).filter(
-                User.department_id == department_id, User.is_active == True  # noqa: E712
+                User.is_active == True, User.id.in_(allowed_user_ids)  # noqa: E712
             ).all()
         }
         if not all(uid in valid_ids for uid in allowed_user_ids):
-            raise HTTPException(400, "Las personas seleccionadas deben pertenecer al departamento elegido.")
+            raise HTTPException(400, "Alguna de las personas seleccionadas no existe o está inactiva.")
     else:
         allowed_user_ids = []
 
@@ -282,9 +282,12 @@ def edit_form(
         raise HTTPException(403)
 
     depts = db.query(Department).order_by(Department.name).all()
-    dept_members = (
+    # Cualquier persona activa es elegible para "personas específicas" (no solo
+    # las del departamento del documento); el select de depto en la plantilla
+    # es solo un filtro visual sobre esta misma lista.
+    members = (
         db.query(User)
-        .filter(User.department_id == doc.department_id, User.is_active == True)  # noqa: E712
+        .filter(User.is_active == True)  # noqa: E712
         .order_by(User.name, User.email)
         .all()
     )
@@ -297,7 +300,7 @@ def edit_form(
             "doc": doc,
             "departments": depts,
             "statuses": STATUSES,
-            "dept_members": dept_members,
+            "members": members,
             "selected_user_ids": selected_user_ids,
             "current_user": user,
             "csrf_token": csrf,
@@ -335,13 +338,14 @@ async def edit_document(
     if status == STATUS_CUSTOM:
         if not allowed_user_ids:
             raise HTTPException(400, "Selecciona al menos una persona para visibilidad 'personas específicas'.")
+        # Cualquier persona activa, de cualquier departamento (no solo el del documento).
         valid_ids = {
             str(u.id) for u in db.query(User.id).filter(
-                User.department_id == doc.department_id, User.is_active == True  # noqa: E712
+                User.is_active == True, User.id.in_(allowed_user_ids)  # noqa: E712
             ).all()
         }
         if not all(uid in valid_ids for uid in allowed_user_ids):
-            raise HTTPException(400, "Las personas seleccionadas deben pertenecer al departamento del documento.")
+            raise HTTPException(400, "Alguna de las personas seleccionadas no existe o está inactiva.")
     else:
         allowed_user_ids = []
 

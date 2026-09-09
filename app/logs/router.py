@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from app.audit import action_label
 from app.auth.deps import require_role
 from app.database import get_db
 from app.models import AuditLog, ROLE_SUPERADMIN, SearchLog
@@ -26,6 +27,8 @@ def audit_logs(
     total = q.count()
     logs = q.order_by(AuditLog.created_at.desc()).offset((page - 1) * _PAGE).limit(_PAGE).all()
     actions = [r[0] for r in db.query(AuditLog.action).distinct().all()]
+    # Ordena por la etiqueta en español (lo que ve el usuario), no por el código crudo.
+    actions.sort(key=action_label)
 
     return templates.TemplateResponse(
         request, "logs/audit.html",
@@ -35,7 +38,7 @@ def audit_logs(
             "page": page,
             "total": total,
             "page_size": _PAGE,
-            "actions": sorted(actions),
+            "actions": actions,
             "selected_action": action,
         },
     )

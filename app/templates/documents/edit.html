@@ -9,6 +9,7 @@
        steps: [],
        step: 0,
        visibility: '{{ doc.status }}',
+       memberFilterDept: '',
        begin() {
          if (this.newFile) {
            this.steps = [
@@ -132,7 +133,7 @@
             {% if s == "public" %}Público (sin login)
             {% elif s == "employee" %}Empleados (toda la empresa)
             {% elif s == "department" %}Departamento (mismo depto.)
-            {% elif s == "custom" %}Personas específicas (del depto.)
+            {% elif s == "custom" %}Personas específicas
             {% else %}Solo admins (del depto.){% endif %}
           </option>
           {% endfor %}
@@ -141,12 +142,22 @@
 
       <!-- Selección de personas (solo cuando la visibilidad es "personas específicas") -->
       <div x-show="visibility === 'custom'" x-cloak>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-          Personas del departamento <span class="text-red-500">*</span>
-        </label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-sm font-medium text-gray-700">
+            Personas <span class="text-red-500">*</span>
+          </label>
+          <select x-model="memberFilterDept"
+                  class="px-2 py-1 border border-gray-300 rounded-lg text-xs focus:outline-none focus:border-indigo-500 bg-white">
+            <option value="">Filtrar por departamento...</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="border border-gray-300 rounded-lg max-h-48 overflow-y-auto divide-y divide-gray-100">
-          {% for m in dept_members %}
-          <label class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer">
+          {% for m in members %}
+          <label class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
+                 x-show="memberFilterDept === '' || memberFilterDept === '{{ m.department_id or '' }}'">
             <input type="checkbox" name="allowed_user_ids" value="{{ m.id }}"
                    {{ 'checked' if m.id|string in selected_user_ids }}
                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
@@ -154,10 +165,13 @@
             <span class="text-xs text-gray-400">{{ m.email }}</span>
           </label>
           {% else %}
-          <p class="px-3 py-3 text-xs text-gray-400">Este departamento no tiene personas activas.</p>
+          <p class="px-3 py-3 text-xs text-gray-400">No hay personas activas.</p>
           {% endfor %}
         </div>
-        <p class="text-xs text-gray-400 mt-1.5">Marca a las personas que podrán ver este documento.</p>
+        <p class="text-xs text-gray-400 mt-1.5">
+          Marca a las personas que podrán ver este documento (de cualquier departamento).
+          El filtro de arriba solo acota la lista, no restringe a quién puedes elegir.
+        </p>
       </div>
 
       {% if doc.drive_url %}

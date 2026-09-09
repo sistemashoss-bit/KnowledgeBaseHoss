@@ -52,3 +52,7 @@ def _evidence_url(key: str, filename: str) -> str:
 
 templates.env.globals["evidence_url"] = _evidence_url
 templates.env.filters["tojson"] = lambda v: json.dumps(v)
+
+from app.audit import action_label as _action_label  # noqa: E402
+
+templates.env.filters["action_label"] = _action_label
