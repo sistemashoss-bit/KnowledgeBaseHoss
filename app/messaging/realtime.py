@@ -36,6 +36,27 @@ async def _aget():
     return _aclient
 
 
+def _drop_client() -> None:
+    """Forget the memoized client after a connection error — the managed
+    Valkey instance can close long-lived pub/sub sockets server-side (idle
+    timeout, maintenance) without the pool noticing until the next read. The
+    next request rebuilds a fresh connection instead of reusing a dead one."""
+    global _aclient
+    stale = _aclient
+    _aclient = None
+    if stale is not None:
+        # Already-dead connection: release the pool in the background,
+        # best-effort, without letting a slow/hanging close block anything.
+        asyncio.ensure_future(_aclose_quietly(stale))
+
+
+async def _aclose_quietly(client) -> None:
+    try:
+        await client.aclose()
+    except Exception:
+        pass
+
+
 def channel(conv_id) -> str:
     return f"chat:conv:{conv_id}"
 
@@ -94,36 +115,49 @@ async def _channel_stream(chan: str, request, event_name: str):
     """Yield SSE frames from a Pub/Sub channel until the client disconnects.
 
     Each published payload is forwarded as `event: <event_name>` with the raw
-    payload as data. Degrades to keepalives when Redis is unavailable.
+    payload as data. Degrades to keepalives when Redis is unavailable, and
+    also if the pub/sub connection dies mid-stream (the managed Valkey
+    instance can close long-lived sockets server-side at any point) — the
+    client's own polling fallback keeps things eventually consistent either
+    way, so a dropped pub/sub connection must never crash the SSE response.
     """
+    import redis.exceptions as redis_exceptions
+
     yield ": connected\n\n"
 
     r = await _aget()
-    if r is None:
-        # No Redis: emit keepalives; the client falls back to slow polling.
+    lost_connection = False
+    if r is not None:
+        pubsub = r.pubsub()
+        try:
+            await pubsub.subscribe(chan)
+            while not await request.is_disconnected():
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=_KEEPALIVE)
+                if msg is None:
+                    yield ": keepalive\n\n"
+                    continue
+                data = msg.get("data", "new")
+                yield f"event: {event_name}\ndata: {data}\n\n"
+        except asyncio.CancelledError:
+            raise
+        except (redis_exceptions.RedisError, OSError) as exc:
+            logger.warning("Valkey pub/sub dropped on %s: %s — degrading to keepalives", chan, exc)
+            _drop_client()
+            lost_connection = True
+        finally:
+            try:
+                await pubsub.unsubscribe(chan)
+                await pubsub.aclose()
+            except Exception:
+                pass
+
+    if r is None or lost_connection:
+        # No Redis, or it just died mid-stream: emit keepalives so the
+        # browser's EventSource doesn't have to reconnect; the client falls
+        # back to slow polling for actual updates.
         while not await request.is_disconnected():
             await asyncio.sleep(_KEEPALIVE)
             yield ": keepalive\n\n"
-        return
-
-    pubsub = r.pubsub()
-    await pubsub.subscribe(chan)
-    try:
-        while not await request.is_disconnected():
-            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=_KEEPALIVE)
-            if msg is None:
-                yield ": keepalive\n\n"
-                continue
-            data = msg.get("data", "new")
-            yield f"event: {event_name}\ndata: {data}\n\n"
-    except asyncio.CancelledError:
-        raise
-    finally:
-        try:
-            await pubsub.unsubscribe(chan)
-            await pubsub.aclose()
-        except Exception:
-            pass
 
 
 async def event_stream(conv_id: str, request):
