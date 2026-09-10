@@ -656,13 +656,22 @@
 
         // ── Web Push (fuera de la pestaña) ──────────────────────────────────────
         async _initPush() {
-          if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+          if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            console.warn('[push] navegador sin soporte para Service Worker/Push');
+            return;
+          }
+          if (!window.isSecureContext) {
+            console.warn('[push] contexto no seguro (hace falta HTTPS o localhost) — Push deshabilitado');
+            return;
+          }
           try {
             const reg = await navigator.serviceWorker.register('/sw.js');
             const sub = await reg.pushManager.getSubscription();
             if (sub) { this.pushState = 'enabled'; return; }
             this.pushState = Notification.permission === 'denied' ? 'denied' : 'default';
-          } catch (e) { /* sin service worker no hay push, el resto sigue igual */ }
+          } catch (e) {
+            console.error('[push] fallo registrando el service worker:', e);
+          }
         },
 
         _urlB64ToUint8Array(b64) {
@@ -676,10 +685,18 @@
           this.pushState = 'subscribing';
           try {
             const perm = await Notification.requestPermission();
-            if (perm !== 'granted') { this.pushState = perm === 'denied' ? 'denied' : 'default'; return; }
+            if (perm !== 'granted') {
+              console.warn('[push] permiso no concedido:', perm);
+              this.pushState = perm === 'denied' ? 'denied' : 'default';
+              return;
+            }
 
             const keyRes = await fetch('/api/push/vapid-public-key');
-            if (!keyRes.ok) { this.pushState = 'default'; return; }
+            if (!keyRes.ok) {
+              console.error('[push] el servidor no tiene VAPID configurado (', keyRes.status, ') — revisa VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY');
+              this.pushState = 'default';
+              return;
+            }
             const { key } = await keyRes.json();
 
             const reg = await navigator.serviceWorker.ready;
@@ -687,13 +704,17 @@
               userVisibleOnly: true,
               applicationServerKey: this._urlB64ToUint8Array(key),
             });
-            await fetch('/api/push/subscribe', {
+            const subRes = await fetch('/api/push/subscribe', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ ...sub.toJSON(), csrf_token: csrfToken }),
             });
+            if (!subRes.ok) console.error('[push] el servidor rechazó la suscripción:', subRes.status);
             this.pushState = 'enabled';
-          } catch (e) { this.pushState = 'default'; }
+          } catch (e) {
+            console.error('[push] fallo activando notificaciones:', e);
+            this.pushState = 'default';
+          }
         },
 
         async disablePush() {
