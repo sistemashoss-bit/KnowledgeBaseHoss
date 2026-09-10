@@ -151,6 +151,31 @@
       {% endif %}
     </div>
 
+    <!-- ── Horas acumuladas por departamento ─────────────────────────────── -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div class="px-6 py-4 border-b border-gray-100">
+        <h2 class="text-sm font-semibold text-gray-700">Horas acumuladas por departamento</h2>
+        <p class="text-xs text-gray-400 mt-0.5">Tiempo total (creación → completado) de tareas terminadas en el período</p>
+      </div>
+      {% if dept_time_stats %}
+      <div class="divide-y divide-gray-100">
+        {% for d in dept_time_stats %}
+        <div class="flex items-center justify-between px-6 py-3">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-800 truncate">{{ d.department }}</p>
+            <p class="text-xs text-gray-400">{{ d.tasks }} tarea{{ 's' if d.tasks != 1 else '' }} completada{{ 's' if d.tasks != 1 else '' }} · promedio {{ d.avg_hours }} h/tarea</p>
+          </div>
+          <span class="text-sm font-semibold text-gray-700 shrink-0 ml-3">
+            {{ d.hours }} <span class="text-xs font-normal text-gray-400">h</span>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="px-6 py-8 text-center text-sm text-gray-400 italic">Sin tareas completadas en el período.</div>
+      {% endif %}
+    </div>
+
     <!-- ── Tables row ──────────────────────────────────────────────────── -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 

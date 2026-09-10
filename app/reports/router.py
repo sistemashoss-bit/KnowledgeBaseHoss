@@ -12,7 +12,7 @@ from app.models import (
     AuditLog, Branch, Department, Project, SearchLog,
     Task, User, UserZone, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN,
-    TASK_STATUSES, TASK_PRIORITIES, PROJECT_STATUSES,
+    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, PROJECT_STATUSES,
 )
 from app.templating import templates
 
@@ -119,6 +119,49 @@ def _tasks_over_time(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
     return days
 
 
+def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> list[dict]:
+    """Horas acumuladas por departamento en el período: para cada tarea que llegó
+    a 'done' (mismo universo que _task_stats, filtrado por fecha de creación),
+    suma el tiempo transcurrido entre su creación y su último cambio (`updated_at`
+    como proxy de completado, igual que _tasks_over_time)."""
+    q = db.query(Task).filter(
+        Task.created_at >= dt_from, Task.created_at < dt_to, Task.status == TASK_DONE,
+    )
+    if dept_ids is not None:
+        q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
+    tasks = q.all()
+
+    seconds_by_dept: dict[str, float] = defaultdict(float)
+    count_by_dept: dict[str, int] = defaultdict(int)
+    for t in tasks:
+        if not t.updated_at or not t.created_at:
+            continue
+        elapsed = (t.updated_at - t.created_at).total_seconds()
+        if elapsed < 0:
+            continue
+        key = str(t.department_id) if t.department_id else ""
+        seconds_by_dept[key] += elapsed
+        count_by_dept[key] += 1
+
+    names = {
+        str(d.id): d.name
+        for d in db.query(Department).filter(Department.id.in_([k for k in seconds_by_dept if k])).all()
+    }
+
+    result = []
+    for key, secs in seconds_by_dept.items():
+        hours = secs / 3600
+        cnt = count_by_dept[key]
+        result.append({
+            "department": names.get(key, "Sin departamento"),
+            "tasks": cnt,
+            "hours": round(hours, 1),
+            "avg_hours": round(hours / cnt, 1) if cnt else 0,
+        })
+    result.sort(key=lambda d: d["hours"], reverse=True)
+    return result
+
+
 def _project_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> dict:
     q = db.query(Project).filter(Project.created_at >= dt_from, Project.created_at < dt_to)
     if dept_ids is not None:
@@ -206,6 +249,7 @@ def reports_dashboard(
 
     # Aggregate
     task_stats = _task_stats(dept_ids, dt_from, dt_to, db)
+    dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db)
     project_stats = _project_stats(dept_ids, dt_from, dt_to, db)
     tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db)
     top_users = _top_users(dt_from, dt_to, db)
@@ -242,6 +286,7 @@ def reports_dashboard(
             "date_to": date_to or date.today().isoformat(),
             # KPIs
             "task_stats": task_stats,
+            "dept_time_stats": dept_time_stats,
             "project_stats": project_stats,
             # tables
             "top_users": top_users,
