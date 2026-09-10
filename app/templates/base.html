@@ -359,12 +359,41 @@
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
       </div>
-      <form method="post" action="/auth/logout"
-            onsubmit="localStorage.removeItem('kb_chat_{{ current_user.id }}')">
+      <form id="logout-form" method="post" action="/auth/logout">
         <button class="w-full text-left text-slate-400 hover:text-white text-xs px-2 py-1 rounded hover:bg-slate-800 transition-colors">
           Cerrar sesión
         </button>
       </form>
+      <script>
+        (function () {
+          var form = document.getElementById('logout-form');
+          if (!form) return;
+          form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            try { localStorage.removeItem('kb_chat_{{ current_user.id }}'); } catch (err) {}
+
+            var done = function () { form.submit(); };
+            if (!('serviceWorker' in navigator)) { done(); return; }
+
+            navigator.serviceWorker.getRegistration('/sw.js').then(function (reg) {
+              if (!reg) return;
+              return reg.pushManager.getSubscription().then(function (sub) {
+                if (!sub) return;
+                // El push es por navegador/dispositivo, no por cuenta: si no lo
+                // soltamos aquí, el siguiente que inicie sesión en este equipo
+                // seguiría recibiendo los avisos de quien se acaba de ir.
+                return fetch('/api/push/unsubscribe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ endpoint: sub.endpoint, csrf_token: '{{ csrf_for(current_user.id) }}' }),
+                }).catch(function () {}).then(function () {
+                  return sub.unsubscribe().catch(function () {});
+                });
+              });
+            }).catch(function () {}).then(done);
+          });
+        })();
+      </script>
       {% else %}
       <a href="/auth/login" class="text-slate-400 hover:text-white text-xs">Iniciar sesión</a>
       {% endif %}
@@ -533,23 +562,36 @@
   {% endblock %}
 
   <script>
-    /* Convierte <time datetime="UTC-ISO" data-fmt="..."> a hora local del browser */
+    /* Convierte <time datetime="UTC-ISO" data-fmt="..."> a hora de Monterrey.
+       Fija (America/Monterrey) en vez de la zona horaria del dispositivo: así
+       todos ven la misma hora sin depender de que cada equipo/navegador tenga
+       bien configurado su reloj/zona. */
     (function () {
-      var pad = function(n) { return String(n).padStart(2, '0'); };
+      var TZ = 'America/Monterrey';
+      var dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone: TZ, hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+      function parts(d) {
+        var p = {};
+        dtf.formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+        if (p.hour === '24') p.hour = '00'; // medianoche: algunos motores la dan como "24" con hour12:false
+        return p;
+      }
       function fmtLocal(el) {
         var iso = el.getAttribute('datetime');
         if (!iso) return;
         var d = new Date(iso);
         if (isNaN(d)) return;
         var fmt = el.dataset.fmt;
+        var p = parts(d);
         if (fmt === 'time') {
-          el.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
+          el.textContent = p.hour + ':' + p.minute;
         } else if (fmt === 'datetime') {
-          el.textContent = pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear()
-                         + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+          el.textContent = p.day + '/' + p.month + '/' + p.year + ' ' + p.hour + ':' + p.minute;
         } else if (fmt === 'datetime-iso') {
-          el.textContent = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
-                         + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+          el.textContent = p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute;
         }
       }
       function run(root) { (root || document).querySelectorAll('time[data-fmt]').forEach(fmtLocal); }
@@ -667,7 +709,15 @@
           try {
             const reg = await navigator.serviceWorker.register('/sw.js');
             const sub = await reg.pushManager.getSubscription();
-            if (sub) { this.pushState = 'enabled'; return; }
+            if (sub) {
+              // Ya había una suscripción de este navegador — el push es por
+              // dispositivo/origen, no por cuenta, así que pudo quedar de OTRA
+              // persona que usó sesión aquí antes. Reconfirma el dueño ante el
+              // servidor para que quede asociada a quien está autenticado ahora.
+              await this._registerSubscription(sub);
+              this.pushState = 'enabled';
+              return;
+            }
             this.pushState = Notification.permission === 'denied' ? 'denied' : 'default';
           } catch (e) {
             console.error('[push] fallo registrando el service worker:', e);
@@ -679,6 +729,19 @@
           const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
           const raw = atob(base64);
           return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+        },
+
+        async _registerSubscription(sub) {
+          try {
+            const subRes = await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...sub.toJSON(), csrf_token: csrfToken }),
+            });
+            if (!subRes.ok) console.error('[push] el servidor rechazó la suscripción:', subRes.status);
+          } catch (e) {
+            console.error('[push] no se pudo confirmar la suscripción con el servidor:', e);
+          }
         },
 
         async enablePush() {
@@ -704,12 +767,7 @@
               userVisibleOnly: true,
               applicationServerKey: this._urlB64ToUint8Array(key),
             });
-            const subRes = await fetch('/api/push/subscribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...sub.toJSON(), csrf_token: csrfToken }),
-            });
-            if (!subRes.ok) console.error('[push] el servidor rechazó la suscripción:', subRes.status);
+            await this._registerSubscription(sub);
             this.pushState = 'enabled';
           } catch (e) {
             console.error('[push] fallo activando notificaciones:', e);

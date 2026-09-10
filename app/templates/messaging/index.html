@@ -290,6 +290,14 @@
            class="absolute inset-0 overflow-y-auto px-6 py-4">
         {% include "messaging/_feed.html" %}
       </div>
+      <script>
+        // Al entrar al chat, arranca en el mensaje más reciente (abajo), no en el más viejo.
+        // Los swaps posteriores (SSE/poll) ya usan hx-swap="scroll:bottom".
+        (function () {
+          var feed = document.getElementById('message-feed');
+          if (feed) feed.scrollTop = feed.scrollHeight;
+        })();
+      </script>
     </div>
 
     <!-- Input bar -->
