@@ -412,7 +412,13 @@ async def create_task(
 
     db.commit()
     if task.assigned_to and str(task.assigned_to) != str(current_user.id):
-        realtime.notify_user(task.assigned_to)
+        actor = current_user.name or current_user.email
+        realtime.notify_user(
+            task.assigned_to,
+            title=f"{actor} te asignó una tarea",
+            body=task.title,
+            url=f"/tasks/{task.id}",
+        )
     realtime.notify_tasks()
     audit.log_action(
         "task_create", user=current_user, request=request,
@@ -588,9 +594,15 @@ async def upload_evidences(
     )
     # Notifica al asignado y al creador (menos a quien sube), solo si hubo archivos.
     if uploaded:
+        actor = current_user.name or current_user.email
         for uid in {task.assigned_to, task.created_by}:
             if uid and str(uid) != str(current_user.id):
-                realtime.notify_user(uid)
+                realtime.notify_user(
+                    uid,
+                    title=f"{actor} subió evidencia",
+                    body=task.title,
+                    url=f"/tasks/{task_id}",
+                )
     return RedirectResponse(f"/tasks/{task_id}", status_code=302)
 
 
@@ -693,9 +705,11 @@ def update_status(
         ))
     db.commit()
     # Notify the other party (assignee/creator) that the status changed.
+    actor = current_user.name or current_user.email
+    push_title = f"{actor} aprobó tu tarea" if is_approval else f"{actor} cambió el estado"
     for uid in {task.assigned_to, task.created_by}:
         if uid and str(uid) != str(current_user.id):
-            realtime.notify_user(uid)
+            realtime.notify_user(uid, title=push_title, body=task.title, url=f"/tasks/{task_id}")
     realtime.notify_tasks()
     realtime.notify_task(task_id)
     audit.log_action(
@@ -798,7 +812,13 @@ def assign_task(
         db.query(TaskTagAssignment).filter(TaskTagAssignment.task_id == task_id).delete()
     db.commit()
     if task.assigned_to and str(task.assigned_to) != str(current_user.id):
-        realtime.notify_user(task.assigned_to)
+        actor = current_user.name or current_user.email
+        realtime.notify_user(
+            task.assigned_to,
+            title=f"{actor} te asignó una tarea",
+            body=task.title,
+            url=f"/tasks/{task_id}",
+        )
     realtime.notify_tasks()
     realtime.notify_task(task_id)
     assignee = db.query(User).filter(User.id == assigned_to).first() if assigned_to else None
@@ -899,9 +919,15 @@ def add_comment(
     comment.user = current_user  # for template rendering
 
     # Notifica al asignado y al creador (menos a quien comenta).
+    actor = current_user.name or current_user.email
     for uid in {task.assigned_to, task.created_by}:
         if uid and str(uid) != str(current_user.id):
-            realtime.notify_user(uid)
+            realtime.notify_user(
+                uid,
+                title=f"{actor} comentó",
+                body=comment.content[:120],
+                url=f"/tasks/{task.id}",
+            )
     realtime.notify_task(task.id)
     audit.log_action(
         "task_comment", user=current_user, request=request,

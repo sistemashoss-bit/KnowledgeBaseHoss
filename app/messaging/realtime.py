@@ -45,14 +45,21 @@ def user_channel(user_id) -> str:
     return f"user:{user_id}:signals"
 
 
-def notify_user(user_id) -> None:
+def notify_user(user_id, title: str | None = None, body: str = "", url: str = "/") -> None:
     """Push a lightweight 'refresh your notifications' signal to a user.
 
     The client re-fetches /api/notifications on receipt. No-op (falls back to the
     client's slow poll) when Valkey is unavailable.
+
+    When `title` is given, this also sends a Web Push notification (service
+    worker) so it surfaces outside an open tab — best-effort, see app.push.
     """
     from app import valkey_client as vk
     vk.publish(user_channel(user_id), json.dumps({"type": "notify"}))
+
+    if title:
+        from app import push
+        push.send_to_user(user_id, title, body, url)
 
 
 def tasks_channel() -> str:

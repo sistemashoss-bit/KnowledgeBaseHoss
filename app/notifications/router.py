@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from app import push
 from app.auth.deps import get_current_user
+from app.auth.utils import verify_csrf_token
+from app.config import settings
 from app.database import get_db
 from app.models import (
-    AuditLog, Conversation, ConversationParticipant, Message, Task, User,
+    AuditLog, Conversation, ConversationParticipant, Message, PushSubscription, Task, User,
     CONV_GROUP, ROLE_ADMIN, ROLE_SUPERADMIN,
 )
 
@@ -288,3 +291,63 @@ def get_notifications(
 
     notifications.sort(key=lambda x: x["created_at"], reverse=True)
     return JSONResponse(content=notifications)
+
+
+# ── Web Push (service worker) ─────────────────────────────────────────────────
+
+@router.get("/push/vapid-public-key")
+def get_vapid_public_key(current_user=Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(401)
+    if not push.configured():
+        raise HTTPException(404, "Web Push no está configurado")
+    return {"key": settings.vapid_public_key}
+
+
+@router.post("/push/subscribe")
+def push_subscribe(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token((payload or {}).get("csrf_token", ""), str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    endpoint = (payload or {}).get("endpoint")
+    keys = (payload or {}).get("keys") or {}
+    p256dh, auth = keys.get("p256dh"), keys.get("auth")
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(400, "Suscripción incompleta")
+
+    existing = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
+    if existing:
+        existing.user_id = current_user.id
+        existing.p256dh = p256dh
+        existing.auth = auth
+    else:
+        db.add(PushSubscription(
+            user_id=current_user.id, endpoint=endpoint, p256dh=p256dh, auth=auth,
+        ))
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/push/unsubscribe")
+def push_unsubscribe(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token((payload or {}).get("csrf_token", ""), str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+    endpoint = (payload or {}).get("endpoint")
+    if endpoint:
+        db.query(PushSubscription).filter(
+            PushSubscription.endpoint == endpoint,
+            PushSubscription.user_id == current_user.id,
+        ).delete()
+        db.commit()
+    return {"ok": True}

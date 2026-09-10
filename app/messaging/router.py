@@ -612,9 +612,16 @@ async def send_message(
 
     # Real-time fan-out to every open client in this conversation.
     vk.publish(realtime.channel(conv_id))
-    # Poke each recipient's notification bell (SSE refresh trigger).
+    # Poke each recipient's notification bell (SSE refresh trigger) + push.
+    actor = current_user.name or current_user.email
+    push_body = content[:120] if content else "Archivo adjunto"
     for uid in _other_participant_ids(conv_id, current_user.id, db):
-        realtime.notify_user(uid)
+        realtime.notify_user(
+            uid,
+            title=f"Nuevo mensaje de {actor}",
+            body=push_body,
+            url=f"/messaging/{conv_id}",
+        )
 
     if valid_files:
         audit.log_action(

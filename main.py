@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -45,6 +45,15 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Knowledge Base", version="1.0.0", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parent / "app" / "assets"), name="assets")
 app.state.limiter = limiter
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Servido en la raíz (no bajo /assets) para que su scope cubra todo el
+    # sitio — necesario para que Web Push llegue sin importar qué página
+    # esté abierta.
+    path = Path(__file__).resolve().parent / "app" / "assets" / "sw.js"
+    return FileResponse(path, media_type="application/javascript")
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 from app.auth.router import router as auth_router

@@ -140,7 +140,7 @@
 
       {% if current_user %}
       <!-- ── Notificaciones ───────────────────────────────────────────────── -->
-      <div x-data="notifSystem('{{ current_user.id }}')" class="relative">
+      <div x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')" class="relative">
 
         <button @click="open = !open"
                 class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -301,8 +301,28 @@
             </template>
           </div>
 
-          <!-- Pie: última actualización -->
-          <div class="shrink-0 px-4 py-2 border-t border-gray-100 bg-slate-50">
+          <!-- Pie: Web Push + última actualización -->
+          <div class="shrink-0 px-4 py-2 border-t border-gray-100 bg-slate-50 space-y-1.5">
+            <template x-if="pushState === 'default'">
+              <button @click="enablePush()"
+                      class="w-full text-center text-[11px] font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
+                Activar notificaciones fuera de la pestaña
+              </button>
+            </template>
+            <template x-if="pushState === 'subscribing'">
+              <p class="text-[11px] text-slate-400 text-center">Activando…</p>
+            </template>
+            <template x-if="pushState === 'enabled'">
+              <button @click="disablePush()"
+                      class="w-full text-center text-[11px] font-medium text-slate-500 hover:text-slate-700 transition-colors">
+                Desactivar notificaciones fuera de la pestaña
+              </button>
+            </template>
+            <template x-if="pushState === 'denied'">
+              <p class="text-[11px] text-slate-400 text-center">
+                Notificaciones del navegador bloqueadas — actívalas en los permisos del sitio.
+              </p>
+            </template>
             <p class="text-[10px] text-slate-400 text-center">
               Se mostrarán las últimas 48 h
             </p>
@@ -540,7 +560,7 @@
 
   {% if current_user %}
   <script>
-    function notifSystem(userId) {
+    function notifSystem(userId, csrfToken) {
       const TTL = 2 * 24 * 60 * 60 * 1000; // 48 h en ms
       const DB_NAME = `hoss_kb_${userId}`;   // IDB por usuario (aislado por navegador)
       const STORE = 'notifs';
@@ -620,6 +640,7 @@
         open: false,
         notifications: [],
         total: 0,
+        pushState: 'unsupported', // 'unsupported' | 'default' | 'denied' | 'subscribing' | 'enabled'
 
         async init() {
           try { await this._prune(); } catch (e) { _idbOk = false; }
@@ -630,6 +651,64 @@
           // Notificaciones generadas en el cliente (p. ej. llamadas perdidas).
           window.addEventListener('notif:add', (e) => this._add(e.detail));
           setInterval(() => this._fetch(), 180000);
+          this._initPush();
+        },
+
+        // ── Web Push (fuera de la pestaña) ──────────────────────────────────────
+        async _initPush() {
+          if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+          try {
+            const reg = await navigator.serviceWorker.register('/sw.js');
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) { this.pushState = 'enabled'; return; }
+            this.pushState = Notification.permission === 'denied' ? 'denied' : 'default';
+          } catch (e) { /* sin service worker no hay push, el resto sigue igual */ }
+        },
+
+        _urlB64ToUint8Array(b64) {
+          const padding = '='.repeat((4 - (b64.length % 4)) % 4);
+          const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+          const raw = atob(base64);
+          return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+        },
+
+        async enablePush() {
+          this.pushState = 'subscribing';
+          try {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') { this.pushState = perm === 'denied' ? 'denied' : 'default'; return; }
+
+            const keyRes = await fetch('/api/push/vapid-public-key');
+            if (!keyRes.ok) { this.pushState = 'default'; return; }
+            const { key } = await keyRes.json();
+
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: this._urlB64ToUint8Array(key),
+            });
+            await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...sub.toJSON(), csrf_token: csrfToken }),
+            });
+            this.pushState = 'enabled';
+          } catch (e) { this.pushState = 'default'; }
+        },
+
+        async disablePush() {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              await fetch('/api/push/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: sub.endpoint, csrf_token: csrfToken }),
+              });
+              await sub.unsubscribe();
+            }
+          } finally { this.pushState = 'default'; }
         },
 
         async _prune() {

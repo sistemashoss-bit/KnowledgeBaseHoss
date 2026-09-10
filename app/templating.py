@@ -54,5 +54,7 @@ templates.env.globals["evidence_url"] = _evidence_url
 templates.env.filters["tojson"] = lambda v: json.dumps(v)
 
 from app.audit import action_label as _action_label  # noqa: E402
+from app.auth.utils import generate_csrf_token as _generate_csrf_token  # noqa: E402
 
 templates.env.filters["action_label"] = _action_label
+templates.env.globals["csrf_for"] = lambda user_id: _generate_csrf_token(str(user_id)) if user_id else ""

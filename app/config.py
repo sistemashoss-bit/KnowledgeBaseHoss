@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     voyage_embedding_dim: int = 2048
     voyage_rerank_model: str = "rerank-2.5"
 
+    # Web Push (notificaciones fuera de la pestaña, vía service worker).
+    # Vacíos = push deshabilitado (silenciosamente): el resto de notificaciones
+    # (dropdown + SSE) sigue funcionando igual.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_admin_email: str = "soporte@hoss.com.mx"
+
 
     @property
     def sqlalchemy_url(self) -> str:
