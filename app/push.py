@@ -18,6 +18,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Correo del claim VAPID "sub" (identifica al remitente ante el push service).
+# No es secreto y no cambia entre entornos, así que va fijo aquí en vez de en
+# la config/.env.
+VAPID_ADMIN_EMAIL = "sistemashoss@gmail.com"
+
 
 def configured() -> bool:
     return bool(settings.vapid_public_key and settings.vapid_private_key)
@@ -51,7 +56,7 @@ def _send_all(user_id, title: str, body: str, url: str) -> None:
                     },
                     data=payload,
                     vapid_private_key=settings.vapid_private_key,
-                    vapid_claims={"sub": f"mailto:{settings.vapid_admin_email}"},
+                    vapid_claims={"sub": f"mailto:{VAPID_ADMIN_EMAIL}"},
                 )
             except WebPushException as exc:
                 status = getattr(exc.response, "status_code", None)

@@ -61,10 +61,10 @@ class Settings(BaseSettings):
 
     # Web Push (notificaciones fuera de la pestaña, vía service worker).
     # Vacíos = push deshabilitado (silenciosamente): el resto de notificaciones
-    # (dropdown + SSE) sigue funcionando igual.
+    # (dropdown + SSE) sigue funcionando igual. El correo admin (claim VAPID
+    # "sub") no es secreto y no depende del entorno — está fijo en app/push.py.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
-    vapid_admin_email: str = "soporte@hoss.com.mx"
 
 
     @property
