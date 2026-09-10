@@ -183,12 +183,8 @@ def upload_form(
 ):
     all_depts = db.query(Department).order_by(Department.name).all()
 
-    if user.role == ROLE_SUPERADMIN:
-        available_depts = all_depts
-        available_statuses = STATUSES
-    else:
-        available_depts = [d for d in all_depts if str(d.id) == str(user.department_id)]
-        available_statuses = STATUSES
+    available_depts = all_depts
+    available_statuses = STATUSES
 
     # Para el select de "personas específicas": se filtra en el cliente por
     # departamento (mismo patrón que tasks/list.html con data-dept).
@@ -231,8 +227,6 @@ async def upload_document(
         raise HTTPException(403, "Invalid CSRF token")
     if status not in STATUSES:
         raise HTTPException(400, f"Status must be one of: {STATUSES}")
-    if user.role == ROLE_ADMIN and str(department_id) != str(user.department_id):
-        raise HTTPException(403, "Can only upload to your own department")
 
     dept = db.query(Department).filter(Department.id == department_id).first()
     if not dept:
