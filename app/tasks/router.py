@@ -462,7 +462,12 @@ def task_detail(
         .first()
     )
     if not task:
-        raise HTTPException(404)
+        # La tarea ya no existe (borrada por otra pestaña/persona, o link viejo).
+        # Redirigir en vez de 404 crudo: el SSE de esta misma página hace
+        # location.reload() al recibir el aviso de "tarea cambiada" que dispara
+        # el propio borrado, y esa recarga puede ganarle a la del HX-Redirect
+        # del botón Eliminar — sin esto, aterriza en un JSON de error.
+        return RedirectResponse("/tasks/", status_code=302)
 
     # Verify visibility
     visible = _tasks_query(current_user, db).filter(Task.id == task_id).first()
