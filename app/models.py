@@ -72,10 +72,15 @@ class Zone(Base):
     slug = Column(String(100), unique=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    branches = relationship("Branch", back_populates="zone")
-    user_zones = relationship("UserZone", back_populates="zone")
-    projects = relationship("Project", back_populates="zone")
-    conversations = relationship("Conversation", back_populates="zone")
+    # passive_deletes=True en todas las colecciones de esta clase: la BD ya
+    # aplica ON DELETE CASCADE/SET NULL en cada FK correspondiente (ver
+    # migración 008 y siguientes); sin esto, el ORM intenta nulificar/gestionar
+    # las filas hijas él mismo antes de borrar, lo que revienta con
+    # IntegrityError en columnas NOT NULL (mismo bug que en Task, ver arriba).
+    branches = relationship("Branch", back_populates="zone", passive_deletes=True)
+    user_zones = relationship("UserZone", back_populates="zone", passive_deletes=True)
+    projects = relationship("Project", back_populates="zone", passive_deletes=True)
+    conversations = relationship("Conversation", back_populates="zone", passive_deletes=True)
 
 
 class Branch(Base):
@@ -91,10 +96,10 @@ class Branch(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     zone = relationship("Zone", back_populates="branches")
-    departments = relationship("Department", back_populates="branch")
-    users = relationship("User", back_populates="branch")
-    projects = relationship("Project", back_populates="branch")
-    conversations = relationship("Conversation", back_populates="branch")
+    departments = relationship("Department", back_populates="branch", passive_deletes=True)
+    users = relationship("User", back_populates="branch", passive_deletes=True)
+    projects = relationship("Project", back_populates="branch", passive_deletes=True)
+    conversations = relationship("Conversation", back_populates="branch", passive_deletes=True)
 
 
 class UserZone(Base):
@@ -121,13 +126,15 @@ class Department(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     branch = relationship("Branch", back_populates="departments")
-    users = relationship("User", back_populates="department")
-    documents = relationship("Document", back_populates="department")
-    projects = relationship("Project", back_populates="department")
-    tasks = relationship("Task", back_populates="department")
-    recurring_tasks = relationship("RecurringTask", back_populates="department")
-    conversations = relationship("Conversation", back_populates="department")
-    task_tags = relationship("TaskTag", back_populates="department", cascade="all, delete-orphan")
+    users = relationship("User", back_populates="department", passive_deletes=True)
+    documents = relationship("Document", back_populates="department", passive_deletes=True)
+    projects = relationship("Project", back_populates="department", passive_deletes=True)
+    tasks = relationship("Task", back_populates="department", passive_deletes=True)
+    recurring_tasks = relationship("RecurringTask", back_populates="department", passive_deletes=True)
+    conversations = relationship("Conversation", back_populates="department", passive_deletes=True)
+    task_tags = relationship(
+        "TaskTag", back_populates="department", cascade="all, delete-orphan", passive_deletes=True,
+    )
 
 
 class User(Base):
@@ -152,22 +159,29 @@ class User(Base):
 
     department = relationship("Department", back_populates="users")
     branch = relationship("Branch", back_populates="users")
-    documents = relationship("Document", back_populates="uploaded_by_user")
-    document_access = relationship("DocumentAllowedUser", back_populates="user")
-    user_zones = relationship("UserZone", back_populates="user")
+    documents = relationship("Document", back_populates="uploaded_by_user", passive_deletes=True)
+    document_access = relationship("DocumentAllowedUser", back_populates="user", passive_deletes=True)
+    user_zones = relationship("UserZone", back_populates="user", passive_deletes=True)
 
     # Work
-    created_projects = relationship("Project", back_populates="created_by_user", foreign_keys="Project.created_by")
-    assigned_tasks = relationship("Task", back_populates="assignee", foreign_keys="Task.assigned_to")
-    created_tasks = relationship("Task", back_populates="created_by_user", foreign_keys="Task.created_by")
-    task_comments = relationship("TaskComment", back_populates="user")
+    created_projects = relationship(
+        "Project", back_populates="created_by_user", foreign_keys="Project.created_by", passive_deletes=True,
+    )
+    assigned_tasks = relationship(
+        "Task", back_populates="assignee", foreign_keys="Task.assigned_to", passive_deletes=True,
+    )
+    created_tasks = relationship(
+        "Task", back_populates="created_by_user", foreign_keys="Task.created_by", passive_deletes=True,
+    )
+    task_comments = relationship("TaskComment", back_populates="user", passive_deletes=True)
     created_recurring_tasks = relationship(
-        "RecurringTask", back_populates="created_by_user", foreign_keys="RecurringTask.created_by"
+        "RecurringTask", back_populates="created_by_user", foreign_keys="RecurringTask.created_by",
+        passive_deletes=True,
     )
 
     # Communication
-    participations = relationship("ConversationParticipant", back_populates="user")
-    sent_messages = relationship("Message", back_populates="sender")
+    participations = relationship("ConversationParticipant", back_populates="user", passive_deletes=True)
+    sent_messages = relationship("Message", back_populates="sender", passive_deletes=True)
 
 
 class Document(Base):
@@ -200,7 +214,7 @@ class Document(Base):
     department = relationship("Department", back_populates="documents")
     uploaded_by_user = relationship("User", back_populates="documents")
     allowed_users = relationship(
-        "DocumentAllowedUser", back_populates="document", cascade="all, delete-orphan"
+        "DocumentAllowedUser", back_populates="document", cascade="all, delete-orphan", passive_deletes=True,
     )
 
 
@@ -270,7 +284,7 @@ class Project(Base):
     branch = relationship("Branch", back_populates="projects")
     zone = relationship("Zone", back_populates="projects")
     created_by_user = relationship("User", back_populates="created_projects", foreign_keys=[created_by])
-    tasks = relationship("Task", back_populates="project")
+    tasks = relationship("Task", back_populates="project", passive_deletes=True)
 
 
 class Task(Base):
@@ -304,12 +318,23 @@ class Task(Base):
     document = relationship("Document", foreign_keys=[document_id])
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_to])
     created_by_user = relationship("User", back_populates="created_tasks", foreign_keys=[created_by])
-    comments = relationship("TaskComment", back_populates="task", order_by="TaskComment.created_at")
-    evidences = relationship("TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at")
-    status_history = relationship(
-        "TaskStatusHistory", back_populates="task", order_by="TaskStatusHistory.changed_at"
+    # passive_deletes=True: al borrar la tarea, deja que la base de datos aplique
+    # el ON DELETE CASCADE ya definido en estas FKs, en vez de que el ORM intente
+    # poner task_id = NULL en cada fila hija primero (revienta porque la columna
+    # es NOT NULL — IntegrityError al eliminar cualquier tarea con historial).
+    comments = relationship(
+        "TaskComment", back_populates="task", order_by="TaskComment.created_at", passive_deletes=True,
     )
-    tags = relationship("TaskTagAssignment", back_populates="task", cascade="all, delete-orphan")
+    evidences = relationship(
+        "TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at", passive_deletes=True,
+    )
+    status_history = relationship(
+        "TaskStatusHistory", back_populates="task", order_by="TaskStatusHistory.changed_at",
+        passive_deletes=True,
+    )
+    tags = relationship(
+        "TaskTagAssignment", back_populates="task", cascade="all, delete-orphan", passive_deletes=True,
+    )
 
 
 class TaskStatusHistory(Base):
@@ -347,7 +372,9 @@ class TaskTag(Base):
 
     department = relationship("Department", back_populates="task_tags")
     created_by_user = relationship("User", foreign_keys=[created_by])
-    tasks = relationship("TaskTagAssignment", back_populates="tag", cascade="all, delete-orphan")
+    tasks = relationship(
+        "TaskTagAssignment", back_populates="tag", cascade="all, delete-orphan", passive_deletes=True,
+    )
 
 
 class TaskTagAssignment(Base):
@@ -468,8 +495,12 @@ class Conversation(Base):
     branch = relationship("Branch", back_populates="conversations")
     department = relationship("Department", back_populates="conversations")
     created_by_user = relationship("User", foreign_keys=[created_by])
-    participants = relationship("ConversationParticipant", back_populates="conversation")
-    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
+    participants = relationship(
+        "ConversationParticipant", back_populates="conversation", passive_deletes=True,
+    )
+    messages = relationship(
+        "Message", back_populates="conversation", order_by="Message.created_at", passive_deletes=True,
+    )
 
 
 class ConversationParticipant(Base):
@@ -495,7 +526,10 @@ class Message(Base):
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="sent_messages")
-    attachments = relationship("MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at")
+    attachments = relationship(
+        "MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at",
+        passive_deletes=True,
+    )
 
 
 class MessageAttachment(Base):

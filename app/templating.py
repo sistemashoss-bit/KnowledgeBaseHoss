@@ -51,7 +51,11 @@ def _evidence_url(key: str, filename: str) -> str:
 
 
 templates.env.globals["evidence_url"] = _evidence_url
-templates.env.filters["tojson"] = lambda v: json.dumps(v)
+# Markup(...) es obligatorio: sin marcarlo como seguro, el autoescape de Jinja
+# convierte las comillas del JSON en &#34;, dejando el <script> con JS inválido
+# (rompe silenciosamente cualquier `const x = {{ ... | tojson }}` — los gráficos
+# de /reports/, el estado de mensajería y de tareas recurrentes que lo usan).
+templates.env.filters["tojson"] = lambda v: Markup(json.dumps(v, default=str))
 
 from app.audit import action_label as _action_label  # noqa: E402
 from app.auth.utils import generate_csrf_token as _generate_csrf_token  # noqa: E402

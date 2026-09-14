@@ -92,29 +92,24 @@ def _status_durations(task: Task) -> dict:
     """Tiempo acumulado en cada estado (sin contar "Listo", que es terminal y no
     aporta al desglose) más el tiempo total que tardó la tarea, de punta a punta.
 
-    El tramo del estado actual se cuenta hasta ahora (o hasta `archived_at` si la
-    tarea ya se archivó), así que el desglose siempre refleja algo aunque la tarea
-    siga abierta. El total, en cambio, sólo tiene sentido una vez la tarea
-    terminó: desde la creación hasta que se aprobó (pasó a "Listo") o se archivó
-    — lo que ocurra después. Mientras siga abierta, `total_seconds` es None.
+    El tramo del estado actual se cuenta hasta ahora, así que el desglose siempre
+    refleja algo aunque la tarea siga abierta. El total, en cambio, sólo tiene
+    sentido una vez la tarea se aprobó (pasó a "Listo"); mientras no llegue a ese
+    estado, `total_seconds` es None. `archived_at` no participa: solo indica que
+    se sacó del Kanban (siempre después de "Listo"), no cuándo se completó.
     """
     history = task.status_history
     if not history:
         return {"breakdown": [], "total_seconds": None}
     totals = {s: 0.0 for s in TASK_STATUSES}
-    now_end = task.archived_at or datetime.utcnow()
+    now_end = datetime.utcnow()
     for i, entry in enumerate(history):
         segment_end = history[i + 1].changed_at if i + 1 < len(history) else now_end
         seconds = (segment_end - entry.changed_at).total_seconds()
         if entry.to_status in totals and seconds > 0:
             totals[entry.to_status] += seconds
 
-    if task.archived_at:
-        finished_at = task.archived_at
-    elif task.status == TASK_DONE:
-        finished_at = history[-1].changed_at
-    else:
-        finished_at = None
+    finished_at = history[-1].changed_at if task.status == TASK_DONE else None
 
     return {
         "breakdown": [

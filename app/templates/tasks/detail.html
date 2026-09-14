@@ -133,6 +133,9 @@
           <p class="text-sm font-medium text-gray-800">
             {{ task.created_by_user.name or task.created_by_user.email if task.created_by_user else "—" }}
           </p>
+          <p class="text-xs text-gray-400 mt-0.5">
+            {{ task.created_at.strftime('%d/%m/%Y %H:%M') if task.created_at else "—" }}
+          </p>
         </div>
 
         <div class="px-5 py-4">
