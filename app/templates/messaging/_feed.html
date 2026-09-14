@@ -19,7 +19,7 @@
   {% endif %}
 
   {# ── Bubble ──────────────────────────────────────────────────────────── #}
-  <div class="{% if is_mine %}max-w-xs lg:max-w-md xl:max-w-lg{% else %}max-w-xs lg:max-w-md xl:max-w-lg{% endif %}">
+  <div class="min-w-0 max-w-[85%] sm:max-w-xs lg:max-w-md xl:max-w-lg">
 
     {# Sender name — only in groups for others #}
     {% if show_avatars and not is_mine and msg.sender %}
@@ -30,15 +30,13 @@
 
     {# Text bubble #}
     {% if msg.content %}
-    <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
+    <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
       {% if is_mine %}
-        bg-orange-500 text-white rounded-br-sm [&_a]:text-white
+        ml-auto bg-orange-500 text-white rounded-br-sm [&_a]:text-white
       {% else %}
         bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
       {% endif %}
-      {% if msg.attachments %}rounded-b-sm{% endif %}">
-      {{ msg.content | linkify }}
-    </div>
+      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify }}</div>
     {% endif %}
 
     {# Attachments #}

@@ -14,7 +14,8 @@
 <body class="h-full flex">
 
   <!-- Sidebar -->
-  <aside class="w-64 bg-slate-900 flex flex-col shrink-0 min-h-screen">
+  <aside {% if current_user %}x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')"{% endif %}
+         class="w-64 bg-slate-900 flex flex-col shrink-0 min-h-screen">
     <div class="px-6 py-5 border-b border-slate-700">
       <a href="/" class="flex items-center justify-center">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
@@ -80,7 +81,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
         </svg>
-        Tareas
+        <span class="flex-1">Tareas</span>
+        <span x-show="assignedTaskCount > 0" x-cloak
+              role="status" aria-live="polite" aria-atomic="true"
+              class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
+          <span aria-hidden="true" x-text="assignedTaskCount > 99 ? '99+' : assignedTaskCount"></span>
+          <span class="sr-only" x-text="assignedTaskCount + ' tareas asignadas con avisos sin leer'"></span>
+        </span>
       </a>
       <a href="/projects/"
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -96,7 +103,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-1-3z" />
         </svg>
-        Mensajes
+        <span class="flex-1">Mensajes</span>
+        <span x-show="messageCount > 0" x-cloak
+              role="status" aria-live="polite" aria-atomic="true"
+              class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
+          <span aria-hidden="true" x-text="messageCount > 99 ? '99+' : messageCount"></span>
+          <span class="sr-only" x-text="messageCount + ' conversaciones con mensajes sin leer'"></span>
+        </span>
       </a>
       {% endif %}
 
@@ -140,7 +153,7 @@
 
       {% if current_user %}
       <!-- ── Notificaciones ───────────────────────────────────────────────── -->
-      <div x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')" class="relative">
+      <div class="relative">
 
         <button @click="open = !open"
                 class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -665,7 +678,11 @@
       let _idbOk = true;
       let _mem = [];
       function _lsLoad() {
-        try { return JSON.parse(localStorage.getItem(LS_KEY) || '{"items":[]}').items || []; }
+        try {
+          // El respaldo contiene únicamente avisos descartados.
+          return (JSON.parse(localStorage.getItem(LS_KEY) || '{"items":[]}').items || [])
+            .map(n => ({ ...n, dismissed: true }));
+        }
         catch (e) { return []; }
       }
       function _lsSave(items) {
@@ -682,14 +699,31 @@
         open: false,
         notifications: [],
         total: 0,
+        messageCount: 0,
         pushState: 'unsupported', // 'unsupported' | 'default' | 'denied' | 'subscribing' | 'enabled'
+
+        get assignedTaskCount() {
+          return new Set(this.notifications
+            .filter(n => n.type === 'task_assigned').map(n => n.url)).size;
+        },
 
         async init() {
           try { await this._prune(); } catch (e) { _idbOk = false; }
-          if (_idbOk) _mem = _lsLoad();      // por si hubo fallback previo
+          _mem = _lsLoad();      // por si hubo fallback previo
           await this._reload();
           await this._fetch();
+          if (window.location.pathname.replace(/\/$/, '') === '/tasks') {
+            const assignedIds = this.notifications
+              .filter(n => n.type === 'task_assigned').map(n => n.id);
+            setTimeout(async () => {
+              if (window.location.pathname.replace(/\/$/, '') !== '/tasks') return;
+              for (const id of assignedIds) { await this.dismiss(id); }
+            }, 10000);
+          }
           window.addEventListener('notif:refresh', () => this._fetch());
+          window.addEventListener('htmx:afterSwap', (e) => {
+            if (e.detail.target.id === 'message-feed') return this._fetch();
+          });
           // Notificaciones generadas en el cliente (p. ej. llamadas perdidas).
           window.addEventListener('notif:add', (e) => this._add(e.detail));
           setInterval(() => this._fetch(), 180000);
@@ -828,6 +862,8 @@
             if (!res.ok) return;
             data = await res.json();
           } catch (e) { return; }
+          // Cuenta las conversaciones que el servidor todavía considera sin leer.
+          this.messageCount = new Set(data.filter(n => n.type === 'message').map(n => n.url)).size;
           try {
             const existing = {};
             (await (_idbOk ? _getAll() : Promise.resolve(_mem))).forEach(n => existing[n.id] = n);
