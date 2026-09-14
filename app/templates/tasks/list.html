@@ -464,6 +464,7 @@ initDragAndDrop();
         </div>
       </div>
 
+      {% if is_admin %}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a departamento</label>
         <select id="nt-dept" name="department_id"
@@ -474,6 +475,7 @@ initDragAndDrop();
           {% endfor %}
         </select>
       </div>
+      {% endif %}
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a persona</label>

@@ -42,6 +42,7 @@ def ensure_indices() -> None:
                         "content_type": {"type": "keyword"},
                         "uploaded_by": {"type": "keyword"},
                         "allowed_user_ids": {"type": "keyword"},
+                        "is_work_document": {"type": "boolean"},
                         "created_at": {"type": "date"},
                     }
                 }
@@ -50,6 +51,8 @@ def ensure_indices() -> None:
     else:
         # Índice preexistente de antes de la visibilidad 'custom': agrega el campo.
         _add_field_mapping(client, DOCUMENTS_INDEX, "allowed_user_ids", {"type": "keyword"})
+        # Índice preexistente de antes de "documento de trabajo": agrega el campo.
+        _add_field_mapping(client, DOCUMENTS_INDEX, "is_work_document", {"type": "boolean"})
 
     _ensure_chunks_index(client)
 

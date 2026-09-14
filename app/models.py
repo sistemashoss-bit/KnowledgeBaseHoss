@@ -189,6 +189,10 @@ class Document(Base):
     content_html = Column(Text, nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
+    # Distingue un archivo de referencia común de un documento en el que la
+    # persona está trabajando (p.ej. un borrador propio). No es un nivel de
+    # visibilidad: hereda el mismo control de acceso selectivo de `status`.
+    is_work_document = Column(Boolean, nullable=False, default=False)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

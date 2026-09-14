@@ -58,18 +58,24 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True):
     return q
 
 
-def _can_edit_task(user: User, task: Task) -> bool:
+def _can_edit_task(user: User, task: Task, db: Session) -> bool:
     if user.role == ROLE_SUPERADMIN:
         return True
     if str(task.created_by) == str(user.id):
         return True
-    if user.role == ROLE_ADMIN and task.department_id and str(task.department_id) == str(user.department_id):
-        return True
+    if user.role == ROLE_ADMIN:
+        allowed_depts = _assignable_department_ids(user, db) or set()
+        if task.department_id and task.department_id in allowed_depts:
+            return True
+        scope = _manager_scope(user, db)
+        if scope and scope["branch_ids"] and task.assigned_to:
+            if task.assigned_to in _branch_user_ids(scope["branch_ids"], db):
+                return True
     return False
 
 
-def _can_update_status(user: User, task: Task) -> bool:
-    if _can_edit_task(user, task):
+def _can_update_status(user: User, task: Task, db: Session) -> bool:
+    if _can_edit_task(user, task, db):
         return True
     return task.assigned_to and str(task.assigned_to) == str(user.id)
 
@@ -188,9 +194,11 @@ def list_tasks(
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     ).filter(Task.archived_at.is_(None))
 
-    # Data for create form
+    # Data for create form. "departments" es difusión abierta (cualquier admin
+    # puede difundir a cualquier departamento); "users" es asignación puntual,
+    # acotada al alcance de cada rol (ver _assignable_users_query).
     departments = db.query(Department).order_by(Department.name).all()
-    users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
+    users = _assignable_users_query(current_user, db).all()
     projects = db.query(Project).order_by(Project.name).all()
     tags = db.query(TaskTag).order_by(TaskTag.name).all()
 
@@ -364,6 +372,7 @@ async def create_task(
         raise HTTPException(401)
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
+    _validate_target_scope(current_user, db, department_id, assigned_to, required=False)
 
     task = Task(
         id=uuid.uuid4(),
@@ -465,7 +474,7 @@ def task_detail(
     if not visible:
         raise HTTPException(403)
 
-    users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
+    users = _assignable_users_query(current_user, db).all()
     departments = db.query(Department).order_by(Department.name).all()
     dept_tags = (
         db.query(TaskTag).filter(TaskTag.department_id == task.department_id).order_by(TaskTag.name).all()
@@ -494,8 +503,9 @@ def task_detail(
             "selected_tag_ids": selected_tag_ids,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
-            "can_edit": _can_edit_task(current_user, task),
-            "can_update_status": _can_update_status(current_user, task),
+            "can_edit": _can_edit_task(current_user, task, db),
+            "can_update_status": _can_update_status(current_user, task, db),
+            "is_admin": current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN),
             "can_approve": _can_approve_task(current_user, task),
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
@@ -629,7 +639,7 @@ def delete_evidence(
 
     task = db.query(Task).filter(Task.id == task_id).first()
     is_uploader = str(ev.uploaded_by) == str(current_user.id)
-    if not is_uploader and not _can_edit_task(current_user, task):
+    if not is_uploader and not _can_edit_task(current_user, task, db):
         raise HTTPException(403)
 
     filename = ev.filename
@@ -686,7 +696,7 @@ def update_status(
     if not current_user:
         raise HTTPException(401)
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_update_status(current_user, task):
+    if not task or not _can_update_status(current_user, task, db):
         raise HTTPException(403)
     if status not in TASK_STATUSES:
         raise HTTPException(400)
@@ -744,7 +754,7 @@ def archive_task(
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_update_status(current_user, task):
+    if not task or not _can_update_status(current_user, task, db):
         raise HTTPException(403)
     if task.status != TASK_DONE:
         raise HTTPException(400, "Solo se pueden archivar tareas Listo")
@@ -774,7 +784,7 @@ def unarchive_task(
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_update_status(current_user, task):
+    if not task or not _can_update_status(current_user, task, db):
         raise HTTPException(403)
     task.archived_at = None
     db.commit()
@@ -802,8 +812,9 @@ def assign_task(
     if not current_user:
         raise HTTPException(401)
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_edit_task(current_user, task):
+    if not task or not _can_edit_task(current_user, task, db):
         raise HTTPException(403)
+    _validate_target_scope(current_user, db, department_id, assigned_to, required=False)
     old_dept_id = task.department_id
     task.assigned_to = assigned_to if assigned_to else None
     task.department_id = department_id if department_id else task.department_id
@@ -843,7 +854,7 @@ def set_task_tags(
     if not current_user:
         raise HTTPException(401)
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_edit_task(current_user, task):
+    if not task or not _can_edit_task(current_user, task, db):
         raise HTTPException(403)
 
     valid_ids = _validated_tag_ids(tag_ids, str(task.department_id) if task.department_id else None, db)
@@ -873,7 +884,7 @@ def delete_task(
     if not current_user:
         raise HTTPException(401)
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or not _can_edit_task(current_user, task):
+    if not task or not _can_edit_task(current_user, task, db):
         raise HTTPException(403)
     title = task.title
     db.delete(task)
@@ -1013,7 +1024,7 @@ def delete_comment(
     task = db.query(Task).filter(Task.id == task_id).first()
     # Borra el autor, o quien pueda editar la tarea (creador/admin del depto/superadmin).
     is_author = str(comment.user_id) == str(current_user.id)
-    if not (is_author or (task and _can_edit_task(current_user, task))):
+    if not (is_author or (task and _can_edit_task(current_user, task, db))):
         raise HTTPException(403)
 
     db.delete(comment)
@@ -1266,37 +1277,62 @@ def _can_manage_recurring(user: User, rt: RecurringTask, db: Session) -> bool:
 
 
 def _assignable_users_query(user: User, db: Session):
-    """Usuarios activos que el encargado puede asignar, según su alcance."""
+    """Usuarios activos a los que se puede asignar una tarea puntual (persona a persona).
+
+    superadmin → cualquiera. admin con zona → personas de las sucursales de su
+    zona. admin sin zona → todo su departamento (todas sus sucursales/zonas).
+    employee → sólo él mismo (autoasignación)."""
     q = db.query(User).filter(User.is_active == True)
-    scope = _manager_scope(user, db)
-    if scope is None:
+    if user.role == ROLE_SUPERADMIN:
         return q.order_by(User.email)
-    conds = []
-    if scope["dept_ids"]:
-        conds.append(User.department_id.in_(scope["dept_ids"]))
-    if scope["branch_ids"]:
-        conds.append(User.branch_id.in_(scope["branch_ids"]))
-    if not conds:
-        return q.filter(false())
-    return q.filter(or_(*conds)).order_by(User.email)
+    if user.role == ROLE_ADMIN:
+        scope = _manager_scope(user, db)
+        conds = []
+        if scope["dept_ids"]:
+            conds.append(User.department_id.in_(scope["dept_ids"]))
+        if scope["branch_ids"]:
+            conds.append(User.branch_id.in_(scope["branch_ids"]))
+        if not conds:
+            return q.filter(false())
+        return q.filter(or_(*conds)).order_by(User.email)
+    return q.filter(User.id == user.id)
 
 
-def _validate_target_scope(user: User, db: Session, department_id: str, assigned_to: str) -> None:
-    """Rechaza departamento/asignado fuera del alcance del encargado.
+def _validate_target_scope(
+    user: User, db: Session, department_id: str, assigned_to: str, *, required: bool = True,
+) -> None:
+    """Valida a quién puede dirigir un encargado (o un empleado) una tarea/plantilla.
 
-    superadmin no tiene restricción. Para el resto, la plantilla debe apuntar a
-    algo dentro de su alcance (su departamento o las sucursales de su zona)."""
+    - superadmin: sin restricción.
+    - admin (con o sin zona): puede difundir a cualquier departamento
+      (`department_id`) sin restricción — es una bandeja compartida global, sin
+      elegir persona. Si además señala a alguien puntual (`assigned_to`), debe
+      caer dentro de su alcance de gestión (su zona, o todo su departamento si
+      no tiene zona) — ver `_assignable_users_query`.
+    - employee: no puede difundir a un departamento ni asignar a otra persona;
+      sólo puede autoasignarse (o dejarla sin persona puntual).
+
+    `required`: True exige que venga department_id o assigned_to (plantillas
+    recurrentes, que no tienen sentido sin destinatario); False lo permite
+    vacío (tarea suelta personal, sin depto ni asignado).
+    """
     if user.role == ROLE_SUPERADMIN:
         return
-    if not department_id and not assigned_to:
-        raise HTTPException(400, "Elige un departamento o una persona dentro de tu alcance")
-    allowed_depts = {str(d) for d in (_assignable_department_ids(user, db) or set())}
-    if department_id and department_id not in allowed_depts:
-        raise HTTPException(403, "Departamento fuera de tu alcance")
-    if assigned_to:
-        allowed_users = {str(u.id) for u in _assignable_users_query(user, db).all()}
-        if assigned_to not in allowed_users:
-            raise HTTPException(403, "Usuario fuera de tu alcance")
+    if required and not department_id and not assigned_to:
+        raise HTTPException(400, "Elige un departamento o una persona")
+
+    if user.role == ROLE_ADMIN:
+        if assigned_to:
+            allowed_users = {str(u.id) for u in _assignable_users_query(user, db).all()}
+            if assigned_to not in allowed_users:
+                raise HTTPException(403, "Solo puedes asignar a alguien dentro de tu alcance")
+        return
+
+    # employee (o cualquier rol no-encargado): sólo autoasignación
+    if department_id:
+        raise HTTPException(403, "No puedes asignar tareas a un departamento")
+    if assigned_to and assigned_to != str(user.id):
+        raise HTTPException(403, "Solo puedes asignarte tareas a ti mismo")
 
 
 def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str, days_of_week: list[str] | None = None):
@@ -1342,17 +1378,17 @@ def list_recurring(
 
     items = _recurring_query(current_user, db).order_by(RecurringTask.created_at.desc()).all()
 
-    # Alcance: superadmin todo; jefe de depto → su departamento; gerente de zona
-    # → las sucursales de sus zonas.
+    # Proyectos: acotados al alcance de gestión (zona/departamento), igual que
+    # antes. Departamentos (difusión) y usuarios (asignación puntual) siguen el
+    # criterio nuevo: cualquier encargado difunde a cualquier depto, pero sólo
+    # asigna en persona dentro del suyo propio (ver _assignable_users_query).
     dept_ids = _assignable_department_ids(current_user, db)
-    dept_q = db.query(Department).order_by(Department.name)
     proj_q = db.query(Project).order_by(Project.name)
     if dept_ids is not None:
         scoped = dept_ids or {None}  # evita IN () vacío
-        dept_q = dept_q.filter(Department.id.in_(scoped))
         proj_q = proj_q.filter(Project.department_id.in_(scoped))
 
-    departments = dept_q.all()
+    departments = db.query(Department).order_by(Department.name).all()
     users = _assignable_users_query(current_user, db).all()
     projects = proj_q.all()
 

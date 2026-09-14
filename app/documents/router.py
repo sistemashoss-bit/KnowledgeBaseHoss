@@ -124,19 +124,21 @@ def list_my_documents(
     request: Request,
     q: str = "",
     department_id: str = "",
+    tab: str = "shared",
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    """Documentos de trabajo: solo los de visibilidad 'personas específicas' donde
-    el usuario está directamente asignado (nada público, de empleado, ni de depto)."""
-    access_filter = build_access_filter(user)
-    raw_docs = rag.search_documents(q, access_filter, department_id or None, size=200)
+    """Mis documentos: misma visibilidad selectiva de siempre (build_access_filter),
+    partido en dos pestañas por `is_work_document` — archivos comunes compartidos
+    conmigo vs. documentos en los que estoy trabajando."""
+    if tab not in ("shared", "work"):
+        tab = "shared"
 
-    uid = str(user.id)
-    raw_docs = [
-        d for d in raw_docs
-        if d.get("status") == STATUS_CUSTOM and uid in (d.get("allowed_user_ids") or [])
-    ]
+    access_filter = build_access_filter(user)
+    raw_docs = rag.search_documents(
+        q, access_filter, department_id or None, size=200,
+        work_only=(tab == "work"),
+    )
 
     ids = [d["id"] for d in raw_docs if d.get("id")]
     drive_map: dict[str, str | None] = {}
@@ -169,8 +171,9 @@ def list_my_documents(
             "selected_dept": department_id,
             "csrf_token": csrf,
             "list_action": "/documents/mine",
-            "page_title": "Documentos de trabajo",
-            "empty_message": "No tienes documentos de trabajo asignados",
+            "page_title": "Mis documentos",
+            "empty_message": "No hay documentos de trabajo" if tab == "work" else "No tienes documentos compartidos",
+            "mine_tab": tab,
         },
     )
 
@@ -216,6 +219,7 @@ async def upload_document(
     description: str = Form(default=""),
     department_id: str = Form(...),
     status: str = Form(...),
+    is_work_document: bool = Form(default=False),
     allowed_user_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
@@ -269,6 +273,7 @@ async def upload_document(
             drive_url=drive_url,
             department_id=department_id,
             status=status,
+            is_work_document=is_work_document,
             uploaded_by=str(user.id),
         )
         content_type_for_index = "drive"
@@ -288,6 +293,7 @@ async def upload_document(
             file_size=len(content),
             department_id=department_id,
             status=status,
+            is_work_document=is_work_document,
             uploaded_by=str(user.id),
         )
         content_type_for_index = file.content_type or ""
@@ -309,6 +315,7 @@ async def upload_document(
         uploaded_by=str(user.id),
         text=text,
         allowed_user_ids=allowed_user_ids,
+        is_work_document=is_work_document,
     )
 
     audit.log_action(
@@ -366,6 +373,7 @@ async def edit_document(
     title: str = Form(...),
     description: str = Form(default=""),
     status: str = Form(...),
+    is_work_document: bool = Form(default=False),
     allowed_user_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
@@ -406,6 +414,7 @@ async def edit_document(
     doc.title = title
     doc.description = description
     doc.status = status
+    doc.is_work_document = is_work_document
 
     dept = db.query(Department).filter(Department.id == doc.department_id).first()
     new_text: str | None = None
@@ -447,6 +456,7 @@ async def edit_document(
             uploaded_by=str(doc.uploaded_by),
             text=new_text,
             allowed_user_ids=allowed_user_ids,
+            is_work_document=doc.is_work_document,
         )
     else:
         # Metadata only — update title/status/dept in existing chunks
@@ -461,6 +471,7 @@ async def edit_document(
             content_type=doc.content_type or "",
             uploaded_by=str(doc.uploaded_by),
             allowed_user_ids=allowed_user_ids,
+            is_work_document=doc.is_work_document,
         )
 
     audit.log_action(

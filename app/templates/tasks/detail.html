@@ -282,6 +282,7 @@
         {% if can_edit %}
         <div id="panel-assign" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <form hx-post="/tasks/{{ task.id }}/assign" hx-target="body" class="grid grid-cols-2 gap-3 items-end">
+            {% if is_admin %}
             <div>
               <label class="block text-xs font-medium text-gray-700 mb-1">Departamento</label>
               <select name="department_id"
@@ -292,6 +293,7 @@
                 {% endfor %}
               </select>
             </div>
+            {% endif %}
             <div>
               <label class="block text-xs font-medium text-gray-700 mb-1">Persona</label>
               <select name="assigned_to"

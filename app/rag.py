@@ -142,6 +142,7 @@ def index_document(
     uploaded_by: str,
     text: str,
     allowed_user_ids: list[str] | None = None,
+    is_work_document: bool = False,
 ) -> None:
     client = search_module.get_client()
     allowed_user_ids = allowed_user_ids or []
@@ -159,6 +160,7 @@ def index_document(
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
             "allowed_user_ids": allowed_user_ids,
+            "is_work_document": bool(is_work_document),
         },
     )
 
@@ -204,6 +206,7 @@ def update_document_metadata(
     content_type: str,
     uploaded_by: str,
     allowed_user_ids: list[str] | None = None,
+    is_work_document: bool = False,
 ) -> None:
     """Update metadata fields in OpenSearch without touching chunk content."""
     client = search_module.get_client()
@@ -222,6 +225,7 @@ def update_document_metadata(
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
             "allowed_user_ids": allowed_user_ids,
+            "is_work_document": bool(is_work_document),
         },
     )
 
@@ -274,7 +278,11 @@ def search_documents(
     access_filter: dict,
     department_id: str | None = None,
     size: int = 24,
+    work_only: bool | None = None,
 ) -> list[dict]:
+    """`work_only`: None = sin filtro; True = solo documentos de trabajo;
+    False = solo archivos comunes (incluye los indexados antes de este campo,
+    que no lo tienen seteado — must_not sobre `true` los deja pasar)."""
     client = search_module.get_client()
 
     must: list[dict] = (
@@ -285,11 +293,20 @@ def search_documents(
     filters = [access_filter]
     if department_id:
         filters.append({"term": {"department_id": department_id}})
+    must_not: list[dict] = []
+    if work_only is True:
+        filters.append({"term": {"is_work_document": True}})
+    elif work_only is False:
+        must_not.append({"term": {"is_work_document": True}})
+
+    bool_query: dict = {"must": must, "filter": filters}
+    if must_not:
+        bool_query["must_not"] = must_not
 
     try:
         res = client.search(
             index=search_module.DOCUMENTS_INDEX,
-            body={"query": {"bool": {"must": must, "filter": filters}}, "size": size},
+            body={"query": {"bool": bool_query}, "size": size},
         )
         return [hit["_source"] for hit in res["hits"]["hits"]]
     except Exception:

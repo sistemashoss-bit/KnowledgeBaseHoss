@@ -44,13 +44,24 @@ def build_access_filter(user: "User | None") -> dict:
         }
     })
 
-    # admin status: only admins, and still scoped to their own department
     if user.role == ROLE_ADMIN:
+        # admin status: only admins, and still scoped to their own department
         should_clauses.append({
             "bool": {
                 "must": [
                     {"term": {"department_id": dept_id}},
                     {"term": {"status": "admin"}},
+                ]
+            }
+        })
+        # custom status del propio departamento: el admin ya puede gestionarlos
+        # (can_manage_document), así que también debe poder verlos aunque no
+        # esté entre las personas específicas elegidas.
+        should_clauses.append({
+            "bool": {
+                "must": [
+                    {"term": {"department_id": dept_id}},
+                    {"term": {"status": "custom"}},
                 ]
             }
         })
@@ -72,6 +83,8 @@ def can_access_document(user: "User | None", doc: "Document") -> bool:
     if doc.status == "department":
         return str(doc.department_id) == str(user.department_id)  # any role in that dept
     if doc.status == "custom":
+        if user.role == ROLE_ADMIN and str(doc.department_id) == str(user.department_id):
+            return True  # ya puede gestionarlo (can_manage_document); también debe poder verlo
         return any(str(au.user_id) == str(user.id) for au in doc.allowed_users)
     if doc.status == "admin":
         return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and str(doc.department_id) == str(user.department_id)

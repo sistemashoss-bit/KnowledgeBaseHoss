@@ -19,7 +19,7 @@ from app.messaging import realtime
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
     Message, MessageAttachment, User, UserZone, Zone,
-    ROLE_SUPERADMIN, CONV_DIRECT, CONV_GROUP,
+    ROLE_SUPERADMIN, ROLE_ADMIN, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
 
@@ -159,7 +159,7 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
 
 def _visible_users(user: User, db: Session) -> list[User]:
     """Users this user can start a DM with."""
-    if user.role == ROLE_SUPERADMIN:
+    if user.role in (ROLE_SUPERADMIN, ROLE_ADMIN):
         return db.query(User).filter(User.is_active == True, User.id != user.id).order_by(User.email).all()
 
     ids: set = set()
@@ -740,6 +740,8 @@ def create_group(
 ):
     if not current_user:
         raise HTTPException(401)
+    if current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN):
+        raise HTTPException(403)
     if not verify_csrf_token(csrf_token, str(current_user.id)):
         raise HTTPException(403, "Invalid CSRF token")
 
