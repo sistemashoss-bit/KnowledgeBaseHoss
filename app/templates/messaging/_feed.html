@@ -75,7 +75,7 @@
 
     {# Timestamp #}
     <p class="text-xs text-gray-400 mt-1 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">
-      <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="time">{{ msg.created_at.strftime('%H:%M') }}</time>
+      <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
     </p>
   </div>
 

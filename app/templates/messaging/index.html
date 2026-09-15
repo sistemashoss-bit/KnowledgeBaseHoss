@@ -294,33 +294,55 @@
       </div>
       <script>
         // Al entrar al chat, arranca en el mensaje más reciente (abajo), no en el más viejo.
-        // Los swaps posteriores (SSE/poll) ya usan hx-swap="scroll:bottom".
+        // Los swaps posteriores (SSE/poll) ya usan hx-swap="scroll:bottom", pero ese
+        // scroll (igual que el inicial de abajo) se calcula ANTES de que las imágenes
+        // adjuntas terminen de cargar, así que scrollHeight queda corto y el feed no
+        // llega hasta el fondo real. Reenganchamos el scroll cuando cada imagen carga.
         (function () {
           var feed = document.getElementById('message-feed');
-          if (feed) feed.scrollTop = feed.scrollHeight;
+          if (!feed) return;
+
+          function toBottom() { feed.scrollTop = feed.scrollHeight; }
+
+          function bindImages() {
+            feed.querySelectorAll('img').forEach(function (img) {
+              if (img.complete || img.dataset.scrollBound) return;
+              img.dataset.scrollBound = '1';
+              img.addEventListener('load', toBottom);
+              img.addEventListener('error', toBottom);
+            });
+          }
+
+          toBottom();
+          bindImages();
+          feed.addEventListener('htmx:afterSwap', function () {
+            toBottom();
+            bindImages();
+          });
         })();
       </script>
     </div>
 
     <!-- Input bar -->
-    <div x-data="{ hasFiles: false }" class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+    <div class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
             hx-target="#send-form"
             hx-swap="none"
             hx-encoding="multipart/form-data"
-            hx-on::after-request="this.reset(); hasFiles = false; document.getElementById('msg-input').focus()"
+            hx-on::after-request="this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); document.getElementById('msg-input').focus()"
             class="flex flex-col gap-2">
 
         <!-- File preview bar -->
-        <div x-show="hasFiles" x-cloak
-             class="flex items-center gap-2 px-1 text-xs text-gray-500">
+        <div id="file-preview-bar"
+             class="hidden items-center gap-2 px-1 text-xs text-gray-500">
           <svg class="w-3.5 h-3.5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
           </svg>
           <span>Archivo(s) adjunto(s) · máx 50 MB c/u</span>
-          <button type="button" @click="$refs.fileInput.value=''; hasFiles=false"
+          <button type="button"
+                  onclick="var fi=document.getElementById('file-input'); fi.value=''; document.getElementById('file-preview-bar').classList.add('hidden')"
                   class="ml-auto text-gray-400 hover:text-red-400 transition-colors">Quitar</button>
         </div>
 
@@ -332,15 +354,15 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
             </svg>
-            <input x-ref="fileInput" type="file" name="files" multiple class="hidden"
-                   @change="hasFiles = $event.target.files.length > 0" />
+            <input id="file-input" type="file" name="files" multiple class="hidden"
+                   onchange="document.getElementById('file-preview-bar').classList.toggle('hidden', this.files.length === 0)" />
           </label>
 
           <textarea id="msg-input"
                     name="content"
                     rows="1"
                     placeholder="Escribe un mensaje..."
-                    @keydown.enter.prevent="if (!$event.shiftKey && ($event.target.value.trim() || hasFiles)) { $el.closest('form').dispatchEvent(new Event('submit', {bubbles:true})) }"
+                    onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); var hasFiles = document.getElementById('file-input').files.length > 0; if (this.value.trim() || hasFiles) { this.closest('form').dispatchEvent(new Event('submit', {bubbles:true})); } }"
                     oninput="this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'"
                     class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 placeholder-gray-400 leading-snug"
                     style="max-height:120px"></textarea>
