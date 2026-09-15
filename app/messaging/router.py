@@ -157,11 +157,8 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
     return result
 
 
-def _visible_users(user: User, db: Session) -> list[User]:
-    """Users this user can start a DM with."""
-    if user.role in (ROLE_SUPERADMIN, ROLE_ADMIN):
-        return db.query(User).filter(User.is_active == True, User.id != user.id).order_by(User.email).all()
-
+def _team_user_ids(user: User, db: Session) -> set:
+    """IDs of users who share this user's department, branch, or zone-scoped branches."""
     ids: set = set()
 
     if user.department_id:
@@ -180,6 +177,28 @@ def _visible_users(user: User, db: Session) -> list[User]:
                 ids.add(u.id)
 
     ids.discard(user.id)
+    return ids
+
+
+def _visible_users(user: User, db: Session) -> list[User]:
+    """Users this user can start a DM with."""
+    if user.role == ROLE_SUPERADMIN:
+        return db.query(User).filter(User.is_active == True, User.id != user.id).order_by(User.email).all()
+
+    if user.role == ROLE_ADMIN:
+        # Admins (with or without a zone) can only message their own team
+        # plus other admins/superadmins — not the whole company.
+        ids = _team_user_ids(user, db)
+        for u in db.query(User).filter(
+            User.role.in_((ROLE_ADMIN, ROLE_SUPERADMIN)), User.is_active == True
+        ).all():
+            ids.add(u.id)
+        ids.discard(user.id)
+        if not ids:
+            return []
+        return db.query(User).filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
+
+    ids = _team_user_ids(user, db)
     if not ids:
         return []
     return db.query(User).filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
@@ -722,6 +741,11 @@ def start_direct(
     if not target:
         raise HTTPException(404)
 
+    if current_user.role != ROLE_SUPERADMIN:
+        allowed_ids = {u.id for u in _visible_users(current_user, db)}
+        if target.id not in allowed_ids:
+            raise HTTPException(403)
+
     conv = _get_or_create_direct(current_user.id, target.id, db)
     return RedirectResponse(f"/messaging/{conv.id}", status_code=302)
 
@@ -758,6 +782,9 @@ def create_group(
     db.flush()
 
     all_ids = set(member_ids) | {str(current_user.id)}
+    if current_user.role != ROLE_SUPERADMIN:
+        allowed_ids = {str(u.id) for u in _visible_users(current_user, db)} | {str(current_user.id)}
+        all_ids &= allowed_ids
     for uid in all_ids:
         db.add(ConversationParticipant(conversation_id=conv.id, user_id=uid))
 
@@ -802,6 +829,11 @@ def add_member(
     target = db.query(User).filter(User.id == user_id, User.is_active == True).first()
     if not target:
         raise HTTPException(404)
+
+    if current_user.role != ROLE_SUPERADMIN:
+        allowed_ids = {u.id for u in _visible_users(current_user, db)}
+        if target.id not in allowed_ids:
+            raise HTTPException(403)
 
     db.add(ConversationParticipant(conversation_id=conv.id, user_id=target.id))
     db.commit()
