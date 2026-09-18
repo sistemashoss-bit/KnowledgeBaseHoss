@@ -290,9 +290,8 @@
         {% for dept in departments %}
         <a href="?view=folders&department_id={{ dept.id }}{% if query %}&q={{ query }}{% endif %}"
            class="flex items-center gap-3 bg-white rounded-xl border border-gray-200 px-4 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
-          <svg class="w-6 h-6 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
-          </svg>
+          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+               class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-sm font-medium text-gray-800">{{ dept.name }}</span>
         </a>
         {% endfor %}
