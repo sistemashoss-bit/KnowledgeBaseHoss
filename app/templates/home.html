@@ -380,11 +380,14 @@
 
       <div x-show="loading" x-cloak class="px-4 pb-2">
         <div class="flex items-center gap-2 text-xs text-orange-500">
-          <div class="flex gap-0.5">
-            <span class="w-1.5 h-1.5 bg-orange-400 rounded-full" style="animation:wdot 1.2s ease-in-out infinite;"></span>
-            <span class="w-1.5 h-1.5 bg-orange-400 rounded-full" style="animation:wdot 1.2s ease-in-out 0.2s infinite;"></span>
-            <span class="w-1.5 h-1.5 bg-orange-400 rounded-full" style="animation:wdot 1.2s ease-in-out 0.4s infinite;"></span>
-          </div>
+          <template x-if="loading">
+            <video autoplay muted playsinline aria-hidden="true"
+                   @loadedmetadata="$el.currentTime = 3"
+                   @ended="$el.currentTime = 3; $el.play().catch(() => {})"
+                   class="w-16 h-16 object-cover rounded-full shrink-0">
+              <source src="{{ url_for('assets', path='dancemax.mp4') }}#t=3" type="video/mp4" />
+            </video>
+          </template>
           <span>Procesando...</span>
         </div>
       </div>

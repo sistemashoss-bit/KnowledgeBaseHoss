@@ -34,6 +34,7 @@ def ask(
     return templates.TemplateResponse(
         request, tpl,
         {
+            "current_user": user,
             "question": question.strip(),
             "answer": result["answer"],
             "sources": result["sources"],

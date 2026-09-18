@@ -221,7 +221,10 @@
                         d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
                 </svg>
                 <p class="text-sm font-medium text-slate-500">Sin notificaciones</p>
-                <p class="text-xs text-slate-400 mt-1">Todo al día</p>
+                <p cl
+                
+                
+                ass="text-xs text-slate-400 mt-1">Todo al día</p>
               </div>
             </template>
 
@@ -480,11 +483,14 @@
       <!-- Thinking indicator (inside feed area) -->
       <div x-show="loading" x-cloak class="px-4 pb-2">
         <div class="flex items-center gap-2 text-xs text-indigo-500">
-          <div class="flex gap-0.5">
-            <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full" style="animation:wdot 1.2s ease-in-out infinite;"></span>
-            <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full" style="animation:wdot 1.2s ease-in-out 0.2s infinite;"></span>
-            <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full" style="animation:wdot 1.2s ease-in-out 0.4s infinite;"></span>
-          </div>
+          <template x-if="loading">
+            <video autoplay muted playsinline aria-hidden="true"
+                   @loadedmetadata="$el.currentTime = 3"
+                   @ended="$el.currentTime = 3; $el.play().catch(() => {})"
+                   class="w-16 h-16 object-cover rounded-full shrink-0">
+              <source src="{{ url_for('assets', path='dancemax.mp4') }}#t=3" type="video/mp4" />
+            </video>
+          </template>
           <span>Procesando...</span>
         </div>
       </div>
