@@ -12,12 +12,13 @@ ROLE_EMPLOYEE = "employee"
 ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE]
 
 # ── Document status constants ─────────────────────────────────────────────────
+# 'department' y 'admin' se retiraron: el propio department_id ya acota la
+# creación (admin solo el suyo, superadmin el que elija) y "compartir" cubre
+# el caso de dar acceso a alguien fuera de ese departamento.
 STATUS_PUBLIC = "public"
 STATUS_EMPLOYEE = "employee"
-STATUS_DEPARTMENT = "department"
 STATUS_CUSTOM = "custom"
-STATUS_ADMIN = "admin"
-STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_DEPARTMENT, STATUS_CUSTOM, STATUS_ADMIN]
+STATUSES = [STATUS_PUBLIC, STATUS_EMPLOYEE, STATUS_CUSTOM]
 
 # ── Project status constants ──────────────────────────────────────────────────
 PROJECT_DRAFT = "draft"
@@ -208,14 +209,60 @@ class Document(Base):
     # visibilidad: hereda el mismo control de acceso selectivo de `status`.
     is_work_document = Column(Boolean, nullable=False, default=False)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    # Carpeta (solo docs de trabajo, ver Folder). Null = sin carpeta.
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     department = relationship("Department", back_populates="documents")
     uploaded_by_user = relationship("User", back_populates="documents")
+    folder = relationship("Folder", back_populates="documents")
     allowed_users = relationship(
         "DocumentAllowedUser", back_populates="document", cascade="all, delete-orphan", passive_deletes=True,
     )
+
+
+FOLDER_MAX_DEPTH = 4
+
+
+class Folder(Base):
+    """Carpeta solo para docs de trabajo, creada por un admin para organizar
+    y compartir en bloque su propio trabajo (hasta FOLDER_MAX_DEPTH niveles).
+    No es un nivel de visibilidad por sí misma: compartir una carpeta da acceso
+    a todo lo que contiene (y su subárbol) vía FolderAllowedUser, igual que
+    DocumentAllowedUser pero a nivel carpeta."""
+    __tablename__ = "folders"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "parent_id", "name", name="uq_folders_owner_parent_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(150), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), nullable=True)
+    depth = Column(Integer, nullable=False, default=1)  # 1..FOLDER_MAX_DEPTH
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User", foreign_keys=[owner_id])
+    parent = relationship("Folder", remote_side=[id], back_populates="children")
+    children = relationship("Folder", back_populates="parent", cascade="all, delete-orphan", passive_deletes=True)
+    documents = relationship("Document", back_populates="folder", passive_deletes=True)
+    allowed_users = relationship(
+        "FolderAllowedUser", back_populates="folder", cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class FolderAllowedUser(Base):
+    """Personas con quienes se compartió la carpeta completa (revocable),
+    independiente de la visibilidad individual de cada documento."""
+    __tablename__ = "folder_allowed_users"
+
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    folder = relationship("Folder", back_populates="allowed_users")
+    user = relationship("User")
 
 
 class DocumentAllowedUser(Base):

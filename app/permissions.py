@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.models import Document, User
+    from app.models import Document, Folder, User
 
 
 def build_access_filter(user: "User | None") -> dict:
@@ -24,17 +24,7 @@ def build_access_filter(user: "User | None") -> dict:
 
     dept_id = str(user.department_id) if user.department_id else "__none__"
 
-    # department status: any authenticated user in that same department
-    should_clauses.append({
-        "bool": {
-            "must": [
-                {"term": {"department_id": dept_id}},
-                {"term": {"status": "department"}},
-            ]
-        }
-    })
-
-    # custom status: only the specific people picked at upload/edit time
+    # custom status: only the specific people picked at upload o compartidas después
     should_clauses.append({
         "bool": {
             "must": [
@@ -45,15 +35,6 @@ def build_access_filter(user: "User | None") -> dict:
     })
 
     if user.role == ROLE_ADMIN:
-        # admin status: only admins, and still scoped to their own department
-        should_clauses.append({
-            "bool": {
-                "must": [
-                    {"term": {"department_id": dept_id}},
-                    {"term": {"status": "admin"}},
-                ]
-            }
-        })
         # custom status del propio departamento: el admin ya puede gestionarlos
         # (can_manage_document), así que también debe poder verlos aunque no
         # esté entre las personas específicas elegidas.
@@ -66,11 +47,41 @@ def build_access_filter(user: "User | None") -> dict:
             }
         })
 
+    # Documento dentro de una carpeta compartida conmigo (o con un ancestro
+    # de esa carpeta) — independiente del status del documento.
+    should_clauses.append({"term": {"folder_shared_user_ids": str(user.id)}})
+
     return {"bool": {"should": should_clauses, "minimum_should_match": 1}}
 
 
+def build_shared_with_me_filter(user: "User") -> dict:
+    """OpenSearch filter for documents explicitly shared with this user —
+    directamente (status='custom' + listado en allowed_user_ids, desde el
+    picker al crear o vía "compartir" después) o a través de una carpeta de
+    trabajo compartida con esta persona. No incluye lo visible solo por
+    status público/empleados ni el auto-acceso de admin a los custom de su
+    depto: eso es visibilidad general, no un compartido directo. Usado en
+    /documents/mine (pestaña "compartidos")."""
+    return {
+        "bool": {
+            "should": [
+                {
+                    "bool": {
+                        "must": [
+                            {"term": {"status": "custom"}},
+                            {"term": {"allowed_user_ids": str(user.id)}},
+                        ]
+                    }
+                },
+                {"term": {"folder_shared_user_ids": str(user.id)}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
 def can_access_document(user: "User | None", doc: "Document") -> bool:
-    from app.models import ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE, STATUS_PUBLIC
+    from app.models import ROLE_SUPERADMIN, ROLE_ADMIN, STATUS_PUBLIC
 
     if doc.status == STATUS_PUBLIC:
         return True
@@ -80,14 +91,18 @@ def can_access_document(user: "User | None", doc: "Document") -> bool:
         return True
     if doc.status == "employee":
         return True  # any authenticated user, company-wide
-    if doc.status == "department":
-        return str(doc.department_id) == str(user.department_id)  # any role in that dept
     if doc.status == "custom":
         if user.role == ROLE_ADMIN and str(doc.department_id) == str(user.department_id):
             return True  # ya puede gestionarlo (can_manage_document); también debe poder verlo
-        return any(str(au.user_id) == str(user.id) for au in doc.allowed_users)
-    if doc.status == "admin":
-        return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and str(doc.department_id) == str(user.department_id)
+        if any(str(au.user_id) == str(user.id) for au in doc.allowed_users):
+            return True
+    # Carpeta compartida conmigo (o con un ancestro de esa carpeta), sin
+    # importar el status del documento.
+    folder = doc.folder
+    while folder is not None:
+        if any(str(fau.user_id) == str(user.id) for fau in folder.allowed_users):
+            return True
+        folder = folder.parent
     return False
 
 
@@ -102,6 +117,34 @@ def can_manage_document(user: "User | None", doc: "Document") -> bool:
         return True
     if doc.uploaded_by and str(doc.uploaded_by) == str(user.id):
         return True
+    return False
+
+
+def can_manage_folder(user: "User | None", folder: "Folder") -> bool:
+    """Solo el dueño (siempre admin, únicos que crean carpetas) o superadmin."""
+    from app.models import ROLE_SUPERADMIN
+
+    if user is None:
+        return False
+    if user.role == ROLE_SUPERADMIN:
+        return True
+    return str(folder.owner_id) == str(user.id)
+
+
+def can_access_folder(user: "User | None", folder: "Folder") -> bool:
+    from app.models import ROLE_SUPERADMIN
+
+    if user is None:
+        return False
+    if user.role == ROLE_SUPERADMIN:
+        return True
+    if str(folder.owner_id) == str(user.id):
+        return True
+    current = folder
+    while current is not None:
+        if any(str(fau.user_id) == str(user.id) for fau in current.allowed_users):
+            return True
+        current = current.parent
     return False
 
 

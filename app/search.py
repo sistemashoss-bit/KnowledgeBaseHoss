@@ -42,6 +42,7 @@ def ensure_indices() -> None:
                         "content_type": {"type": "keyword"},
                         "uploaded_by": {"type": "keyword"},
                         "allowed_user_ids": {"type": "keyword"},
+                        "folder_shared_user_ids": {"type": "keyword"},
                         "is_work_document": {"type": "boolean"},
                         "created_at": {"type": "date"},
                     }
@@ -53,6 +54,8 @@ def ensure_indices() -> None:
         _add_field_mapping(client, DOCUMENTS_INDEX, "allowed_user_ids", {"type": "keyword"})
         # Índice preexistente de antes de "documento de trabajo": agrega el campo.
         _add_field_mapping(client, DOCUMENTS_INDEX, "is_work_document", {"type": "boolean"})
+        # Índice preexistente de antes de carpetas compartidas: agrega el campo.
+        _add_field_mapping(client, DOCUMENTS_INDEX, "folder_shared_user_ids", {"type": "keyword"})
 
     _ensure_chunks_index(client)
 
@@ -68,6 +71,8 @@ def _ensure_chunks_index(client: OpenSearch) -> None:
             else:
                 if "allowed_user_ids" not in props:
                     _add_field_mapping(client, CHUNKS_INDEX, "allowed_user_ids", {"type": "keyword"})
+                if "folder_shared_user_ids" not in props:
+                    _add_field_mapping(client, CHUNKS_INDEX, "folder_shared_user_ids", {"type": "keyword"})
                 return
         except Exception:
             return
@@ -84,6 +89,7 @@ def _ensure_chunks_index(client: OpenSearch) -> None:
                     "department_name": {"type": "keyword"},
                     "status": {"type": "keyword"},
                     "allowed_user_ids": {"type": "keyword"},
+                    "folder_shared_user_ids": {"type": "keyword"},
                     "chunk_index": {"type": "integer"},
                     "content": {"type": "text"},
                     "embedding": {"type": "knn_vector", "dimension": _embedding_dim()},

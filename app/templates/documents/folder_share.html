@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Compartir carpeta{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-6">
+  <div class="max-w-2xl mx-auto">
+    <div class="mb-6">
+      <a href="/documents/folders/{{ folder.id }}" class="text-sm text-indigo-600 hover:text-indigo-500">← Volver a la carpeta</a>
+      <h1 class="text-xl font-bold text-gray-900 mt-2">Compartir carpeta</h1>
+      <p class="text-sm text-gray-500 mt-0.5">{{ folder.name }}</p>
+      <p class="text-xs text-gray-400 mt-1">
+        Da acceso a todo el contenido de esta carpeta (y sus subcarpetas), sin importar la
+        visibilidad individual de cada documento. Se puede revocar cuando quieras.
+      </p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-4">
+      <h2 class="text-sm font-semibold text-gray-700 mb-3">Personas con acceso ({{ shared_users|length }})</h2>
+      {% if shared_users %}
+      <div class="divide-y divide-gray-100">
+        {% for u in shared_users %}
+        <div class="flex items-center justify-between py-2">
+          <div>
+            <p class="text-sm text-gray-800">{{ u.name or u.email }}</p>
+            <p class="text-xs text-gray-400">{{ u.email }}{% if u.department %} · {{ u.department.name }}{% endif %}</p>
+          </div>
+          <form method="post" action="/documents/folders/{{ folder.id }}/share/{{ u.id }}/revoke"
+                onsubmit="return confirm('¿Revocar el acceso de {{ u.name or u.email }} a esta carpeta?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+              Revocar
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-sm text-gray-400">Todavía no has compartido esta carpeta con nadie.</p>
+      {% endif %}
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 p-6">
+      <h2 class="text-sm font-semibold text-gray-700 mb-3">Agregar persona</h2>
+      {% if candidates %}
+      <form method="post" action="/documents/folders/{{ folder.id }}/share" class="flex gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <select name="target_user_id" required
+                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+          <option value="">Seleccionar persona...</option>
+          {% for u in candidates %}
+          <option value="{{ u.id }}">{{ u.name or u.email }} ({{ u.email }}){% if u.department %} — {{ u.department.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
+          Compartir
+        </button>
+      </form>
+      {% else %}
+      <p class="text-sm text-gray-400">No hay más personas activas para agregar.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

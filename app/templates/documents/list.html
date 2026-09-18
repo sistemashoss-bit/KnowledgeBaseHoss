@@ -1,25 +1,199 @@
 {% extends "base.html" %}
 {% block title %}{{ page_title | default('Documentos') }}{% endblock %}
 
+{% macro doc_grid(docs, csrf_token, empty_message, query) %}
+{% if docs %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  {% for doc in docs %}
+  <div class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow flex flex-col{{ ' kb-doc-card cursor-grab active:cursor-grabbing' if doc.can_assign_folder }}"
+       {% if doc.can_assign_folder %}draggable="true" data-doc-id="{{ doc.id }}"{% endif %}>
+    <!-- Badges -->
+    <div class="flex items-center gap-2 mb-2">
+      {% if doc.status == "public" %}
+      <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">público</span>
+      {% elif doc.status == "employee" %}
+      <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">empleado</span>
+      {% else %}
+      <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium">personas específicas</span>
+      {% endif %}
+
+      {% if doc.department_name %}
+      <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs">{{ doc.department_name }}</span>
+      {% endif %}
+
+      {% if doc.is_work_document %}
+      <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">trabajo</span>
+      {% endif %}
+
+      {% if doc.is_drive %}
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.156-2.828a4 4 0 015.656 0 4 4 0 010 5.656l-1.5 1.5"/>
+        </svg>
+        Drive
+      </span>
+      {% endif %}
+    </div>
+
+    <h3 class="font-semibold text-gray-900 text-sm mb-1 line-clamp-2">{{ doc.title }}</h3>
+
+    {% if doc.description %}
+    <p class="text-xs text-gray-500 line-clamp-2 flex-1 mb-3">{{ doc.description }}</p>
+    {% else %}
+    <div class="flex-1"></div>
+    {% endif %}
+
+    <div x-data="{ open: false }">
+      <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
+        <span class="text-xs text-gray-400">{% if doc.is_drive %}Google Drive{% else %}{{ doc.content_type or "archivo" }}{% endif %}</span>
+        <div class="flex items-center gap-1">
+          {% if doc.previewable %}
+          {# Previsualizable: "Vista previa" reemplaza a "Ver" (despliega el iframe inline) #}
+          <button type="button" @click="open = !open"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            </svg>
+            <span x-text="open ? 'Ocultar' : 'Vista previa'"></span>
+          </button>
+          {% else %}
+          {# No previsualizable (office, etc.): se conserva "Ver" para abrir en pestaña #}
+          <a href="/documents/{{ doc.id }}/view"
+             target="_blank" rel="noopener"
+             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            </svg>
+            Ver
+          </a>
+          {% endif %}
+          {% if doc.is_drive %}
+          {# Abrir el Drive original en otra pestaña (/view redirige al drive_url) #}
+          <a href="/documents/{{ doc.id }}/view"
+             target="_blank" rel="noopener"
+             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+            Abrir
+          </a>
+          {% else %}
+          <a href="/documents/{{ doc.id }}/download"
+             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Descargar
+          </a>
+          {% endif %}
+          {% if doc.can_manage %}
+          <a href="/documents/{{ doc.id }}/share"
+             class="p-1 text-gray-400 hover:text-indigo-500 transition-colors" title="Compartir">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+            </svg>
+          </a>
+          <a href="/documents/{{ doc.id }}/edit"
+             class="p-1 text-gray-400 hover:text-indigo-500 transition-colors" title="Editar">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+          </a>
+          <form method="post" action="/documents/{{ doc.id }}/delete" class="inline"
+                onsubmit="return confirm('¿Eliminar este documento?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="p-1 text-gray-400 hover:text-red-500 transition-colors" title="Eliminar">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if doc.previewable %}
+      <!-- El iframe se crea solo al abrir (lazy) para no cargar decenas a la vez -->
+      <template x-if="open">
+        <div class="mt-2 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+          <iframe src="{{ doc.preview_url }}" class="w-full h-72" loading="lazy"
+                  referrerpolicy="no-referrer" allow="autoplay"></iframe>
+        </div>
+      </template>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-16 text-gray-400">
+  <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+  </svg>
+  <p class="text-sm">{{ empty_message | default('No hay documentos disponibles') }}</p>
+  {% if query %}
+  <p class="text-xs mt-1">Intenta con otro término de búsqueda</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 <div class="flex-1 overflow-y-auto">
 
   <!-- Top bar -->
   <div class="bg-white border-b border-gray-200 px-6 py-4">
     {% if mine_tab %}
-    <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 mb-3" role="group">
-      <a href="/documents/mine?tab=shared{% if query %}&q={{ query }}{% endif %}{% if selected_dept %}&department_id={{ selected_dept }}{% endif %}"
-         class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {{ 'bg-indigo-600 text-white' if mine_tab == 'shared' else 'text-gray-600 hover:text-gray-900' }}">
-        Documentos compartidos
+    <div class="flex items-center justify-between mb-3">
+      <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="group">
+        <a href="/documents/mine?tab=shared{% if query %}&q={{ query }}{% endif %}{% if selected_dept %}&department_id={{ selected_dept }}{% endif %}"
+           class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {{ 'bg-indigo-600 text-white' if mine_tab == 'shared' else 'text-gray-600 hover:text-gray-900' }}">
+          Documentos compartidos
+        </a>
+        <a href="/documents/mine?tab=work{% if query %}&q={{ query }}{% endif %}{% if selected_dept %}&department_id={{ selected_dept }}{% endif %}"
+           class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {{ 'bg-indigo-600 text-white' if mine_tab == 'work' else 'text-gray-600 hover:text-gray-900' }}">
+          Docs de trabajo
+        </a>
+      </div>
+      {% if mine_tab == "work" and current_user.role == "admin" %}
+      <a href="/documents/folders"
+         class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+        </svg>
+        Carpetas
       </a>
-      <a href="/documents/mine?tab=work{% if query %}&q={{ query }}{% endif %}{% if selected_dept %}&department_id={{ selected_dept }}{% endif %}"
-         class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {{ 'bg-indigo-600 text-white' if mine_tab == 'work' else 'text-gray-600 hover:text-gray-900' }}">
-        Docs de trabajo
-      </a>
+      {% endif %}
     </div>
     {% endif %}
+
+    {% if not mine_tab %}
+    <div class="flex items-center justify-between mb-3">
+      <h1 class="text-lg font-bold text-gray-900">Documentos</h1>
+      <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="group">
+        <button type="button" data-view-btn="list" onclick="setDocsView('list')"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+          Lista
+        </button>
+        <button type="button" data-view-btn="folders" onclick="setDocsView('folders')"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+          </svg>
+          Carpetas
+        </button>
+      </div>
+    </div>
+    {% endif %}
+
     <form method="get" action="{{ list_action | default('/documents/') }}" class="flex gap-3">
       {% if mine_tab %}<input type="hidden" name="tab" value="{{ mine_tab }}" />{% endif %}
+      {% if not mine_tab %}<input type="hidden" name="view" value="{{ view_mode }}" id="docs-view-input" />{% endif %}
       <div class="flex-1 relative">
         <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -33,6 +207,23 @@
         />
       </div>
 
+      {% if show_employee_filter %}
+        {% if zones %}
+        <select name="zone_id" onchange="this.form.submit()"
+                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+          {% for z in zones %}
+          <option value="{{ z.id }}" {% if selected_zone == z.id|string %}selected{% endif %}>{{ z.name }}</option>
+          {% endfor %}
+          <option value="all" {% if selected_zone == "all" %}selected{% endif %}>Todas las zonas</option>
+        </select>
+        {% endif %}
+        <select name="employee_id" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+          <option value="">Todos los empleados</option>
+          {% for e in employees %}
+          <option value="{{ e.id }}" {% if selected_employee == e.id|string %}selected{% endif %}>{{ e.name or e.email }}</option>
+          {% endfor %}
+        </select>
+      {% elif mine_tab != "work" %}
       <select name="department_id" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
         <option value="">Todos los departamentos</option>
         {% for dept in departments %}
@@ -41,6 +232,7 @@
         </option>
         {% endfor %}
       </select>
+      {% endif %}
 
       <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
         Buscar
@@ -50,8 +242,8 @@
 
   <div class="p-6">
 
-    <!-- Documents grid -->
-    <div>
+    <!-- Vista: Lista -->
+    <div id="view-list">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-semibold text-gray-700">
           {{ documents|length }} documento{{ 's' if documents|length != 1 }} encontrado{{ 's' if documents|length != 1 }}
@@ -68,140 +260,67 @@
         {% endif %}
       </div>
 
-      {% if documents %}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {% for doc in documents %}
-        <div class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow flex flex-col">
-          <!-- Badges -->
-          <div class="flex items-center gap-2 mb-2">
-            {% if doc.status == "public" %}
-            <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">público</span>
-            {% elif doc.status == "employee" %}
-            <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">empleado</span>
-            {% elif doc.status == "department" %}
-            <span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium">departamento</span>
-            {% elif doc.status == "custom" %}
-            <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium">personas específicas</span>
-            {% else %}
-            <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">admin</span>
-            {% endif %}
-
-            {% if doc.department_name %}
-            <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs">{{ doc.department_name }}</span>
-            {% endif %}
-
-            {% if doc.is_work_document %}
-            <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">trabajo</span>
-            {% endif %}
-
-            {% if doc.is_drive %}
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.156-2.828a4 4 0 015.656 0 4 4 0 010 5.656l-1.5 1.5"/>
-              </svg>
-              Drive
-            </span>
-            {% endif %}
-          </div>
-
-          <h3 class="font-semibold text-gray-900 text-sm mb-1 line-clamp-2">{{ doc.title }}</h3>
-
-          {% if doc.description %}
-          <p class="text-xs text-gray-500 line-clamp-2 flex-1 mb-3">{{ doc.description }}</p>
-          {% else %}
-          <div class="flex-1"></div>
-          {% endif %}
-
-          <div x-data="{ open: false }">
-            <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
-              <span class="text-xs text-gray-400">{% if doc.is_drive %}Google Drive{% else %}{{ doc.content_type or "archivo" }}{% endif %}</span>
-              <div class="flex items-center gap-1">
-                {% if doc.previewable %}
-                {# Previsualizable: "Vista previa" reemplaza a "Ver" (despliega el iframe inline) #}
-                <button type="button" @click="open = !open"
-                        class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                  </svg>
-                  <span x-text="open ? 'Ocultar' : 'Vista previa'"></span>
-                </button>
-                {% else %}
-                {# No previsualizable (office, etc.): se conserva "Ver" para abrir en pestaña #}
-                <a href="/documents/{{ doc.id }}/view"
-                   target="_blank" rel="noopener"
-                   class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                  </svg>
-                  Ver
-                </a>
-                {% endif %}
-                {% if doc.is_drive %}
-                {# Abrir el Drive original en otra pestaña (/view redirige al drive_url) #}
-                <a href="/documents/{{ doc.id }}/view"
-                   target="_blank" rel="noopener"
-                   class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                  </svg>
-                  Abrir
-                </a>
-                {% else %}
-                <a href="/documents/{{ doc.id }}/download"
-                   class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                  </svg>
-                  Descargar
-                </a>
-                {% endif %}
-                {% if doc.can_manage %}
-                <a href="/documents/{{ doc.id }}/edit"
-                   class="p-1 text-gray-400 hover:text-indigo-500 transition-colors" title="Editar">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                  </svg>
-                </a>
-                <form method="post" action="/documents/{{ doc.id }}/delete" class="inline"
-                      onsubmit="return confirm('¿Eliminar este documento?')">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                  <button type="submit" class="p-1 text-gray-400 hover:text-red-500 transition-colors" title="Eliminar">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                  </button>
-                </form>
-                {% endif %}
-              </div>
-            </div>
-
-            {% if doc.previewable %}
-            <!-- El iframe se crea solo al abrir (lazy) para no cargar decenas a la vez -->
-            <template x-if="open">
-              <div class="mt-2 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
-                <iframe src="{{ doc.preview_url }}" class="w-full h-72" loading="lazy"
-                        referrerpolicy="no-referrer" allow="autoplay"></iframe>
-              </div>
-            </template>
-            {% endif %}
-          </div>
+      {% if mine_tab == "work" and folders %}
+      <div class="mb-4">
+        <p class="text-xs text-gray-400 mb-2">Arrastra uno de tus documentos hacia una carpeta para organizarlo:</p>
+        <div class="flex flex-wrap gap-2">
+          {% for f in folders %}
+          <a href="/documents/folders/{{ f.id }}" draggable="false" data-folder-id="{{ f.id }}"
+             class="kb-folder-drop flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-xs text-gray-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+            <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+            </svg>
+            {{ "—" * (f.depth - 1) }} {{ f.name }}
+          </a>
+          {% endfor %}
         </div>
-        {% endfor %}
-      </div>
-
-      {% else %}
-      <div class="text-center py-16 text-gray-400">
-        <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-        <p class="text-sm">{{ empty_message | default('No hay documentos disponibles') }}</p>
-        {% if query %}
-        <p class="text-xs mt-1">Intenta con otro término de búsqueda</p>
-        {% endif %}
       </div>
       {% endif %}
+
+      {{ doc_grid(documents, csrf_token, empty_message, query) }}
     </div>
+
+    {% if not mine_tab %}
+    <!-- Vista: Carpetas por departamento -->
+    <div id="view-folders" class="hidden">
+      {% if not selected_dept %}
+      <h2 class="text-sm font-semibold text-gray-700 mb-4">Departamentos</h2>
+      {% if departments %}
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+        {% for dept in departments %}
+        <a href="?view=folders&department_id={{ dept.id }}{% if query %}&q={{ query }}{% endif %}"
+           class="flex items-center gap-3 bg-white rounded-xl border border-gray-200 px-4 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <svg class="w-6 h-6 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+          </svg>
+          <span class="text-sm font-medium text-gray-800">{{ dept.name }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-sm text-gray-400">No hay departamentos.</p>
+      {% endif %}
+      {% else %}
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <a href="?view=folders{% if query %}&q={{ query }}{% endif %}" class="text-sm text-indigo-600 hover:text-indigo-500">← Departamentos</a>
+          <h2 class="text-sm font-semibold text-gray-700 mt-1">
+            {{ selected_dept_name }} — {{ documents|length }} documento{{ 's' if documents|length != 1 }}
+          </h2>
+        </div>
+        {% if current_user and current_user.role in ("superadmin", "admin") %}
+        <a href="/documents/upload" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Subir documento
+        </a>
+        {% endif %}
+      </div>
+      {{ doc_grid(documents, csrf_token, empty_message, query) }}
+      {% endif %}
+    </div>
+    {% endif %}
 
   </div>
 </div>
@@ -209,4 +328,89 @@
 <style>
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
+
+{% if not mine_tab %}
+<script>
+(function () {
+  function setDocsView(v) {
+    try { localStorage.setItem('docs_view', v); } catch (e) {}
+    var listEl = document.getElementById('view-list');
+    var foldersEl = document.getElementById('view-folders');
+    if (listEl) listEl.classList.toggle('hidden', v !== 'list');
+    if (foldersEl) foldersEl.classList.toggle('hidden', v !== 'folders');
+    document.querySelectorAll('[data-view-btn]').forEach(function (b) {
+      var active = b.getAttribute('data-view-btn') === v;
+      b.classList.toggle('bg-indigo-600', active);
+      b.classList.toggle('text-white', active);
+      b.classList.toggle('text-gray-600', !active);
+    });
+    var viewInput = document.getElementById('docs-view-input');
+    if (viewInput) viewInput.value = v;
+  }
+  window.setDocsView = setDocsView;
+
+  var urlView = {{ view_mode | tojson }};
+  var saved = urlView;
+  if (!saved) {
+    try { saved = localStorage.getItem('docs_view') || 'list'; } catch (e) { saved = 'list'; }
+  }
+  setDocsView(saved);
+})();
+</script>
+{% endif %}
+
+{% if mine_tab == "work" and folders %}
+<script>
+(function () {
+  var csrfToken = {{ csrf_token | tojson }};
+
+  document.querySelectorAll('.kb-doc-card[draggable="true"]').forEach(function (card) {
+    card.addEventListener('dragstart', function (e) {
+      e.dataTransfer.setData('text/plain', card.dataset.docId);
+      e.dataTransfer.effectAllowed = 'move';
+      card.classList.add('opacity-50');
+    });
+    card.addEventListener('dragend', function () {
+      card.classList.remove('opacity-50');
+    });
+  });
+
+  document.querySelectorAll('.kb-folder-drop').forEach(function (zone) {
+    zone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      zone.classList.add('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+    });
+    zone.addEventListener('dragleave', function () {
+      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+    });
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+      var docId = e.dataTransfer.getData('text/plain');
+      if (!docId) return;
+
+      var body = new URLSearchParams();
+      body.set('folder_id', zone.dataset.folderId);
+      body.set('csrf_token', csrfToken);
+
+      fetch('/documents/' + docId + '/move-to-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      }).then(function (res) {
+        if (res.ok) {
+          zone.classList.add('border-green-500', 'text-green-600');
+          setTimeout(function () { zone.classList.remove('border-green-500', 'text-green-600'); }, 900);
+        } else {
+          alert('No se pudo mover el documento a la carpeta.');
+        }
+      }).catch(function () {
+        alert('No se pudo mover el documento a la carpeta.');
+      });
+    });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -143,9 +143,11 @@ def index_document(
     text: str,
     allowed_user_ids: list[str] | None = None,
     is_work_document: bool = False,
+    folder_shared_user_ids: list[str] | None = None,
 ) -> None:
     client = search_module.get_client()
     allowed_user_ids = allowed_user_ids or []
+    folder_shared_user_ids = folder_shared_user_ids or []
 
     client.index(
         index=search_module.DOCUMENTS_INDEX,
@@ -160,6 +162,7 @@ def index_document(
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
             "allowed_user_ids": allowed_user_ids,
+            "folder_shared_user_ids": folder_shared_user_ids,
             "is_work_document": bool(is_work_document),
         },
     )
@@ -180,6 +183,7 @@ def index_document(
             "department_name": department_name or "",
             "status": status,
             "allowed_user_ids": allowed_user_ids,
+            "folder_shared_user_ids": folder_shared_user_ids,
             "chunk_index": i,
             "content": chunk,
         }
@@ -207,10 +211,12 @@ def update_document_metadata(
     uploaded_by: str,
     allowed_user_ids: list[str] | None = None,
     is_work_document: bool = False,
+    folder_shared_user_ids: list[str] | None = None,
 ) -> None:
     """Update metadata fields in OpenSearch without touching chunk content."""
     client = search_module.get_client()
     allowed_user_ids = allowed_user_ids or []
+    folder_shared_user_ids = folder_shared_user_ids or []
 
     client.index(
         index=search_module.DOCUMENTS_INDEX,
@@ -225,6 +231,7 @@ def update_document_metadata(
             "content_type": content_type or "",
             "uploaded_by": uploaded_by or "",
             "allowed_user_ids": allowed_user_ids,
+            "folder_shared_user_ids": folder_shared_user_ids,
             "is_work_document": bool(is_work_document),
         },
     )
@@ -241,6 +248,7 @@ def update_document_metadata(
                         "ctx._source.department_id = params.department_id;"
                         "ctx._source.department_name = params.department_name;"
                         "ctx._source.allowed_user_ids = params.allowed_user_ids;"
+                        "ctx._source.folder_shared_user_ids = params.folder_shared_user_ids;"
                     ),
                     "params": {
                         "title": title,
@@ -248,6 +256,7 @@ def update_document_metadata(
                         "department_id": department_id or "",
                         "department_name": department_name or "",
                         "allowed_user_ids": allowed_user_ids,
+                        "folder_shared_user_ids": folder_shared_user_ids,
                     },
                 },
             },
@@ -279,10 +288,13 @@ def search_documents(
     department_id: str | None = None,
     size: int = 24,
     work_only: bool | None = None,
+    uploaded_by: str | None = None,
 ) -> list[dict]:
     """`work_only`: None = sin filtro; True = solo documentos de trabajo;
     False = solo archivos comunes (incluye los indexados antes de este campo,
-    que no lo tienen seteado — must_not sobre `true` los deja pasar)."""
+    que no lo tienen seteado — must_not sobre `true` los deja pasar).
+    `uploaded_by`: filtra por autor (usado por el filtro de empleado en
+    /documents/mine, pestaña de trabajo)."""
     client = search_module.get_client()
 
     must: list[dict] = (
@@ -293,6 +305,8 @@ def search_documents(
     filters = [access_filter]
     if department_id:
         filters.append({"term": {"department_id": department_id}})
+    if uploaded_by:
+        filters.append({"term": {"uploaded_by": uploaded_by}})
     must_not: list[dict] = []
     if work_only is True:
         filters.append({"term": {"is_work_document": True}})
