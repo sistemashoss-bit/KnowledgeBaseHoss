@@ -64,11 +64,10 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {% for f in shared_folders %}
         <a href="/documents/folders/{{ f.id }}"
-           class="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-indigo-300 hover:shadow-sm transition-all">
-          <svg class="w-4 h-4 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
-          </svg>
-          <span class="text-sm text-gray-800">{{ f.name }}</span>
+           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+               class="w-6 h-6 object-contain shrink-0" draggable="false" />
+          <span class="text-base text-gray-800">{{ f.name }}</span>
           <span class="text-xs text-gray-400 ml-auto">{{ f.owner.name or f.owner.email }}</span>
         </a>
         {% endfor %}
@@ -83,11 +82,10 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {% for f in subfolders %}
         <a href="/documents/folders/{{ f.id }}"
-           class="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-indigo-300 hover:shadow-sm transition-all">
-          <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
-          </svg>
-          <span class="text-sm text-gray-800">{{ f.name }}</span>
+           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+               class="w-6 h-6 object-contain shrink-0" draggable="false" />
+          <span class="text-base text-gray-800">{{ f.name }}</span>
         </a>
         {% endfor %}
       </div>

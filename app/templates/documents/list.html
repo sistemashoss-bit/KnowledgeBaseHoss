@@ -266,10 +266,9 @@
         <div class="flex flex-wrap gap-2">
           {% for f in folders %}
           <a href="/documents/folders/{{ f.id }}" draggable="false" data-folder-id="{{ f.id }}" data-folder-name="{{ f.name }}"
-             class="kb-folder-drop flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-xs text-gray-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
-            <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
-            </svg>
+             class="kb-folder-drop flex items-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-gray-300 text-sm text-gray-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+            <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+                 class="w-6 h-6 object-contain shrink-0" draggable="false" />
             {{ "—" * (f.depth - 1) }} {{ f.name }}
           </a>
           {% endfor %}
