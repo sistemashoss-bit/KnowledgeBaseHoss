@@ -258,7 +258,7 @@ def list_my_documents(
         for row in db.query(Document.id, Document.drive_url).filter(Document.id.in_(ids)).all():
             drive_map[str(row.id)] = row.drive_url
 
-    can_drag_to_folder = tab == "work" and user.role == ROLE_ADMIN
+    can_drag_to_folder = tab == "work" and user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
 
     docs = []
     for d in raw_docs:
@@ -329,7 +329,7 @@ def upload_form(
             .all()
         )
 
-    own_folders = _own_folders(db, user.id) if user.role == ROLE_ADMIN else []
+    own_folders = _own_folders(db, user.id) if user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) else []
 
     csrf = generate_csrf_token(str(user.id))
     return templates.TemplateResponse(
@@ -376,12 +376,12 @@ async def upload_document(
     if not dept:
         raise HTTPException(404, "Department not found")
 
-    # Carpetas: solo admin, solo docs de trabajo, solo carpetas propias.
+    # Carpetas: solo admin/superadmin, solo docs de trabajo, solo carpetas propias.
     folder_id = folder_id.strip()
     folder: Folder | None = None
     if folder_id:
-        if user.role != ROLE_ADMIN or not is_work_document:
-            raise HTTPException(400, "Las carpetas son solo para documentos de trabajo del admin dueño de la carpeta.")
+        if user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN) or not is_work_document:
+            raise HTTPException(400, "Las carpetas son solo para documentos de trabajo del dueño de la carpeta.")
         folder = db.query(Folder).filter(Folder.id == folder_id).first()
         if not folder or str(folder.owner_id) != str(user.id):
             raise HTTPException(404, "Carpeta no encontrada.")
@@ -506,9 +506,9 @@ def edit_form(
     )
     selected_user_ids = {str(au.user_id) for au in doc.allowed_users}
 
-    # Carpetas: solo el propio admin que subió el documento, y solo si es de trabajo.
+    # Carpetas: solo quien subió el documento (admin o superadmin), y solo si es de trabajo.
     can_assign_folder = (
-        user.role == ROLE_ADMIN and doc.is_work_document and str(doc.uploaded_by) == str(user.id)
+        user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and doc.is_work_document and str(doc.uploaded_by) == str(user.id)
     )
     own_folders = _own_folders(db, user.id) if can_assign_folder else []
 
@@ -557,10 +557,10 @@ async def edit_document(
     if status not in STATUSES:
         raise HTTPException(400)
 
-    # Solo el propio admin dueño del documento gestiona su carpeta; cualquier
-    # otro editor (superadmin, admin del depto gestionando algo ajeno) deja
-    # doc.folder_id tal cual estaba, aunque el form no traiga ese campo.
-    if user.role == ROLE_ADMIN and str(doc.uploaded_by) == str(user.id):
+    # Solo quien subió el documento gestiona su carpeta; cualquier otro editor
+    # (admin del depto gestionando algo ajeno) deja doc.folder_id tal cual
+    # estaba, aunque el form no traiga ese campo.
+    if user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) and str(doc.uploaded_by) == str(user.id):
         folder_id = folder_id.strip()
         folder: Folder | None = None
         if folder_id and is_work_document:
@@ -699,7 +699,7 @@ def move_document_to_folder(
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(404, "Documento no encontrado.")
-    if user.role != ROLE_ADMIN or not doc.is_work_document or str(doc.uploaded_by) != str(user.id):
+    if user.role not in (ROLE_ADMIN, ROLE_SUPERADMIN) or not doc.is_work_document or str(doc.uploaded_by) != str(user.id):
         raise HTTPException(403, "Solo puedes organizar en carpetas tus propios documentos de trabajo.")
 
     folder_id = folder_id.strip()
@@ -914,7 +914,10 @@ def folders_root(
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    own_folders = [f for f in _own_folders(db, user.id) if f.parent_id is None] if user.role == ROLE_ADMIN else []
+    own_folders = (
+        [f for f in _own_folders(db, user.id) if f.parent_id is None]
+        if user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) else []
+    )
     shared_folders = (
         db.query(Folder)
         .join(FolderAllowedUser, FolderAllowedUser.folder_id == Folder.id)
@@ -932,7 +935,7 @@ def folders_root(
             "shared_folders": shared_folders,
             "folder_docs": [],
             "can_manage": False,
-            "can_create_here": user.role == ROLE_ADMIN,
+            "can_create_here": user.role in (ROLE_ADMIN, ROLE_SUPERADMIN),
             "current_user": user,
             "csrf_token": generate_csrf_token(str(user.id)),
         },
@@ -946,7 +949,7 @@ def create_folder(
     parent_id: str = Form(default=""),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
-    user=Depends(require_role(ROLE_ADMIN)),
+    user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
     if not verify_csrf_token(csrf_token, str(user.id)):
         raise HTTPException(403, "Invalid CSRF token")
@@ -1025,7 +1028,15 @@ def folder_detail(
             "shared_folders": [],
             "folder_docs": docs,
             "can_manage": can_manage_folder(user, folder),
-            "can_create_here": can_manage_folder(user, folder) and folder.depth < FOLDER_MAX_DEPTH,
+            # Crear subcarpetas es solo del dueño (admin o superadmin, cada
+            # quien en su propio árbol): can_manage_folder por sí sola le da a
+            # superadmin permiso de gestión (compartir/eliminar) sobre
+            # cualquier carpeta ajena, pero eso no debe incluir crear ahí.
+            "can_create_here": (
+                user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+                and str(folder.owner_id) == str(user.id)
+                and folder.depth < FOLDER_MAX_DEPTH
+            ),
             "current_user": user,
             "csrf_token": generate_csrf_token(str(user.id)),
         },

@@ -250,10 +250,20 @@ def reports_dashboard(
     # Aggregate
     task_stats = _task_stats(dept_ids, dt_from, dt_to, db)
     dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db)
-    project_stats = _project_stats(dept_ids, dt_from, dt_to, db)
     tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db)
-    top_users = _top_users(dt_from, dt_to, db)
-    top_searches = _top_searches(dt_from, dt_to, db)
+
+    # Proyectos, usuarios más activos y búsquedas frecuentes: solo superadmin.
+    # (top_users/top_searches además son globales, sin acotar por depto, así
+    # que ni deben calcularse para un admin — verían actividad de toda la
+    # empresa, no solo la de su departamento).
+    if current_user.role == ROLE_SUPERADMIN:
+        project_stats = _project_stats(dept_ids, dt_from, dt_to, db)
+        top_users = _top_users(dt_from, dt_to, db)
+        top_searches = _top_searches(dt_from, dt_to, db)
+    else:
+        project_stats = {"total": 0, "active_total": 0, "by_status": {}}
+        top_users = []
+        top_searches = []
 
     # Chart.js data
     timeline_labels = [d["date"] for d in tasks_timeline]

@@ -71,7 +71,7 @@
     </div>
 
     <!-- ── KPI Cards ───────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 {{ 'lg:grid-cols-4' if current_user.role == 'superadmin' else 'lg:grid-cols-3' }} gap-4 mb-8">
 
       <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
         <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Tareas en período</p>
@@ -96,11 +96,13 @@
         <p class="text-xs text-gray-400 mt-1">{{ task_stats.review }} en revisión</p>
       </div>
 
+      {% if current_user.role == 'superadmin' %}
       <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
         <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Proyectos activos</p>
         <p class="text-3xl font-bold text-indigo-600 mt-1">{{ project_stats.active_total }}</p>
         <p class="text-xs text-gray-400 mt-1">{{ project_stats.total }} creados en período</p>
       </div>
+      {% endif %}
 
     </div>
 
@@ -176,7 +178,8 @@
       {% endif %}
     </div>
 
-    <!-- ── Tables row ──────────────────────────────────────────────────── -->
+    <!-- ── Tables row (solo superadmin: actividad global de toda la empresa) ── -->
+    {% if current_user.role == 'superadmin' %}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 
       <!-- Top users -->
@@ -260,6 +263,7 @@
         {% endfor %}
       </div>
     </div>
+    {% endif %}
 
   </div>
 </div>

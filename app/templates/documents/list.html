@@ -157,7 +157,7 @@
           Docs de trabajo
         </a>
       </div>
-      {% if mine_tab == "work" and current_user.role == "admin" %}
+      {% if mine_tab == "work" and current_user.role in ("admin", "superadmin") %}
       <a href="/documents/folders"
          class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,7 +245,7 @@
     <!-- Vista: Lista -->
     <div id="view-list">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-sm font-semibold text-gray-700">
+        <h2 class="text-sm font-semibold text-gray-700" id="docs-count" data-count="{{ documents|length }}">
           {{ documents|length }} documento{{ 's' if documents|length != 1 }} encontrado{{ 's' if documents|length != 1 }}
         </h2>
         {% if current_user and current_user.role in ("superadmin", "admin") %}
@@ -265,7 +265,7 @@
         <p class="text-xs text-gray-400 mb-2">Arrastra uno de tus documentos hacia una carpeta para organizarlo:</p>
         <div class="flex flex-wrap gap-2">
           {% for f in folders %}
-          <a href="/documents/folders/{{ f.id }}" draggable="false" data-folder-id="{{ f.id }}"
+          <a href="/documents/folders/{{ f.id }}" draggable="false" data-folder-id="{{ f.id }}" data-folder-name="{{ f.name }}"
              class="kb-folder-drop flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-xs text-gray-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
             <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
@@ -363,6 +363,66 @@
 (function () {
   var csrfToken = {{ csrf_token | tojson }};
 
+  // ── Toast de confirmación ────────────────────────────────────────────────
+  var toastEl = null;
+  function showToast(message, isError) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.style.position = 'fixed';
+      toastEl.style.left = '50%';
+      toastEl.style.bottom = '24px';
+      toastEl.style.transform = 'translate(-50%, 16px)';
+      toastEl.style.padding = '10px 16px';
+      toastEl.style.borderRadius = '10px';
+      toastEl.style.fontSize = '13px';
+      toastEl.style.fontWeight = '500';
+      toastEl.style.color = '#fff';
+      toastEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+      toastEl.style.zIndex = '9999';
+      toastEl.style.opacity = '0';
+      toastEl.style.transition = 'opacity 200ms ease, transform 200ms ease';
+      toastEl.style.pointerEvents = 'none';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = message;
+    toastEl.style.backgroundColor = isError ? '#dc2626' : '#16a34a';
+    clearTimeout(toastEl._hideTimer);
+    // Forzar reflow para reiniciar la transición si ya estaba visible.
+    toastEl.style.transition = 'none';
+    toastEl.style.opacity = '0';
+    toastEl.style.transform = 'translate(-50%, 16px)';
+    void toastEl.offsetWidth;
+    toastEl.style.transition = 'opacity 200ms ease, transform 200ms ease';
+    toastEl.style.opacity = '1';
+    toastEl.style.transform = 'translate(-50%, 0)';
+    toastEl._hideTimer = setTimeout(function () {
+      toastEl.style.opacity = '0';
+      toastEl.style.transform = 'translate(-50%, 16px)';
+    }, 2200);
+  }
+
+  // ── Contador "N documentos encontrados" ──────────────────────────────────
+  function decrementDocsCount() {
+    var counter = document.getElementById('docs-count');
+    if (!counter) return;
+    var n = parseInt(counter.dataset.count, 10) - 1;
+    if (n < 0) n = 0;
+    counter.dataset.count = n;
+    counter.textContent = n + ' documento' + (n !== 1 ? 's' : '') + ' encontrado' + (n !== 1 ? 's' : '');
+  }
+
+  // ── Animar y quitar la tarjeta movida (ya vive en la carpeta destino) ────
+  function removeCardAnimated(card) {
+    card.style.pointerEvents = 'none';
+    card.style.transition = 'opacity 280ms ease, transform 280ms ease';
+    card.style.transform = 'scale(0.9)';
+    card.style.opacity = '0';
+    setTimeout(function () {
+      card.remove();
+      decrementDocsCount();
+    }, 280);
+  }
+
   document.querySelectorAll('.kb-doc-card[draggable="true"]').forEach(function (card) {
     card.addEventListener('dragstart', function (e) {
       e.dataTransfer.setData('text/plain', card.dataset.docId);
@@ -378,16 +438,18 @@
     zone.addEventListener('dragover', function (e) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      zone.classList.add('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+      zone.classList.add('border-indigo-500', 'text-indigo-600', 'bg-indigo-50', 'scale-105');
     });
     zone.addEventListener('dragleave', function () {
-      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50', 'scale-105');
     });
     zone.addEventListener('drop', function (e) {
       e.preventDefault();
-      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50');
+      zone.classList.remove('border-indigo-500', 'text-indigo-600', 'bg-indigo-50', 'scale-105');
       var docId = e.dataTransfer.getData('text/plain');
       if (!docId) return;
+      var card = document.querySelector('.kb-doc-card[data-doc-id="' + docId + '"]');
+      var folderName = zone.dataset.folderName || 'la carpeta';
 
       var body = new URLSearchParams();
       body.set('folder_id', zone.dataset.folderId);
@@ -399,13 +461,15 @@
         body: body.toString(),
       }).then(function (res) {
         if (res.ok) {
-          zone.classList.add('border-green-500', 'text-green-600');
-          setTimeout(function () { zone.classList.remove('border-green-500', 'text-green-600'); }, 900);
+          zone.classList.add('border-green-500', 'text-green-600', 'bg-green-50');
+          setTimeout(function () { zone.classList.remove('border-green-500', 'text-green-600', 'bg-green-50'); }, 900);
+          showToast('Documento movido a «' + folderName + '»', false);
+          if (card) removeCardAnimated(card);
         } else {
-          alert('No se pudo mover el documento a la carpeta.');
+          showToast('No se pudo mover el documento a la carpeta.', true);
         }
       }).catch(function () {
-        alert('No se pudo mover el documento a la carpeta.');
+        showToast('No se pudo mover el documento a la carpeta.', true);
       });
     });
   });
