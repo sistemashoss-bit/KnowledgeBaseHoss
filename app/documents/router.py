@@ -78,6 +78,15 @@ def _preview_meta(doc_id: str, content_type: str, drive_url: str | None) -> dict
     return {"previewable": False, "is_drive": False, "preview_url": None, "external_url": None}
 
 
+def _safe_return_to(value: str) -> str:
+    """Solo permite volver a una ruta interna de /documents/ (evita open
+    redirect); cualquier otra cosa cae al listado general."""
+    value = (value or "").strip()
+    if value.startswith("/documents/") and not value.startswith("//"):
+        return value
+    return "/documents/"
+
+
 def _own_folders(db: Session, owner_id) -> list[Folder]:
     """Todas las carpetas del owner, en orden de árbol (padres antes que
     hijos) para mostrarlas indentadas por profundidad en un <select> plano."""
@@ -487,6 +496,7 @@ async def upload_document(
 def edit_form(
     doc_id: str,
     request: Request,
+    return_to: str = "",
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -524,6 +534,7 @@ def edit_form(
             "selected_user_ids": selected_user_ids,
             "can_assign_folder": can_assign_folder,
             "folders": own_folders,
+            "return_to": _safe_return_to(return_to),
             "current_user": user,
             "csrf_token": csrf,
         },
@@ -543,6 +554,7 @@ async def edit_document(
     allowed_user_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
+    return_to: str = Form(default=""),
     file: UploadFile = File(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
@@ -678,7 +690,7 @@ async def edit_document(
         "edit_document", user=user, request=request,
         resource_type="document", resource_id=doc_id, resource_name=title,
     )
-    return RedirectResponse("/documents/", status_code=302)
+    return RedirectResponse(_safe_return_to(return_to), status_code=302)
 
 
 @router.post("/{doc_id}/move-to-folder")
@@ -882,6 +894,7 @@ def delete_document(
     doc_id: str,
     request: Request,
     csrf_token: str = Form(...),
+    return_to: str = Form(default=""),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -904,7 +917,7 @@ def delete_document(
         "delete_document", user=user, request=request,
         resource_type="document", resource_id=doc_id, resource_name=title,
     )
-    return RedirectResponse("/documents/", status_code=302)
+    return RedirectResponse(_safe_return_to(return_to), status_code=302)
 
 
 # ── Carpetas (solo docs de trabajo, hasta FOLDER_MAX_DEPTH niveles) ──────────

@@ -13,7 +13,7 @@
     open: false,
     query: '',
     selectedId: '',
-    people: {{ people | tojson }},
+    people: {{ people | tojson | forceescape }},
     get filtered() {
       const q = this.query.trim().toLowerCase();
       if (!q) return this.people;
