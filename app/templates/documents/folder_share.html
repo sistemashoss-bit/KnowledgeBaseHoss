@@ -15,14 +15,39 @@
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 p-6 mb-4">
-      <h2 class="text-sm font-semibold text-gray-700 mb-3">Personas con acceso ({{ shared_users|length }})</h2>
-      {% if shared_users %}
+      <h2 class="text-sm font-semibold text-gray-700 mb-3">
+        Personas con acceso ({{ shared_users|length + partial_users|length }})
+      </h2>
+      {% if shared_users or partial_users %}
       <div class="divide-y divide-gray-100">
         {% for u in shared_users %}
         <div class="flex items-center justify-between py-2">
           <div>
             <p class="text-sm text-gray-800">{{ u.name or u.email }}</p>
-            <p class="text-xs text-gray-400">{{ u.email }}{% if u.department %} · {{ u.department.name }}{% endif %}</p>
+            <p class="text-xs text-gray-400">
+              {{ u.email }}{% if u.department %} · {{ u.department.name }}{% endif %}
+              · <span class="text-emerald-600 font-medium">Acceso completo</span>
+            </p>
+          </div>
+          <form method="post" action="/documents/folders/{{ folder.id }}/share/{{ u.id }}/revoke"
+                onsubmit="return confirm('¿Revocar el acceso de {{ u.name or u.email }} a esta carpeta?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+              Revocar
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+        {% for u in partial_users %}
+        <div class="flex items-center justify-between py-2">
+          <div>
+            <p class="text-sm text-gray-800">{{ u.name or u.email }}</p>
+            <p class="text-xs text-gray-400">
+              {{ u.email }}{% if u.department %} · {{ u.department.name }}{% endif %}
+              · <span class="text-amber-600 font-medium">
+                {{ partial_counts[u.id|string] }} elemento{{ 's' if partial_counts[u.id|string] != 1 else '' }}
+              </span>
+            </p>
           </div>
           <form method="post" action="/documents/folders/{{ folder.id }}/share/{{ u.id }}/revoke"
                 onsubmit="return confirm('¿Revocar el acceso de {{ u.name or u.email }} a esta carpeta?')">
@@ -42,15 +67,64 @@
     <div class="bg-white rounded-xl border border-gray-200 p-6">
       <h2 class="text-sm font-semibold text-gray-700 mb-3">Agregar persona</h2>
       {% if candidates %}
-      <form method="post" action="/documents/folders/{{ folder.id }}/share" class="flex gap-2">
+      <form method="post" action="/documents/folders/{{ folder.id }}/share" id="share-folder-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
         <select name="target_user_id" required
-                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white mb-4">
           <option value="">Seleccionar persona...</option>
           {% for u in candidates %}
           <option value="{{ u.id }}">{{ u.name or u.email }} ({{ u.email }}){% if u.department %} — {{ u.department.name }}{% endif %}</option>
           {% endfor %}
         </select>
+
+        <div class="space-y-2 mb-4">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="share_mode" value="all" checked
+                   onchange="document.getElementById('folder-share-selection').classList.add('hidden')"
+                   class="mt-0.5" />
+            <span class="text-sm text-gray-700">
+              Compartir toda la carpeta
+              <span class="block text-xs text-gray-400">Incluye todo el contenido y subcarpetas, sin importar su visibilidad individual.</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="share_mode" value="selected"
+                   onchange="document.getElementById('folder-share-selection').classList.remove('hidden')"
+                   class="mt-0.5" />
+            <span class="text-sm text-gray-700">
+              Seleccionar contenido específico
+              <span class="block text-xs text-gray-400">Elige qué documentos y subcarpetas puede ver esta persona.</span>
+            </span>
+          </label>
+        </div>
+
+        <div id="folder-share-selection" class="hidden border border-gray-200 rounded-lg p-3 mb-4 max-h-64 overflow-y-auto">
+          {% if not direct_documents and not direct_subfolders %}
+          <p class="text-sm text-gray-400">Esta carpeta no tiene contenido directo todavía.</p>
+          {% endif %}
+          {% for f in direct_subfolders %}
+          <label class="flex items-center gap-2 py-1 cursor-pointer">
+            <input type="checkbox" name="subfolder_ids" value="{{ f.id }}" />
+            <span class="text-sm text-gray-700">📁 {{ f.name }}</span>
+            <span class="text-xs text-gray-400">(se comparte completa)</span>
+          </label>
+          {% endfor %}
+          {% for d in direct_documents %}
+          <label class="flex items-center gap-2 py-1 cursor-pointer">
+            <input type="checkbox" name="document_ids" value="{{ d.id }}" />
+            <span class="text-sm text-gray-700">{{ d.title }}</span>
+            {% if d.status == 'custom' %}
+            <span class="text-xs text-red-500">restringido</span>
+            {% elif d.status == 'employee' %}
+            <span class="text-xs text-gray-400">empleados</span>
+            {% else %}
+            <span class="text-xs text-gray-400">público</span>
+            {% endif %}
+          </label>
+          {% endfor %}
+        </div>
+
         <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
           Compartir
         </button>

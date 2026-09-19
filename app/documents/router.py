@@ -1108,9 +1108,40 @@ def folder_share_form(
         .all()
     )
     shared_ids = {str(u.id) for u in shared_users}
+
+    # Contenido directo (sin bajar a sub-subcarpetas): lo que se puede
+    # seleccionar a mano en vez de compartir la carpeta completa.
+    direct_documents = (
+        db.query(Document).filter(Document.folder_id == folder_id).order_by(Document.title).all()
+    )
+    direct_subfolders = (
+        db.query(Folder).filter(Folder.parent_id == folder_id).order_by(Folder.name).all()
+    )
+
+    # Personas con acceso parcial: ya tienen algún documento o subcarpeta de
+    # este nivel compartido individualmente, pero no la carpeta completa.
+    partial_counts: dict[str, int] = {}
+    doc_ids = [d.id for d in direct_documents]
+    if doc_ids:
+        for dau in db.query(DocumentAllowedUser).filter(DocumentAllowedUser.document_id.in_(doc_ids)).all():
+            partial_counts[str(dau.user_id)] = partial_counts.get(str(dau.user_id), 0) + 1
+    subfolder_ids_ = [f.id for f in direct_subfolders]
+    if subfolder_ids_:
+        for fau in db.query(FolderAllowedUser).filter(FolderAllowedUser.folder_id.in_(subfolder_ids_)).all():
+            partial_counts[str(fau.user_id)] = partial_counts.get(str(fau.user_id), 0) + 1
+    for uid in shared_ids:
+        partial_counts.pop(uid, None)  # ya tiene acceso completo, no lo listamos aparte
+
+    partial_users = (
+        db.query(User).filter(User.id.in_(list(partial_counts.keys())))
+        .order_by(User.name, User.email).all()
+        if partial_counts else []
+    )
+
+    excluded_ids = shared_ids | set(partial_counts.keys())
     candidates_query = db.query(User).filter(User.is_active == True)  # noqa: E712
-    if shared_ids:
-        candidates_query = candidates_query.filter(~User.id.in_(shared_ids))
+    if excluded_ids:
+        candidates_query = candidates_query.filter(~User.id.in_(excluded_ids))
     candidates = candidates_query.order_by(User.name, User.email).all()
 
     return templates.TemplateResponse(
@@ -1118,6 +1149,10 @@ def folder_share_form(
         {
             "folder": folder,
             "shared_users": shared_users,
+            "partial_users": partial_users,
+            "partial_counts": partial_counts,
+            "direct_documents": direct_documents,
+            "direct_subfolders": direct_subfolders,
             "candidates": candidates,
             "current_user": user,
             "csrf_token": generate_csrf_token(str(user.id)),
@@ -1131,6 +1166,9 @@ def share_folder(
     request: Request,
     background_tasks: BackgroundTasks,
     target_user_id: str = Form(...),
+    share_mode: str = Form("all"),
+    document_ids: list[str] = Form([]),
+    subfolder_ids: list[str] = Form([]),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
@@ -1147,19 +1185,71 @@ def share_folder(
     if not target:
         raise HTTPException(400, "Persona no encontrada o inactiva.")
 
-    already_shared = db.query(FolderAllowedUser).filter(
-        FolderAllowedUser.folder_id == folder_id,
-        FolderAllowedUser.user_id == target_user_id,
-    ).first()
-    if not already_shared:
-        db.add(FolderAllowedUser(folder_id=folder_id, user_id=target_user_id))
+    if share_mode == "selected":
+        # Solo contenido directo de esta carpeta (no se desglosan sub-subcarpetas
+        # desde aquí): documentos → DocumentAllowedUser puntual; subcarpetas →
+        # FolderAllowedUser en la propia subcarpeta (comparte su subárbol completo).
+        valid_doc_ids = {
+            str(row[0]) for row in db.query(Document.id).filter(Document.folder_id == folder_id).all()
+        }
+        valid_subfolder_ids = {
+            str(row[0]) for row in db.query(Folder.id).filter(Folder.parent_id == folder_id).all()
+        }
+
+        granted_docs = 0
+        for doc_id in document_ids:
+            if doc_id not in valid_doc_ids:
+                continue
+            exists = db.query(DocumentAllowedUser).filter(
+                DocumentAllowedUser.document_id == doc_id,
+                DocumentAllowedUser.user_id == target_user_id,
+            ).first()
+            if not exists:
+                db.add(DocumentAllowedUser(document_id=doc_id, user_id=target_user_id))
+                granted_docs += 1
         db.commit()
-        folders_lib.reindex_folder_subtree(db, folder.id, background_tasks)
-        audit.log_action(
-            "share_folder", user=user, request=request,
-            resource_type="folder", resource_id=folder_id, resource_name=folder.name,
-            details=f"shared_with={target.email}",
-        )
+        for doc_id in document_ids:
+            if doc_id in valid_doc_ids:
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if doc:
+                    _reindex_document_access(db, doc, background_tasks)
+
+        granted_subfolders = 0
+        for subfolder_id in subfolder_ids:
+            if subfolder_id not in valid_subfolder_ids:
+                continue
+            exists = db.query(FolderAllowedUser).filter(
+                FolderAllowedUser.folder_id == subfolder_id,
+                FolderAllowedUser.user_id == target_user_id,
+            ).first()
+            if not exists:
+                db.add(FolderAllowedUser(folder_id=subfolder_id, user_id=target_user_id))
+                granted_subfolders += 1
+        db.commit()
+        for subfolder_id in subfolder_ids:
+            if subfolder_id in valid_subfolder_ids:
+                folders_lib.reindex_folder_subtree(db, subfolder_id, background_tasks)
+
+        if granted_docs or granted_subfolders:
+            audit.log_action(
+                "share_folder_selected", user=user, request=request,
+                resource_type="folder", resource_id=folder_id, resource_name=folder.name,
+                details=f"shared_with={target.email}; documents={granted_docs}; subfolders={granted_subfolders}",
+            )
+    else:
+        already_shared = db.query(FolderAllowedUser).filter(
+            FolderAllowedUser.folder_id == folder_id,
+            FolderAllowedUser.user_id == target_user_id,
+        ).first()
+        if not already_shared:
+            db.add(FolderAllowedUser(folder_id=folder_id, user_id=target_user_id))
+            db.commit()
+            folders_lib.reindex_folder_subtree(db, folder.id, background_tasks)
+            audit.log_action(
+                "share_folder", user=user, request=request,
+                resource_type="folder", resource_id=folder_id, resource_name=folder.name,
+                details=f"shared_with={target.email}",
+            )
     return RedirectResponse(f"/documents/folders/{folder_id}/share", status_code=302)
 
 
@@ -1181,19 +1271,51 @@ def revoke_folder_share(
     if not can_manage_folder(user, folder):
         raise HTTPException(403)
 
+    target = db.query(User).filter(User.id == target_user_id).first()
+    target_email = target.email if target else target_user_id
+    revoked_any = False
+
     grant = db.query(FolderAllowedUser).filter(
         FolderAllowedUser.folder_id == folder_id,
         FolderAllowedUser.user_id == target_user_id,
     ).first()
     if grant:
-        target_email = grant.user.email if grant.user else target_user_id
         db.delete(grant)
         db.commit()
         folders_lib.reindex_folder_subtree(db, folder.id, background_tasks)
+        revoked_any = True
+
+    # Limpia también cualquier acceso parcial (documentos/subcarpetas
+    # directos de este nivel) que se le haya dado a esta persona: "Revocar"
+    # quita todo lo que tenga en esta carpeta, sea completo o seleccionado.
+    direct_docs = db.query(Document).filter(Document.folder_id == folder_id).all()
+    for doc in direct_docs:
+        dau = db.query(DocumentAllowedUser).filter(
+            DocumentAllowedUser.document_id == doc.id,
+            DocumentAllowedUser.user_id == target_user_id,
+        ).first()
+        if dau:
+            db.delete(dau)
+            db.commit()
+            _reindex_document_access(db, doc, background_tasks)
+            revoked_any = True
+
+    direct_subfolders = db.query(Folder).filter(Folder.parent_id == folder_id).all()
+    for subfolder in direct_subfolders:
+        fau = db.query(FolderAllowedUser).filter(
+            FolderAllowedUser.folder_id == subfolder.id,
+            FolderAllowedUser.user_id == target_user_id,
+        ).first()
+        if fau:
+            db.delete(fau)
+            db.commit()
+            folders_lib.reindex_folder_subtree(db, subfolder.id, background_tasks)
+            revoked_any = True
+
+    if revoked_any:
         audit.log_action(
             "revoke_folder_share", user=user, request=request,
             resource_type="folder", resource_id=folder_id, resource_name=folder.name,
             details=f"revoked_from={target_email}",
         )
     return RedirectResponse(f"/documents/folders/{folder_id}/share", status_code=302)
-    return RedirectResponse("/documents/", status_code=302)
