@@ -1,0 +1,60 @@
+{# Combobox de búsqueda para elegir una persona (Alpine.js, ya cargado en base.html).
+   Filtra en el cliente por nombre/correo/departamento mientras se escribe y
+   manda el id elegido en un input hidden con el `name` dado. #}
+{% macro user_picker(candidates, name='target_user_id', placeholder='Buscar persona por nombre o correo...') %}
+{% set people = [] %}
+{% for u in candidates %}
+{% set label = (u.name or u.email) ~ ' (' ~ u.email ~ ')' ~ (' — ' ~ u.department.name if u.department else '') %}
+{% set search = ((u.name or '') ~ ' ' ~ u.email ~ ' ' ~ (u.department.name if u.department else '')) | lower %}
+{% set _ = people.append({'id': u.id|string, 'label': label, 'search': search}) %}
+{% endfor %}
+<div
+  x-data="{
+    open: false,
+    query: '',
+    selectedId: '',
+    people: {{ people | tojson }},
+    get filtered() {
+      const q = this.query.trim().toLowerCase();
+      if (!q) return this.people;
+      return this.people.filter(p => p.search.includes(q));
+    },
+    select(p) { this.selectedId = p.id; this.query = p.label; this.open = false; },
+  }"
+  x-init="$el.closest('form').addEventListener('submit', (e) => {
+    if (!selectedId) { e.preventDefault(); open = true; $refs.searchInput.focus(); }
+  })"
+  @click.outside="open = false"
+  class="relative"
+>
+  <input type="hidden" name="{{ name }}" :value="selectedId" />
+  <input
+    type="text"
+    x-ref="searchInput"
+    x-model="query"
+    @focus="open = true"
+    @input="if (selectedId) selectedId = ''"
+    placeholder="{{ placeholder }}"
+    autocomplete="off"
+    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white"
+  />
+  <div
+    x-show="open"
+    x-cloak
+    class="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg"
+  >
+    <template x-if="filtered.length === 0">
+      <p class="px-3 py-2 text-sm text-gray-400">Sin resultados</p>
+    </template>
+    <template x-for="p in filtered" :key="p.id">
+      <button
+        type="button"
+        @click="select(p)"
+        class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 transition-colors"
+      >
+        <span x-text="p.label"></span>
+      </button>
+    </template>
+  </div>
+</div>
+{% endmacro %}

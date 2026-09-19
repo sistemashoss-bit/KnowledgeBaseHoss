@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "documents/_user_picker.html" as picker %}
 {% block title %}Compartir documento{% endblock %}
 
 {% block content %}
@@ -47,13 +48,9 @@
       {% if candidates %}
       <form method="post" action="/documents/{{ doc.id }}/share" class="flex gap-2">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <select name="target_user_id" required
-                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white">
-          <option value="">Seleccionar persona...</option>
-          {% for u in candidates %}
-          <option value="{{ u.id }}">{{ u.name or u.email }} ({{ u.email }}){% if u.department %} — {{ u.department.name }}{% endif %}</option>
-          {% endfor %}
-        </select>
+        <div class="flex-1">
+          {{ picker.user_picker(candidates) }}
+        </div>
         <button type="submit"
                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
           Compartir

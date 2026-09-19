@@ -17,6 +17,7 @@ from app.permissions import (
     build_shared_with_me_filter,
     can_access_document,
     can_access_folder,
+    can_enter_folder,
     can_manage_document,
     can_manage_doc_dict,
     can_manage_folder,
@@ -918,12 +919,17 @@ def folders_root(
         [f for f in _own_folders(db, user.id) if f.parent_id is None]
         if user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) else []
     )
-    shared_folders = (
-        db.query(Folder)
-        .join(FolderAllowedUser, FolderAllowedUser.folder_id == Folder.id)
-        .filter(FolderAllowedUser.user_id == user.id)
-        .order_by(Folder.name)
-        .all()
+    # Carpetas raíz ajenas que el usuario puede navegar: compartidas completas,
+    # o que contienen (en cualquier profundidad) algo compartido selectivamente
+    # con él — se muestra la carpeta contenedora, no solo el ítem suelto, para
+    # que la experiencia sea como Drive (entra y ve únicamente lo compartido).
+    top_level_folders = db.query(Folder).filter(Folder.parent_id.is_(None)).all()
+    shared_folders = sorted(
+        (
+            f for f in top_level_folders
+            if str(f.owner_id) != str(user.id) and can_enter_folder(user, f)
+        ),
+        key=lambda f: f.name,
     )
 
     return templates.TemplateResponse(
@@ -994,19 +1000,29 @@ def folder_detail(
     folder = db.query(Folder).filter(Folder.id == folder_id).first()
     if not folder:
         raise HTTPException(404)
-    if not can_access_folder(user, folder):
+    if not can_enter_folder(user, folder):
         raise HTTPException(403)
 
+    # Acceso completo (dueño/superadmin/carpeta compartida entera): se ve todo.
+    # Si no, solo entró porque algo suelto de su subárbol le fue compartido, así
+    # que se filtra a lo que realmente puede ver (estilo Drive: ve la carpeta,
+    # pero no todo su contenido).
+    full_access = can_access_folder(user, folder)
+
     breadcrumb = [
-        {"id": str(f.id), "name": f.name, "accessible": can_access_folder(user, f)}
+        {"id": str(f.id), "name": f.name, "accessible": can_enter_folder(user, f)}
         for f in reversed(folders_lib.ancestor_chain(db, folder.id))
     ]
     subfolders = sorted(
         db.query(Folder).filter(Folder.parent_id == folder.id).all(), key=lambda f: f.name
     )
+    if not full_access:
+        subfolders = [f for f in subfolders if can_enter_folder(user, f)]
     folder_docs = (
         db.query(Document).filter(Document.folder_id == folder.id).order_by(Document.title).all()
     )
+    if not full_access:
+        folder_docs = [d for d in folder_docs if can_access_document(user, d)]
     docs = []
     for d in folder_docs:
         docs.append({
@@ -1027,6 +1043,7 @@ def folder_detail(
             "subfolders": subfolders,
             "shared_folders": [],
             "folder_docs": docs,
+            "partial_view": not full_access,
             "can_manage": can_manage_folder(user, folder),
             # Crear subcarpetas es solo del dueño (admin o superadmin, cada
             # quien en su propio árbol): can_manage_folder por sí sola le da a

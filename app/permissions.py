@@ -148,6 +148,22 @@ def can_access_folder(user: "User | None", folder: "Folder") -> bool:
     return False
 
 
+def can_enter_folder(user: "User | None", folder: "Folder") -> bool:
+    """Como can_access_folder, pero también True cuando la carpeta no está
+    compartida completa pero contiene, en cualquier profundidad, al menos un
+    documento o subcarpeta a los que el usuario sí tiene acceso individual
+    (compartido selectivo) — así puede navegarla como contenedor (al estilo
+    Drive) aunque solo vea una parte de lo que hay dentro. `folder_detail`
+    usa esto para decidir si deja entrar, y luego filtra lo que se muestra."""
+    if can_access_folder(user, folder):
+        return True
+    if user is None:
+        return False
+    if any(can_access_document(user, doc) for doc in folder.documents):
+        return True
+    return any(can_enter_folder(user, child) for child in folder.children)
+
+
 def can_manage_user(actor: "User", target: "User") -> bool:
     """Who can disable/reset-password another user."""
     from app.models import ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE

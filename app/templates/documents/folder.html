@@ -42,6 +42,12 @@
       </div>
     </div>
 
+    {% if partial_view %}
+    <div class="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+      Solo ves el contenido de esta carpeta que te compartieron. Puede haber más documentos o subcarpetas aquí a los que no tienes acceso.
+    </div>
+    {% endif %}
+
     <!-- Nueva carpeta -->
     {% if can_create_here %}
     <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
