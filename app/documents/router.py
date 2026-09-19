@@ -1003,6 +1003,45 @@ def create_folder(
     return RedirectResponse(f"/documents/folders/{folder.id}", status_code=302)
 
 
+@router.post("/folders/{folder_id}/rename")
+def rename_folder(
+    folder_id: str,
+    request: Request,
+    name: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_auth),
+):
+    if not verify_csrf_token(csrf_token, str(user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    folder = db.query(Folder).filter(Folder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(404)
+    if not can_manage_folder(user, folder):
+        raise HTTPException(403)
+
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "El nombre es obligatorio.")
+
+    old_name = folder.name
+    folder.name = name
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(400, "Ya existe una carpeta con ese nombre en este nivel.")
+
+    if name != old_name:
+        audit.log_action(
+            "rename_folder", user=user, request=request,
+            resource_type="folder", resource_id=folder_id, resource_name=name,
+            details=f"old_name={old_name}",
+        )
+    return RedirectResponse(f"/documents/folders/{folder.id}", status_code=302)
+
+
 @router.get("/folders/{folder_id}", response_class=HTMLResponse)
 def folder_detail(
     folder_id: str,
