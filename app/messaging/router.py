@@ -18,7 +18,7 @@ from app import audit, storage, valkey_client as vk
 from app.messaging import realtime
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
-    Message, MessageAttachment, User, UserZone, Zone,
+    Message, MessageAttachment, User, UserBranch, UserZone, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
@@ -158,7 +158,8 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
 
 
 def _team_user_ids(user: User, db: Session) -> set:
-    """IDs of users who share this user's department, branch, or zone-scoped branches."""
+    """IDs of users who share this user's department, branch, zone-scoped
+    branches, or branches assigned to them directly (supervisor)."""
     ids: set = set()
 
     if user.department_id:
@@ -170,11 +171,13 @@ def _team_user_ids(user: User, db: Session) -> set:
             ids.add(u.id)
 
     zone_ids = [uz.zone_id for uz in db.query(UserZone).filter(UserZone.user_id == user.id).all()]
+    branch_ids = set()
     if zone_ids:
-        branch_ids = [b.id for b in db.query(Branch).filter(Branch.zone_id.in_(zone_ids)).all()]
-        if branch_ids:
-            for u in db.query(User).filter(User.branch_id.in_(branch_ids), User.is_active == True).all():
-                ids.add(u.id)
+        branch_ids |= {b.id for b in db.query(Branch).filter(Branch.zone_id.in_(zone_ids)).all()}
+    branch_ids |= {ub.branch_id for ub in db.query(UserBranch).filter(UserBranch.user_id == user.id).all()}
+    if branch_ids:
+        for u in db.query(User).filter(User.branch_id.in_(branch_ids), User.is_active == True).all():
+            ids.add(u.id)
 
     ids.discard(user.id)
     return ids

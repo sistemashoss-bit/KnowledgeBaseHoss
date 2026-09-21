@@ -1191,9 +1191,11 @@ def _manager_scope(user: User, db: Session) -> dict | None:
     """Alcance de gestión de un encargado.
 
     - superadmin → None (sin restricción, todo).
-    - admin CON zona(s) (gerente regional) → sólo las sucursales de sus zonas
+    - admin CON zona(s) (coordinador regional) y/o sucursales sueltas
+      asignadas directamente (supervisor) → sólo esas sucursales
       (`branch_ids`); no todo el departamento.
-    - admin SIN zona (jefe de departamento) → todo su departamento (`dept_ids`).
+    - admin SIN zona ni sucursales (jefe de departamento) → todo su
+      departamento (`dept_ids`).
 
     Devuelve un dict con `dept_ids` y `branch_ids` (uno de los dos vacío según el
     caso), o None para superadmin.
@@ -1202,10 +1204,13 @@ def _manager_scope(user: User, db: Session) -> dict | None:
         return None
 
     zone_ids = [uz.zone_id for uz in user.user_zones]
+    branch_ids = set()
     if zone_ids:
-        branch_ids = {
+        branch_ids |= {
             row[0] for row in db.query(Branch.id).filter(Branch.zone_id.in_(zone_ids)).all()
         }
+    branch_ids |= {ub.branch_id for ub in user.user_branches}
+    if branch_ids:
         return {"dept_ids": set(), "branch_ids": branch_ids}
 
     return {"dept_ids": {user.department_id} if user.department_id else set(), "branch_ids": set()}

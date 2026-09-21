@@ -10,7 +10,7 @@ from app.auth.deps import get_current_user
 from app.database import get_db
 from app.models import (
     AuditLog, Branch, Department, Project, SearchLog,
-    Task, User, UserZone, Zone,
+    Task, User, UserBranch, UserZone, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, PROJECT_STATUSES,
 )
@@ -23,6 +23,12 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 def _dept_ids_for_zone(zone_id: str, db: Session) -> list:
     branch_ids = [b.id for b in db.query(Branch).filter(Branch.zone_id == zone_id).all()]
+    if not branch_ids:
+        return []
+    return [d.id for d in db.query(Department).filter(Department.branch_id.in_(branch_ids)).all()]
+
+
+def _dept_ids_for_branches(branch_ids: list, db: Session) -> list:
     if not branch_ids:
         return []
     return [d.id for d in db.query(Department).filter(Department.branch_id.in_(branch_ids)).all()]
@@ -52,6 +58,11 @@ def _resolve_scope(current_user, zone_id: str, department_id: str, db: Session):
         for zid in zone_ids:
             ids.extend(_dept_ids_for_zone(zid, db))
         return ids, "", ""
+
+    # employees (supervisores) con sucursales asignadas directamente
+    branch_ids = [str(ub.branch_id) for ub in db.query(UserBranch).filter(UserBranch.user_id == current_user.id).all()]
+    if branch_ids:
+        return _dept_ids_for_branches(branch_ids, db), "", ""
 
     # employee with only department
     if current_user.department_id:
@@ -230,9 +241,10 @@ def reports_dashboard(
         # Admin without department — nothing to scope
         pass
     elif current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN):
-        # Employees: only allow if they have zone assignments
+        # Employees: only allow if they have zone or branch assignments
         has_zones = db.query(UserZone).filter(UserZone.user_id == current_user.id).first()
-        if not has_zones and not current_user.department_id:
+        has_branches = db.query(UserBranch).filter(UserBranch.user_id == current_user.id).first()
+        if not has_zones and not has_branches and not current_user.department_id:
             raise HTTPException(403)
 
     # Date range defaults: last 30 days

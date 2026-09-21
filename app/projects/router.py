@@ -11,7 +11,7 @@ from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
 from app import audit
 from app.models import (
-    Branch, Department, Project, Task, User, UserZone, Zone,
+    Branch, Department, Project, Task, User, UserBranch, UserZone, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN,
     PROJECT_STATUSES, TASK_STATUSES, TASK_PRIORITIES,
 )
@@ -43,6 +43,10 @@ def _projects_query(user: User, db: Session):
     zone_ids = [uz.zone_id for uz in db.query(UserZone).filter(UserZone.user_id == user.id).all()]
     if zone_ids:
         conditions.append(Project.zone_id.in_(zone_ids))
+
+    direct_branch_ids = [ub.branch_id for ub in db.query(UserBranch).filter(UserBranch.user_id == user.id).all()]
+    if direct_branch_ids:
+        conditions.append(Project.branch_id.in_(direct_branch_ids))
 
     return q.filter(or_(*conditions))
 

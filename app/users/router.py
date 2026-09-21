@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import require_role
 from app.auth.utils import generate_csrf_token, verify_csrf_token
 from app.database import get_db
-from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserZone, Zone
+from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
 from app.permissions import can_manage_user
 from app.templating import templates
 
@@ -130,6 +130,7 @@ def user_management(
         joinedload(User.department),
         joinedload(User.branch),
         joinedload(User.user_zones).joinedload(UserZone.zone),
+        joinedload(User.user_branches).joinedload(UserBranch.branch),
     ]
     if actor.role == ROLE_SUPERADMIN:
         users = db.query(User).options(*opts).order_by(User.role, User.email).all()
@@ -168,6 +169,7 @@ def create_user_html(
     department_id: str = Form(default=""),
     branch_id: str = Form(default=""),
     zone_ids: list[str] = Form(default=[]),
+    branch_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
@@ -179,6 +181,7 @@ def create_user_html(
         role = ROLE_EMPLOYEE
         department_id = str(actor.department_id)
         zone_ids = []
+        branch_ids = []
     elif role not in ROLES:
         raise HTTPException(400, "Invalid role")
 
@@ -201,6 +204,9 @@ def create_user_html(
     for zid in zone_ids:
         if zid:
             db.add(UserZone(user_id=new_user.id, zone_id=zid))
+    for bid in branch_ids:
+        if bid:
+            db.add(UserBranch(user_id=new_user.id, branch_id=bid))
 
     db.commit()
     return RedirectResponse("/users/", status_code=302)
@@ -232,6 +238,7 @@ def edit_user(
     department_id: str = Form(default=""),
     branch_id: str = Form(default=""),
     zone_ids: list[str] = Form(default=[]),
+    branch_ids: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
@@ -260,6 +267,12 @@ def edit_user(
         for zid in zone_ids:
             if zid:
                 db.add(UserZone(user_id=target.id, zone_id=zid))
+
+        # Replace direct branch assignments (supervisor: sucursales sueltas)
+        db.query(UserBranch).filter(UserBranch.user_id == target.id).delete()
+        for bid in branch_ids:
+            if bid:
+                db.add(UserBranch(user_id=target.id, branch_id=bid))
 
     db.commit()
     return RedirectResponse("/users/", status_code=302)

@@ -101,6 +101,7 @@ class Branch(Base):
     users = relationship("User", back_populates="branch", passive_deletes=True)
     projects = relationship("Project", back_populates="branch", passive_deletes=True)
     conversations = relationship("Conversation", back_populates="branch", passive_deletes=True)
+    user_branches = relationship("UserBranch", back_populates="branch", passive_deletes=True)
 
 
 class UserZone(Base):
@@ -113,6 +114,20 @@ class UserZone(Base):
 
     user = relationship("User", back_populates="user_zones")
     zone = relationship("Zone", back_populates="user_zones")
+
+
+class UserBranch(Base):
+    """Many-to-many: users (típicamente supervisores) que manejan sucursales
+    específicas directamente, sin cubrir la zona completa (a diferencia de
+    UserZone). Alcance más angosto: un subconjunto suelto de sucursales."""
+    __tablename__ = "user_branches"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), primary_key=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="user_branches")
+    branch = relationship("Branch", back_populates="user_branches")
 
 
 # ── Existing models (documents layer — unchanged) ─────────────────────────────
@@ -163,6 +178,7 @@ class User(Base):
     documents = relationship("Document", back_populates="uploaded_by_user", passive_deletes=True)
     document_access = relationship("DocumentAllowedUser", back_populates="user", passive_deletes=True)
     user_zones = relationship("UserZone", back_populates="user", passive_deletes=True)
+    user_branches = relationship("UserBranch", back_populates="user", passive_deletes=True)
 
     # Work
     created_projects = relationship(

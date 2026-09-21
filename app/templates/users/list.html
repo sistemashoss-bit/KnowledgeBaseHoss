@@ -76,6 +76,25 @@
           {% endif %}
         </div>
 
+        <div class="md:col-span-2">
+          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales asignadas (supervisor)</label>
+          {% if branches %}
+          <div class="flex flex-wrap gap-3 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
+            {% for b in branches %}
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" name="branch_ids" value="{{ b.id }}"
+                     class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+              <span class="text-xs text-gray-700">{{ b.name }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
+            No hay sucursales creadas.
+          </p>
+          {% endif %}
+        </div>
+
         {% else %}
         <input type="hidden" name="role" value="employee" />
         <input type="hidden" name="department_id" value="" />
@@ -151,7 +170,10 @@
                 {% for uz in u.user_zones %}
                 <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-xs">{{ uz.zone.name }}</span>
                 {% endfor %}
-                {% if not u.department and not u.branch and not u.user_zones %}
+                {% for ub in u.user_branches %}
+                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-xs">{{ ub.branch.name }}</span>
+                {% endfor %}
+                {% if not u.department and not u.branch and not u.user_zones and not u.user_branches %}
                 <span class="text-xs text-gray-300">—</span>
                 {% endif %}
               </div>
@@ -252,6 +274,22 @@
                                {% if z.id|string in (u.user_zones | map(attribute='zone_id') | map('string') | list) %}checked{% endif %}
                                class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
                         <span class="text-xs text-gray-700">{{ z.name }}</span>
+                      </label>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  {% endif %}
+
+                  {% if branches %}
+                  <div class="col-span-2">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales asignadas (supervisor)</label>
+                    <div class="flex flex-wrap gap-3 border border-gray-200 rounded px-3 py-2 bg-white">
+                      {% for b in branches %}
+                      <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" name="branch_ids" value="{{ b.id }}"
+                               {% if b.id|string in (u.user_branches | map(attribute='branch_id') | map('string') | list) %}checked{% endif %}
+                               class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+                        <span class="text-xs text-gray-700">{{ b.name }}</span>
                       </label>
                       {% endfor %}
                     </div>
