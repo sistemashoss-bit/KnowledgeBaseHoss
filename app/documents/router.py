@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_auth, require_role
 from app.auth.utils import generate_csrf_token, verify_csrf_token
@@ -214,9 +214,17 @@ def list_my_documents(
     zones: list[Zone] = []
     employees: list[User] = []
     selected_zone_value = ""
-    show_employee_filter = tab == "work" and user.role == ROLE_ADMIN
+    show_employee_filter = tab == "work" and user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
 
-    if show_employee_filter:
+    if show_employee_filter and user.role == ROLE_SUPERADMIN:
+        employees = (
+            db.query(User)
+            .options(joinedload(User.department))
+            .filter(User.is_active == True)  # noqa: E712
+            .order_by(User.name, User.email)
+            .all()
+        )
+    elif show_employee_filter:
         dept_zone = (
             user.department.branch.zone
             if user.department and user.department.branch and user.department.branch.zone_id

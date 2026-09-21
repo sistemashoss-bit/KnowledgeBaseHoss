@@ -221,7 +221,7 @@
         <select name="employee_id" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
           <option value="">Todos los empleados</option>
           {% for e in employees %}
-          <option value="{{ e.id }}" {% if selected_employee == e.id|string %}selected{% endif %}>{{ e.name or e.email }}</option>
+          <option value="{{ e.id }}" {% if selected_employee == e.id|string %}selected{% endif %}>{{ e.name or e.email }}{% if current_user.role == "superadmin" and e.department %} · {{ e.department.name }}{% endif %}</option>
           {% endfor %}
         </select>
       {% elif mine_tab != "work" %}
