@@ -72,7 +72,8 @@ def generate_due_tasks(today: date | None = None) -> int:
                 priority=rt.priority,
                 is_recurring=True,
                 project_id=rt.project_id,
-                department_id=rt.department_id,
+                # Sin depto en la plantilla, hereda el del asignado para que el admin del área la vea.
+                department_id=rt.department_id or (rt.assignee.department_id if rt.assignee else None),
                 assigned_to=rt.assigned_to,
                 document_id=rt.document_id,
                 created_by=rt.created_by,

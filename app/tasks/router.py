@@ -58,6 +58,17 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True):
     return q
 
 
+def _effective_department_id(department_id, assigned_to, db: Session):
+    """Departamento con el que queda una tarea. Si no se eligió uno pero hay
+    asignado (p.ej. autoasignación), hereda el del asignado: sin esto la tarea
+    queda con department_id NULL y el admin del área no la ve ni la gestiona."""
+    if department_id:
+        return department_id
+    if assigned_to:
+        return db.query(User.department_id).filter(User.id == assigned_to).scalar()
+    return None
+
+
 def _can_edit_task(user: User, task: Task, db: Session) -> bool:
     if user.role == ROLE_SUPERADMIN:
         return True
@@ -375,7 +386,7 @@ async def create_task(
         description=description.strip() or None,
         priority=priority if priority in TASK_PRIORITIES else "medium",
         status=status if status in TASK_STATUSES else "pending",
-        department_id=department_id if department_id else None,
+        department_id=_effective_department_id(department_id, assigned_to, db),
         assigned_to=assigned_to if assigned_to else None,
         project_id=project_id if project_id else None,
         document_id=_validated_document_id(document_id, current_user, db),
@@ -817,7 +828,9 @@ def assign_task(
     _validate_target_scope(current_user, db, department_id, assigned_to, required=False)
     old_dept_id = task.department_id
     task.assigned_to = assigned_to if assigned_to else None
-    task.department_id = department_id if department_id else task.department_id
+    task.department_id = department_id if department_id else (
+        task.department_id or _effective_department_id(None, assigned_to, db)
+    )
     if department_id and str(task.department_id) != str(old_dept_id):
         # Las etiquetas son por departamento: si cambia, las del depto anterior dejan de aplicar.
         db.query(TaskTagAssignment).filter(TaskTagAssignment.task_id == task_id).delete()
