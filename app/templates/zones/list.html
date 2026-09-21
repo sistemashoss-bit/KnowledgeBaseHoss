@@ -60,9 +60,9 @@
                   class="flex items-center gap-2">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <input type="text" name="name" value="{{ zone.name }}" required
-                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-48" />
+                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-48" />
               <button type="submit"
-                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                      class="px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-500 transition-colors">
                 Guardar
               </button>
               <button type="button" @click="editZone = null"
@@ -73,7 +73,7 @@
           </div>
           <div class="flex items-center gap-2">
             <button @click="editZone = editZone === '{{ zone.id }}' ? null : '{{ zone.id }}'; editBranch = null"
-                    class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                    class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
               Editar
             </button>
             <button hx-delete="/org/zones/{{ zone.id }}"
@@ -92,7 +92,7 @@
           <div class="px-6 py-3">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <div class="w-2 h-2 rounded-full bg-orange-400 shrink-0"></div>
+                <div class="w-2 h-2 rounded-full bg-blue-400 shrink-0"></div>
                 <div x-show="editBranch !== '{{ branch.id }}'">
                   <p class="text-sm font-medium text-gray-800">{{ branch.name }}</p>
                   <p class="text-xs text-gray-400">
@@ -104,16 +104,16 @@
                       class="flex items-center gap-2 flex-wrap">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input type="text" name="name" value="{{ branch.name }}" required
-                         class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-40" />
+                         class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-40" />
                   <select name="zone_id"
-                          class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                          class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                     <option value="">— Sin zona —</option>
                     {% for z in zones %}
                     <option value="{{ z.id }}" {% if branch.zone_id|string == z.id|string %}selected{% endif %}>{{ z.name }}</option>
                     {% endfor %}
                   </select>
                   <button type="submit"
-                          class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                          class="px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-500 transition-colors">
                     Guardar
                   </button>
                   <button type="button" @click="editBranch = null"
@@ -124,7 +124,7 @@
               </div>
               <div class="flex items-center gap-2">
                 <button @click="editBranch = editBranch === '{{ branch.id }}' ? null : '{{ branch.id }}'; editZone = null"
-                        class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
                   Editar
                 </button>
                 <button hx-delete="/org/branches/{{ branch.id }}"
@@ -175,16 +175,16 @@
                   class="flex items-center gap-2 flex-wrap">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <input type="text" name="name" value="{{ branch.name }}" required
-                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-orange-500 w-40" />
+                     class="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-40" />
               <select name="zone_id"
-                      class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                      class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                 <option value="">— Sin zona —</option>
                 {% for z in zones %}
                 <option value="{{ z.id }}">{{ z.name }}</option>
                 {% endfor %}
               </select>
               <button type="submit"
-                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-500 transition-colors">
+                      class="px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-500 transition-colors">
                 Guardar
               </button>
               <button type="button" @click="editBranch = null"
@@ -194,7 +194,7 @@
             </form>
             <div class="flex items-center gap-2">
               <button @click="editBranch = editBranch === '{{ branch.id }}' ? null : '{{ branch.id }}'; editZone = null"
-                      class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                      class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
                 Editar
               </button>
               <button hx-delete="/org/branches/{{ branch.id }}"

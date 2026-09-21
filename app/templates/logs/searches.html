@@ -13,7 +13,7 @@
     <!-- Filter -->
     <form method="get" class="flex gap-3 items-center">
       <select name="search_type" onchange="this.form.submit()"
-              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-indigo-500">
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500">
         <option value="">Todos los tipos</option>
         <option value="document" {{ 'selected' if selected_type == 'document' }}>Documentos</option>
         <option value="rag" {{ 'selected' if selected_type == 'rag' }}>Preguntas (RAG)</option>
@@ -46,7 +46,7 @@
             </td>
             <td class="px-4 py-3">
               <span class="px-2 py-0.5 rounded-full text-xs font-medium
-                {{ 'bg-purple-100 text-purple-700' if log.search_type == 'rag' else 'bg-blue-100 text-blue-700' }}">
+                {{ 'bg-blue-100 text-blue-700' if log.search_type == 'rag' else 'bg-blue-100 text-blue-700' }}">
                 {{ 'Pregunta' if log.search_type == 'rag' else 'Búsqueda' }}
               </span>
             </td>
@@ -67,7 +67,7 @@
     <div class="flex gap-2 justify-center">
       {% for p in range(1, pages + 1) %}
       <a href="?page={{ p }}{% if selected_type %}&search_type={{ selected_type }}{% endif %}"
-         class="px-3 py-1 rounded text-sm {{ 'bg-indigo-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
+         class="px-3 py-1 rounded text-sm {{ 'bg-blue-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
         {{ p }}
       </a>
       {% endfor %}

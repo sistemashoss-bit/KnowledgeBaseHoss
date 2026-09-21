@@ -5,7 +5,7 @@
 
 {% macro priority_dot(p) %}
   {% if p == "urgent" %}<span class="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Urgente"></span>
-  {% elif p == "high" %}<span class="w-2 h-2 rounded-full bg-orange-400 shrink-0" title="Alta"></span>
+  {% elif p == "high" %}<span class="w-2 h-2 rounded-full bg-blue-400 shrink-0" title="Alta"></span>
   {% elif p == "medium" %}<span class="w-2 h-2 rounded-full bg-yellow-400 shrink-0" title="Media"></span>
   {% else %}<span class="w-2 h-2 rounded-full bg-gray-300 shrink-0" title="Baja"></span>
   {% endif %}
@@ -41,7 +41,7 @@
         <p class="text-sm text-gray-500 mt-0.5">Plantillas que se generan automáticamente ({{ items | length }})</p>
       </div>
       <button onclick="openRecurring()"
-              class="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+              class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
         </svg>
@@ -148,25 +148,25 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
         <input type="text" name="title" id="rt-title" required
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
         <textarea name="description" id="rt-description" rows="2"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"></textarea>
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Inicio <span class="text-xs text-gray-400">(opcional)</span></label>
           <input type="date" name="start_date" id="rt-start-date"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Fin <span class="text-xs text-gray-400">(opcional)</span></label>
           <input type="date" name="end_date" id="rt-end-date"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
       </div>
 
@@ -174,7 +174,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Frecuencia</label>
           <select name="frequency" id="rt-frequency"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="daily">Diario</option>
             <option value="weekly">Semanal</option>
             <option value="monthly">Mensual</option>
@@ -184,7 +184,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
           <select name="priority" id="rt-priority"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="low">Baja</option>
             <option value="medium" selected>Media</option>
             <option value="high">Alta</option>
@@ -196,7 +196,7 @@
       <div id="rt-weekly-wrap" class="hidden">
         <label class="block text-sm font-medium text-gray-700 mb-1">Día de la semana</label>
         <select name="day_of_week" id="rt-day-of-week"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           {% for d in weekdays %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}
         </select>
       </div>
@@ -205,14 +205,14 @@
         <div class="flex items-center justify-between mb-1">
           <label class="block text-sm font-medium text-gray-700">Días de la semana</label>
           <div class="flex gap-2 text-[11px]">
-            <button type="button" data-preset="0,1,2,3,4" class="text-orange-600 hover:underline">Lun–Vie</button>
-            <button type="button" data-preset="0,2,4" class="text-orange-600 hover:underline">Lun/Mié/Vie</button>
+            <button type="button" data-preset="0,1,2,3,4" class="text-blue-600 hover:underline">Lun–Vie</button>
+            <button type="button" data-preset="0,2,4" class="text-blue-600 hover:underline">Lun/Mié/Vie</button>
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
           {% for d in weekdays_short %}
-          <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs cursor-pointer has-[:checked]:bg-orange-50 has-[:checked]:border-orange-400 has-[:checked]:text-orange-700">
-            <input type="checkbox" name="days_of_week" value="{{ loop.index0 }}" class="rt-day-checkbox accent-orange-600" />
+          <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-400 has-[:checked]:text-blue-700">
+            <input type="checkbox" name="days_of_week" value="{{ loop.index0 }}" class="rt-day-checkbox accent-blue-600" />
             {{ d }}
           </label>
           {% endfor %}
@@ -222,13 +222,13 @@
       <div id="rt-monthly-wrap" class="hidden">
         <label class="block text-sm font-medium text-gray-700 mb-1">Día del mes <span class="text-xs text-gray-400">(1–31; se ajusta al último día en meses cortos)</span></label>
         <input type="number" name="day_of_month" id="rt-day-of-month" min="1" max="31"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Departamento</label>
         <select name="department_id" id="rt-department"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           {% if is_superadmin %}<option value="">— Sin departamento —</option>{% else %}<option value="">— Elegir —</option>{% endif %}
           {% for dept in departments %}<option value="{{ dept.id }}">{{ dept.name }}</option>{% endfor %}
         </select>
@@ -238,7 +238,7 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Asignar a persona <span class="text-xs text-gray-400">(vacío = tarea del área)</span></label>
         <select name="assigned_to" id="rt-assigned-to"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           <option value="">— Sin asignar —</option>
           {% for u in users %}<option value="{{ u.id }}" data-dept="{{ u.department_id or '' }}">{{ u.name or u.email }}</option>{% endfor %}
         </select>
@@ -248,7 +248,7 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Proyecto (opcional)</label>
         <select name="project_id" id="rt-project"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           <option value="">— Ninguno —</option>
           {% for p in projects %}<option value="{{ p.id }}" data-dept="{{ p.department_id or '' }}">{{ p.name }}</option>{% endfor %}
         </select>
@@ -261,7 +261,7 @@
           Documento a revisar <span class="text-xs text-gray-400">(opcional)</span>
         </label>
         <select name="document_id" id="rt-document"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           <option value="">— Ninguno —</option>
           {% for d in documents %}<option value="{{ d.id }}">{{ d.title }}{% if d.department_name %} · {{ d.department_name }}{% endif %}</option>{% endfor %}
         </select>
@@ -273,7 +273,7 @@
         <button type="button" onclick="document.getElementById('modal-recurring').classList.add('hidden')"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
         <button type="submit"
-                class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
           Guardar
         </button>
       </div>

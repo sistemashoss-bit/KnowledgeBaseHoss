@@ -32,7 +32,7 @@
     {% for att in docs %}
     {% set file_url = "/messaging/" ~ conv_id ~ "/attachments/" ~ att.id ~ "/download" %}
     <a href="{{ file_url }}"
-       class="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 hover:border-orange-300 hover:bg-orange-50 transition-colors">
+       class="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors">
       {% if 'pdf' in att.content_type %}
       <svg class="w-6 h-6 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"

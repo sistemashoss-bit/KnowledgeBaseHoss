@@ -11,7 +11,7 @@
     <img src="{{ avatar_url(msg.sender.avatar_key) }}"
          alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-white" />
     {% else %}
-    <div class="w-7 h-7 rounded-full bg-indigo-200 flex items-center justify-center text-indigo-700 text-xs font-bold ring-1 ring-white select-none">
+    <div class="w-7 h-7 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 text-xs font-bold ring-1 ring-white select-none">
       {{ (msg.sender.name or msg.sender.email)[0].upper() if msg.sender else "?" }}
     </div>
     {% endif %}
@@ -32,7 +32,7 @@
     {% if msg.content %}
     <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
       {% if is_mine %}
-        ml-auto bg-orange-500 text-white rounded-br-sm [&_a]:text-white
+        ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white
       {% else %}
         bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
       {% endif %}
@@ -48,11 +48,11 @@
       {# Imagen: miniatura visible; clic abre el lightbox #}
       <img src="{{ file_url }}?inline=1" alt="{{ att.filename }}" loading="lazy"
            data-lightbox
-           class="rounded-xl max-w-full max-h-64 object-cover border cursor-zoom-in {% if is_mine %}border-orange-300{% else %}border-gray-200 shadow-sm{% endif %}" />
+           class="rounded-xl max-w-full max-h-64 object-cover border cursor-zoom-in {% if is_mine %}border-blue-300{% else %}border-gray-200 shadow-sm{% endif %}" />
       {% else %}
       <a href="{{ file_url }}"
          class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
-           {% if is_mine %}bg-orange-400 text-white hover:bg-orange-300{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm{% endif %}
+           {% if is_mine %}bg-blue-400 text-white hover:bg-blue-300{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm{% endif %}
            transition-colors">
         {% if 'pdf' in att.content_type %}
         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

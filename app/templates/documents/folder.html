@@ -8,15 +8,15 @@
     <!-- Breadcrumb -->
     <div class="mb-6">
       <nav class="text-sm text-gray-500 flex items-center flex-wrap gap-1">
-        <a href="/documents/mine?tab=work" class="text-indigo-600 hover:text-indigo-500">Docs de trabajo</a>
+        <a href="/documents/mine?tab=work" class="text-blue-600 hover:text-blue-500">Docs de trabajo</a>
         <span>/</span>
-        <a href="/documents/folders" class="{{ 'text-indigo-600 hover:text-indigo-500' if folder else 'text-gray-700 font-medium' }}">Carpetas</a>
+        <a href="/documents/folders" class="{{ 'text-blue-600 hover:text-blue-500' if folder else 'text-gray-700 font-medium' }}">Carpetas</a>
         {% for f in breadcrumb %}
         <span>/</span>
         {% if loop.last %}
         <span class="text-gray-700 font-medium">{{ f.name }}</span>
         {% elif f.accessible %}
-        <a href="/documents/folders/{{ f.id }}" class="text-indigo-600 hover:text-indigo-500">{{ f.name }}</a>
+        <a href="/documents/folders/{{ f.id }}" class="text-blue-600 hover:text-blue-500">{{ f.name }}</a>
         {% else %}
         <span class="text-gray-400" title="Sin acceso a esta carpeta">{{ f.name }}</span>
         {% endif %}
@@ -27,7 +27,7 @@
         <div class="flex items-center gap-2 min-w-0" x-show="!editing">
           <h1 class="text-xl font-bold text-gray-900 truncate">{{ folder.name }}</h1>
           <button type="button" @click="editing = true; $nextTick(() => $refs.renameInput.select())"
-                  class="p-1 text-gray-400 hover:text-indigo-500 transition-colors shrink-0" title="Renombrar">
+                  class="p-1 text-gray-400 hover:text-blue-500 transition-colors shrink-0" title="Renombrar">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -39,8 +39,8 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="text" name="name" required maxlength="150" value="{{ folder.name }}"
                  x-ref="renameInput"
-                 class="text-xl font-bold text-gray-900 border-b-2 border-indigo-400 focus:outline-none px-0.5 min-w-0" />
-          <button type="submit" class="px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors shrink-0">
+                 class="text-xl font-bold text-gray-900 border-b-2 border-blue-400 focus:outline-none px-0.5 min-w-0" />
+          <button type="submit" class="px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors shrink-0">
             Guardar
           </button>
           <button type="button" @click="editing = false" class="px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 rounded-lg transition-colors shrink-0">
@@ -81,8 +81,8 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         {% if folder %}<input type="hidden" name="parent_id" value="{{ folder.id }}" />{% endif %}
         <input type="text" name="name" required placeholder="Nombre de la nueva carpeta"
-               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500" />
-        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors">
+               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
           Crear carpeta
         </button>
       </form>
@@ -96,7 +96,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {% for f in shared_folders %}
         <a href="/documents/folders/{{ f.id }}"
-           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-blue-300 hover:shadow-sm transition-all">
           <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
                class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-base text-gray-800">{{ f.name }}</span>
@@ -114,7 +114,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {% for f in subfolders %}
         <a href="/documents/folders/{{ f.id }}"
-           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+           class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-blue-300 hover:shadow-sm transition-all">
           <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
                class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-base text-gray-800">{{ f.name }}</span>
@@ -142,7 +142,7 @@
               Ver
             </a>
             {% if doc.can_manage %}
-            <a href="/documents/{{ doc.id }}/edit?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else '')) | urlencode }}" class="p-1 text-gray-400 hover:text-indigo-500 transition-colors" title="Editar">
+            <a href="/documents/{{ doc.id }}/edit?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else '')) | urlencode }}" class="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="Editar">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>

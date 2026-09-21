@@ -44,7 +44,7 @@
         </svg>
         <input id="conv-search" type="text" placeholder="Buscar conversación…"
                oninput="convFilter()"
-               class="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 bg-gray-50" />
+               class="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400 bg-gray-50" />
       </div>
     </div>
 
@@ -55,7 +55,7 @@
         <a href="/messaging/{{ item.conv.id }}"
            data-conv-search="{{ item.display_name | lower }}"
            class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50
-             {% if active_conv and active_conv.id == item.conv.id %}bg-orange-50 border-l-2 border-l-orange-500{% endif %}">
+             {% if active_conv and active_conv.id == item.conv.id %}bg-blue-50 border-l-2 border-l-blue-500{% endif %}">
 
           <!-- Avatar -->
           {% if item.conv.type == 'group' %}
@@ -63,7 +63,7 @@
           <img src="{{ group_avatar_url(item.conv.avatar_key) }}" alt=""
                class="w-9 h-9 rounded-full object-cover shrink-0" />
             {% else %}
-          <div class="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 text-sm font-bold">
+          <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 text-sm font-bold">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
@@ -76,7 +76,7 @@
             <img src="{{ avatar_url(item.other_avatar_key) }}" alt=""
                  class="w-9 h-9 rounded-full object-cover" />
             {% else %}
-            <div class="w-9 h-9 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-bold">
+            <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold">
               {{ item.avatar }}
             </div>
             {% endif %}
@@ -105,7 +105,7 @@
                 {% endif %}
               </p>
               {% if item.unread > 0 %}
-              <span class="ml-2 w-5 h-5 rounded-full bg-orange-500 text-white text-xs flex items-center justify-center shrink-0 font-medium">
+              <span class="ml-2 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center shrink-0 font-medium">
                 {{ item.unread if item.unread < 10 else "9+" }}
               </span>
               {% endif %}
@@ -136,7 +136,7 @@
         <img src="{{ group_avatar_url(active_conv.avatar_key) }}" alt=""
              class="w-8 h-8 rounded-full object-cover shrink-0" />
           {% else %}
-        <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
@@ -154,7 +154,7 @@
         <img src="{{ avatar_url(ns.ak) }}" alt=""
              class="w-8 h-8 rounded-full object-cover shrink-0" />
           {% else %}
-        <div class="w-8 h-8 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-sm shrink-0">
+        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0">
           {{ active_conv_name[0].upper() }}
         </div>
           {% endif %}
@@ -198,7 +198,7 @@
         <!-- Shared files -->
         <button onclick="openFilesPanel('{{ active_conv.id }}')"
                 title="Archivos compartidos"
-                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-orange-600 hover:border-orange-300 transition-colors">
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M5 8h14M5 8a2 2 0 01-2-2V5a1 1 0 011-1h16a1 1 0 011 1v1a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/>
@@ -271,7 +271,7 @@
         <form method="post" action="/messaging/{{ active_conv.id }}/members" class="flex gap-2 items-center">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <select name="user_id" required
-                  class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                  class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
             <option value="">— Agregar persona —</option>
             {% for u in all_users %}
             {% if u.id|string not in participant_ids %}
@@ -280,7 +280,7 @@
             {% endfor %}
           </select>
           <button type="submit"
-                  class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors shrink-0">
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors shrink-0">
             Agregar
           </button>
         </form>
@@ -357,7 +357,7 @@
         <!-- File preview bar -->
         <div id="file-preview-bar"
              class="hidden items-center gap-2 px-1 text-xs text-gray-500">
-          <svg class="w-3.5 h-3.5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
           </svg>
@@ -369,7 +369,7 @@
 
         <div class="flex gap-2 items-end">
           <!-- Attach button -->
-          <label class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-orange-500 hover:border-orange-300 cursor-pointer transition-colors shrink-0"
+          <label class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 cursor-pointer transition-colors shrink-0"
                  title="Adjuntar archivo">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -385,11 +385,11 @@
                     placeholder="Escribe un mensaje..."
                     onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); var hasFiles = document.getElementById('file-input').files.length > 0; if (this.value.trim() || hasFiles) { this.closest('form').dispatchEvent(new Event('submit', {bubbles:true})); } }"
                     oninput="this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'"
-                    class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 placeholder-gray-400 leading-snug"
+                    class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder-gray-400 leading-snug"
                     style="max-height:120px"></textarea>
 
           <button type="submit"
-                  class="w-9 h-9 bg-orange-500 hover:bg-orange-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
+                  class="w-9 h-9 bg-blue-500 hover:bg-blue-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
             <svg class="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
             </svg>
@@ -403,8 +403,8 @@
     <!-- Empty state -->
     <div class="flex-1 flex items-center justify-center">
       <div class="text-center">
-        <div class="w-16 h-16 mx-auto rounded-full bg-orange-50 flex items-center justify-center mb-4">
-          <svg class="w-8 h-8 text-orange-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="w-16 h-16 mx-auto rounded-full bg-blue-50 flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                   d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
           </svg>
@@ -441,7 +441,7 @@
       </svg>
       <input id="dm-search" type="text" placeholder="Buscar por nombre o correo…"
              oninput="dmFilter()"
-             class="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400" />
+             class="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400" />
     </div>
 
     <div class="space-y-1 max-h-64 overflow-y-auto">
@@ -450,8 +450,8 @@
             data-search="{{ ((contact.name or '') + ' ' + contact.email) | lower }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button type="submit"
-                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-orange-50 text-left transition-colors">
-          <div class="w-8 h-8 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-bold shrink-0">
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-50 text-left transition-colors">
+          <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shrink-0">
             {{ (contact.name or contact.email)[0].upper() }}
           </div>
           <div class="min-w-0">
@@ -505,7 +505,7 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del grupo <span class="text-red-500">*</span></label>
         <input type="text" name="name" required placeholder="Ej. Equipo Sistemas"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
       </div>
 
       <!-- Scope filters (double as group metadata) -->
@@ -515,7 +515,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Zona</label>
           <select id="ng-zone" name="zone_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">— Todas —</option>
             {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
           </select>
@@ -525,7 +525,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
           <select id="ng-dept" name="department_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">— Todos —</option>
             {% for d in departments %}
             <option value="{{ d.id }}" data-zone="{{ d.branch.zone_id if d.branch else '' }}">{{ d.name }}</option>
@@ -545,7 +545,7 @@
           </label>
           <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
             <input id="ng-check-all" type="checkbox"
-                   class="w-3.5 h-3.5 rounded text-orange-500 focus:ring-orange-400 border-gray-300" />
+                   class="w-3.5 h-3.5 rounded text-blue-500 focus:ring-blue-400 border-gray-300" />
             Seleccionar todos
           </label>
         </div>
@@ -558,8 +558,8 @@
           <label class="ng-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
                  data-dept="{{ u.department_id or '' }}">
             <input type="checkbox" name="member_ids" value="{{ u.id }}"
-                   class="ng-cb w-4 h-4 rounded text-orange-500 focus:ring-orange-400 border-gray-300"/>
-            <div class="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-bold shrink-0">
+                   class="ng-cb w-4 h-4 rounded text-blue-500 focus:ring-blue-400 border-gray-300"/>
+            <div class="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
               {{ (u.name or u.email)[0].upper() }}
             </div>
             <div class="min-w-0 flex-1">
@@ -582,7 +582,7 @@
         <button type="button" onclick="document.getElementById('modal-group').classList.add('hidden')"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
         <button type="submit"
-                class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
           Crear Grupo
         </button>
       </div>
@@ -615,7 +615,7 @@
                src="{% if active_conv.avatar_key %}{{ group_avatar_url(active_conv.avatar_key) }}{% endif %}"
                class="w-16 h-16 rounded-full object-cover border border-gray-200 {% if not active_conv.avatar_key %}hidden{% endif %}" />
           <div id="eg-placeholder"
-               class="w-16 h-16 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center {% if active_conv.avatar_key %}hidden{% endif %}">
+               class="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center {% if active_conv.avatar_key %}hidden{% endif %}">
             <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
@@ -636,14 +636,14 @@
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del grupo <span class="text-red-500">*</span></label>
         <input id="edit-group-name" type="text" name="name" required value="{{ active_conv.name }}"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
       </div>
 
       <div class="flex gap-3 justify-end pt-1">
         <button type="button" onclick="document.getElementById('modal-edit-group').classList.add('hidden')"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
         <button type="submit"
-                class="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors">
+                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
           Guardar cambios
         </button>
       </div>
@@ -837,7 +837,7 @@ function convFilter() {
     const av = document.createElement('div');
     av.className = 'lk-av flex items-center justify-center w-full h-full';
     const circle = document.createElement('div');
-    circle.className = 'w-20 h-20 rounded-full bg-indigo-600 flex items-center justify-center text-white text-3xl font-bold select-none';
+    circle.className = 'w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center text-white text-3xl font-bold select-none';
     circle.textContent = (p.name || p.identity || '?')[0].toUpperCase();
     av.appendChild(circle);
     div.appendChild(av);

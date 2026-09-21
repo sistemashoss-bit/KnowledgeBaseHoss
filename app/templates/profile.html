@@ -15,7 +15,7 @@
                alt="Avatar"
                class="w-20 h-20 rounded-full object-cover border-2 border-gray-100" />
           {% else %}
-          <div class="w-20 h-20 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-2xl font-bold border-2 border-gray-100">
+          <div class="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-2xl font-bold border-2 border-gray-100">
             {{ current_user.email[0].upper() }}
           </div>
           {% endif %}
@@ -34,7 +34,7 @@
             <div>
               <p class="text-gray-400 text-xs mb-0.5">Rol</p>
               <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium
-                {% if current_user.role == 'superadmin' %}bg-purple-100 text-purple-700
+                {% if current_user.role == 'superadmin' %}bg-blue-100 text-blue-700
                 {% elif current_user.role == 'admin' %}bg-blue-100 text-blue-700
                 {% else %}bg-gray-100 text-gray-600{% endif %}">
                 {{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}

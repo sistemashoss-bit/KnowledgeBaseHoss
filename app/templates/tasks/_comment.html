@@ -1,7 +1,7 @@
 {% set is_author = current_user and comment.user_id == current_user.id %}
 {% set can_manage = is_author or can_edit|default(false) %}
 <div id="comment-{{ comment.id }}" class="flex gap-3 px-6 py-4" x-data="{ editing: false }">
-  <div class="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 text-xs font-bold shrink-0">
+  <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
     {{ comment.user.email[0].upper() if comment.user else "?" }}
   </div>
   <div class="flex-1 min-w-0">
@@ -44,10 +44,10 @@
           class="mt-1">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <textarea name="content" rows="2" required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none">{{ comment.content }}</textarea>
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none">{{ comment.content }}</textarea>
       <div class="flex gap-2 mt-1.5">
         <button type="submit"
-                class="px-3 py-1 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-medium transition-colors">
+                class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors">
           Guardar
         </button>
         <button type="button" @click="editing = false"

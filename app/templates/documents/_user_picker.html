@@ -36,7 +36,7 @@
     @input="if (selectedId) selectedId = ''"
     placeholder="{{ placeholder }}"
     autocomplete="off"
-    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-indigo-500 bg-white"
+    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
   />
   <div
     x-show="open"
@@ -50,7 +50,7 @@
       <button
         type="button"
         @click="select(p)"
-        class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 transition-colors"
+        class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 transition-colors"
       >
         <span x-text="p.label"></span>
       </button>

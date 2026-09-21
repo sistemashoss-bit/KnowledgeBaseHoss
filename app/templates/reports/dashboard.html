@@ -28,19 +28,19 @@
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-500 font-medium">Desde</label>
           <input type="date" name="date_from" value="{{ date_from }}"
-                 class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                 class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-500 font-medium">Hasta</label>
           <input type="date" name="date_to" value="{{ date_to }}"
-                 class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                 class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
 
         {% if current_user.role == 'superadmin' %}
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-500 font-medium">Zona</label>
           <select name="zone_id"
-                  class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400">
+                  class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
             <option value="">Todas</option>
             {% for z in zones %}
             <option value="{{ z.id }}" {% if z.id|string == active_zone %}selected{% endif %}>{{ z.name }}</option>
@@ -50,7 +50,7 @@
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-500 font-medium">Departamento</label>
           <select name="department_id"
-                  class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400">
+                  class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
             <option value="">Todos</option>
             {% for d in departments %}
             <option value="{{ d.id }}" {% if d.id|string == active_dept %}selected{% endif %}>{{ d.name }}</option>
@@ -60,7 +60,7 @@
         {% endif %}
 
         <button type="submit"
-                class="px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium rounded-lg transition-colors">
+                class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
           Aplicar
         </button>
         <a href="/reports/"
@@ -99,7 +99,7 @@
       {% if current_user.role == 'superadmin' %}
       <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
         <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Proyectos activos</p>
-        <p class="text-3xl font-bold text-indigo-600 mt-1">{{ project_stats.active_total }}</p>
+        <p class="text-3xl font-bold text-blue-600 mt-1">{{ project_stats.active_total }}</p>
         <p class="text-xs text-gray-400 mt-1">{{ project_stats.total }} creados en período</p>
       </div>
       {% endif %}
@@ -193,7 +193,7 @@
           {% for u in top_users %}
           <div class="flex items-center justify-between px-6 py-3">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 text-xs font-bold shrink-0">
+              <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
                 {{ loop.index }}
               </div>
               <div class="min-w-0">
@@ -223,7 +223,7 @@
           {% for s in top_searches %}
           <div class="flex items-center justify-between px-6 py-3 gap-3">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-bold shrink-0">
+              <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
                 {{ loop.index }}
               </div>
               <p class="text-sm text-gray-800 truncate">{{ s.query }}</p>

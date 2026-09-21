@@ -13,7 +13,7 @@
     <!-- Filter -->
     <form method="get" class="flex gap-3 items-center">
       <select name="action" onchange="this.form.submit()"
-              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-indigo-500">
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500">
         <option value="">Todas las acciones</option>
         {% for a in actions %}
         <option value="{{ a }}" {{ 'selected' if a == selected_action }}>{{ a | action_label }}</option>
@@ -81,7 +81,7 @@
     <div class="flex gap-2 justify-center">
       {% for p in range(1, pages + 1) %}
       <a href="?page={{ p }}{% if selected_action %}&action={{ selected_action }}{% endif %}"
-         class="px-3 py-1 rounded text-sm {{ 'bg-indigo-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
+         class="px-3 py-1 rounded text-sm {{ 'bg-blue-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
         {{ p }}
       </a>
       {% endfor %}

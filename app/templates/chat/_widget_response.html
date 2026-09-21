@@ -17,12 +17,12 @@
   </div>
 
   <div class="flex gap-2 justify-start">
-    <div class="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+    <div class="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0 mt-0.5">
       <img src="{{ url_for('assets', path='mascota.png') }}" alt="MAX"
            class="w-full h-full rounded-full object-contain" />
     </div>
     <div class="max-w-[85%] space-y-1.5">
-      <p class="text-xs text-gray-800 bg-indigo-50 rounded-xl rounded-tl-none px-3 py-2 leading-relaxed">
+      <p class="text-xs text-gray-800 bg-blue-50 rounded-xl rounded-tl-none px-3 py-2 leading-relaxed">
         {{ answer | replace('\n', '<br>') | safe }}
       </p>
       {% if sources %}
@@ -30,7 +30,7 @@
         {% for source in sources %}
         <a href="/documents/{{ source.id }}/view"
            target="_blank" rel="noopener"
-           class="text-xs text-indigo-600 bg-white border border-indigo-200 hover:bg-indigo-50 px-2 py-0.5 rounded-full transition-colors truncate max-w-[140px]">
+           class="text-xs text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 px-2 py-0.5 rounded-full transition-colors truncate max-w-[140px]">
           {{ source.title }}
         </a>
         {% endfor %}

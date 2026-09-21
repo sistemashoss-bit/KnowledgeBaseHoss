@@ -20,20 +20,20 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Correo <span class="text-red-500">*</span></label>
           <input type="email" name="email" required placeholder="usuario@empresa.com"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500" />
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
         </div>
 
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Nombre completo</label>
           <input type="text" name="name" placeholder="Opcional"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500" />
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
         </div>
 
         {% if current_user.role == "superadmin" %}
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
           <select name="role"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
             {% for r in roles %}<option value="{{ r }}">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(r, r) }}</option>{% endfor %}
           </select>
         </div>
@@ -41,7 +41,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
           <select name="department_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
             <option value="">Sin departamento</option>
             {% for dept in departments %}<option value="{{ dept.id }}">{{ dept.name }}</option>{% endfor %}
           </select>
@@ -50,7 +50,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Sucursal</label>
           <select name="branch_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white">
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
             <option value="">Sin sucursal</option>
             {% for b in branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
           </select>
@@ -63,7 +63,7 @@
             {% for z in zones %}
             <label class="flex items-center gap-1.5 cursor-pointer">
               <input type="checkbox" name="zone_ids" value="{{ z.id }}"
-                     class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+                     class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
               <span class="text-xs text-gray-700">{{ z.name }}</span>
             </label>
             {% endfor %}
@@ -71,7 +71,7 @@
           {% else %}
           <p class="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
             No hay zonas creadas. Crea zonas en
-            <a href="/org/zones/" class="text-orange-600 underline">Zonas y Sucursales</a>.
+            <a href="/org/zones/" class="text-blue-600 underline">Zonas y Sucursales</a>.
           </p>
           {% endif %}
         </div>
@@ -83,7 +83,7 @@
             {% for b in branches %}
             <label class="flex items-center gap-1.5 cursor-pointer">
               <input type="checkbox" name="branch_ids" value="{{ b.id }}"
-                     class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+                     class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
               <span class="text-xs text-gray-700">{{ b.name }}</span>
             </label>
             {% endfor %}
@@ -102,7 +102,7 @@
 
         <div class="md:col-span-2">
           <button type="submit"
-                  class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-medium transition-colors">
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
             Crear usuario
           </button>
         </div>
@@ -133,7 +133,7 @@
                 <img src="{{ avatar_url(u.avatar_key) }}" alt=""
                      class="w-7 h-7 rounded-full object-cover shrink-0" />
                 {% else %}
-                <div class="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 text-xs font-bold shrink-0">
+                <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
                   {{ (u.name or u.email)[0].upper() }}
                 </div>
                 {% endif %}
@@ -151,7 +151,7 @@
             <!-- Role -->
             <td class="px-4 py-3">
               <span class="px-2 py-0.5 rounded-full text-xs font-medium
-                {% if u.role == 'superadmin' %}bg-purple-100 text-purple-700
+                {% if u.role == 'superadmin' %}bg-blue-100 text-blue-700
                 {% elif u.role == 'admin' %}bg-blue-100 text-blue-700
                 {% else %}bg-gray-100 text-gray-600{% endif %}">
                 {{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(u.role, u.role) }}
@@ -165,7 +165,7 @@
                 <span class="text-xs text-gray-700">{{ u.department.name }}</span>
                 {% endif %}
                 {% if u.branch %}
-                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-xs">{{ u.branch.name }}</span>
+                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-xs">{{ u.branch.name }}</span>
                 {% endif %}
                 {% for uz in u.user_zones %}
                 <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-xs">{{ uz.zone.name }}</span>
@@ -206,7 +206,7 @@
 
                 <!-- Edit toggle -->
                 <button @click="editFor = editFor === '{{ u.id }}' ? null : '{{ u.id }}'"
-                        class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
                   Editar
                 </button>
 
@@ -215,27 +215,27 @@
               <!-- Edit inline form -->
               <div x-show="editFor === '{{ u.id }}'" x-cloak class="mt-2">
                 <form method="post" action="/users/{{ u.id }}/edit"
-                      class="grid grid-cols-2 gap-2 p-3 bg-orange-50 rounded-lg border border-orange-100">
+                      class="grid grid-cols-2 gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
 
                   <div class="col-span-2 sm:col-span-1">
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Nombre</label>
                     <input type="text" name="name" value="{{ u.name or '' }}"
                            placeholder="Nombre completo"
-                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500" />
+                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500" />
                   </div>
 
                   {% if current_user.role == "superadmin" %}
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Correo</label>
                     <input type="email" name="email" value="{{ u.email }}"
-                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500" />
+                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500" />
                   </div>
 
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Rol</label>
                     <select name="role"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                       {% for r in roles %}
                       <option value="{{ r }}" {% if u.role == r %}selected{% endif %}>{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(r, r) }}</option>
                       {% endfor %}
@@ -245,7 +245,7 @@
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Departamento</label>
                     <select name="department_id"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                       <option value="">Sin departamento</option>
                       {% for dept in departments %}
                       <option value="{{ dept.id }}" {% if u.department_id and u.department_id|string == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
@@ -256,7 +256,7 @@
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Sucursal</label>
                     <select name="branch_id"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                       <option value="">Sin sucursal</option>
                       {% for b in branches %}
                       <option value="{{ b.id }}" {% if u.branch_id and u.branch_id|string == b.id|string %}selected{% endif %}>{{ b.name }}</option>
@@ -272,7 +272,7 @@
                       <label class="flex items-center gap-1.5 cursor-pointer">
                         <input type="checkbox" name="zone_ids" value="{{ z.id }}"
                                {% if z.id|string in (u.user_zones | map(attribute='zone_id') | map('string') | list) %}checked{% endif %}
-                               class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+                               class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
                         <span class="text-xs text-gray-700">{{ z.name }}</span>
                       </label>
                       {% endfor %}
@@ -288,7 +288,7 @@
                       <label class="flex items-center gap-1.5 cursor-pointer">
                         <input type="checkbox" name="branch_ids" value="{{ b.id }}"
                                {% if b.id|string in (u.user_branches | map(attribute='branch_id') | map('string') | list) %}checked{% endif %}
-                               class="w-3.5 h-3.5 rounded text-orange-500 border-gray-300 focus:ring-orange-400" />
+                               class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
                         <span class="text-xs text-gray-700">{{ b.name }}</span>
                       </label>
                       {% endfor %}
@@ -299,7 +299,7 @@
 
                   <div class="col-span-2 flex gap-2 pt-1">
                     <button type="submit"
-                            class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-xs font-medium transition-colors">
+                            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors">
                       Guardar
                     </button>
                     <button type="button" @click="editFor = null"

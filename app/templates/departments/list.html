@@ -12,9 +12,9 @@
       <form method="post" action="/departments/" class="flex gap-3">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="text" name="name" required placeholder="Recursos Humanos"
-               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-orange-500" />
+               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
         <button type="submit"
-                class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-medium transition-colors">
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
           Crear
         </button>
       </form>
@@ -38,7 +38,7 @@
             <td class="px-4 py-3 font-medium text-gray-900">{{ dept.name }}</td>
             <td class="px-4 py-3">
               {% if dept.branch %}
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
                 {{ dept.branch.name }}
               </span>
               {% else %}
@@ -49,7 +49,7 @@
             <td class="px-4 py-3 text-right">
               <div class="flex items-center justify-end gap-2">
                 <button @click="editFor = editFor === '{{ dept.id }}' ? null : '{{ dept.id }}'"
-                        class="text-xs px-2 py-1 rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
                   Editar
                 </button>
                 <form method="post" action="/departments/{{ dept.id }}/delete"
@@ -65,19 +65,19 @@
               <!-- Inline edit form -->
               <div x-show="editFor === '{{ dept.id }}'" x-cloak class="mt-2 text-left">
                 <form method="post" action="/departments/{{ dept.id }}/edit"
-                      class="flex flex-col gap-2 p-3 bg-orange-50 rounded-lg border border-orange-100">
+                      class="flex flex-col gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
 
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Nombre</label>
                     <input type="text" name="name" value="{{ dept.name }}" required
-                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500" />
+                           class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500" />
                   </div>
 
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Sucursal</label>
                     <select name="branch_id"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-orange-500 bg-white">
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                       <option value="">Corporativo (sin sucursal)</option>
                       {% for b in branches %}
                       <option value="{{ b.id }}" {% if dept.branch_id and dept.branch_id|string == b.id|string %}selected{% endif %}>
@@ -89,7 +89,7 @@
 
                   <div class="flex gap-2 pt-1">
                     <button type="submit"
-                            class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-xs font-medium transition-colors">
+                            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors">
                       Guardar
                     </button>
                     <button type="button" @click="editFor = null"
