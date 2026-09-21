@@ -3,9 +3,10 @@
 <head>
   <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>HOSS Conocimiento</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -55,7 +56,7 @@
 
   <!-- ── Navbar ──────────────────────────────────────────────────────────── -->
   <header class="bg-white border-b border-stone-200 sticky top-0 z-40">
-    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-center">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-center">
       <a href="/">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
              alt="HOSS" class="h-8 w-auto object-contain" />
@@ -64,20 +65,20 @@
   </header>
 
   <!-- ── Hero ────────────────────────────────────────────────────────────── -->
-  <section class="bg-stone-900 bg-cover bg-center bg-no-repeat text-white py-16 px-6"
+  <section class="bg-stone-900 bg-cover bg-center bg-no-repeat text-white py-10 sm:py-16 px-4 sm:px-6"
            style="background-image: url('{{ url_for('assets', path='hossbackground.png').path }}');">
     <div class="max-w-3xl mx-auto text-center">
       <span class="inline-block px-3 py-1 bg-blue-600/20 text-blue-400 text-xs font-semibold rounded-full uppercase tracking-wider mb-5">
         Documentación Institucional
       </span>
-      <h1 class="text-4xl sm:text-5xl font-bold text-white mb-4 leading-tight">
+      <h1 class="text-3xl sm:text-5xl font-bold text-white mb-4 leading-tight">
         Base de Conocimiento
       </h1>
       <p class="text-stone-400 text-lg mb-10 max-w-xl mx-auto">
         Accede a políticas, procedimientos y documentos oficiales de la organización de forma rápida y segura.
       </p>
 
-      <form method="get" action="/" class="flex gap-2 max-w-2xl mx-auto">
+      <form method="get" action="/" class="flex flex-col sm:flex-row gap-2 max-w-2xl mx-auto">
         <div class="flex-1 relative">
           <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 pointer-events-none"
                fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,11 +87,10 @@
           </svg>
           <input type="text" name="q" value="{{ query }}"
                  placeholder="Buscar políticas, procedimientos, reglamentos..."
-                 autofocus
                  class="w-full pl-11 pr-4 py-3.5 bg-white text-stone-900 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-stone-400"/>
         </div>
         <button type="submit"
-                class="px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-semibold transition-colors shrink-0">
+                class="px-4 sm:px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-semibold transition-colors shrink-0">
           Buscar
         </button>
       </form>
@@ -98,7 +98,7 @@
   </section>
 
   <!-- ── Main content ────────────────────────────────────────────────────── -->
-  <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-12">
+  <main class="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-12">
 
     {% if query %}
     <!-- Search results -->
@@ -118,7 +118,7 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {% for doc in documents %}
       <div class="bg-white rounded-xl border border-stone-200 p-4 hover:shadow-md hover:border-blue-200 transition-all flex flex-col">
-        <div class="flex items-center gap-2 mb-2">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
           {% if doc.status == "public" %}
           <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">público</span>
           {% elif doc.status == "employee" %}
@@ -185,7 +185,7 @@
 
         <div class="bg-white border border-stone-200 rounded-xl overflow-hidden">
           <button @click="open = open === 1 ? null : 1"
-                  class="w-full flex items-center justify-between px-5 py-4 text-left">
+                  class="w-full flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-5 py-4 text-left">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
                 <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -210,7 +210,7 @@
 
         <div class="bg-white border border-stone-200 rounded-xl overflow-hidden">
           <button @click="open = open === 2 ? null : 2"
-                  class="w-full flex items-center justify-between px-5 py-4 text-left">
+                  class="w-full flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-5 py-4 text-left">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
                 <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -235,7 +235,7 @@
 
         <div class="bg-white border border-stone-200 rounded-xl overflow-hidden">
           <button @click="open = open === 3 ? null : 3"
-                  class="w-full flex items-center justify-between px-5 py-4 text-left">
+                  class="w-full flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-5 py-4 text-left">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
                 <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -260,7 +260,7 @@
 
         <div class="bg-white border border-stone-200 rounded-xl overflow-hidden">
           <button @click="open = open === 4 ? null : 4"
-                  class="w-full flex items-center justify-between px-5 py-4 text-left">
+                  class="w-full flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-5 py-4 text-left">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
                 <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,7 +285,7 @@
 
         <div class="bg-white border border-stone-200 rounded-xl overflow-hidden">
           <button @click="open = open === 5 ? null : 5"
-                  class="w-full flex items-center justify-between px-5 py-4 text-left">
+                  class="w-full flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-5 py-4 text-left">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
                 <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -316,7 +316,7 @@
 
   <!-- ── Footer ──────────────────────────────────────────────────────────── -->
   <footer class="border-t border-stone-200 bg-white mt-auto">
-    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between text-xs text-stone-400">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 text-xs text-stone-400">
       <span>© {{ 2026 }}</span>
       {% if not current_user %}
       <a href="/auth/login" class="text-blue-600 hover:text-blue-500 font-medium">Acceso empleados →</a>
@@ -328,7 +328,7 @@
   <div x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
        @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
-       class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+       class="chat-widget fixed z-50 flex flex-col items-end gap-3">
 
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-200"
@@ -337,8 +337,7 @@
          x-transition:leave="transition ease-in duration-150"
          x-transition:leave-start="opacity-100 translate-y-0 scale-100"
          x-transition:leave-end="opacity-0 translate-y-3 scale-95"
-         class="w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col overflow-hidden"
-         style="max-height: min(560px, calc(100vh - 100px));">
+         class="chat-widget-panel bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col overflow-hidden">
 
       <div class="bg-blue-600 px-4 py-3 flex items-center gap-3 shrink-0">
         <div class="w-8 h-8 shrink-0 rounded-full bg-white/20 flex items-center justify-center">

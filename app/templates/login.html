@@ -3,11 +3,12 @@
 <head>
   <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>Iniciar sesión — Knowledge Base</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
 </head>
-<body class="h-full flex items-center justify-center">
+<body class="min-h-full flex items-center justify-center px-4 py-8">
   <div class="w-full max-w-sm">
     <div class="text-center mb-8">
       <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"

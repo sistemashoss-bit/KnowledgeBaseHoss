@@ -2,7 +2,7 @@
 {% block title %}Reportería — HOSS Conocimiento{% endblock %}
 
 {% block content %}
-<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+<div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
   <div class="max-w-7xl mx-auto">
 
     <!-- Header -->
@@ -155,14 +155,14 @@
 
     <!-- ── Horas acumuladas por departamento ─────────────────────────────── -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-      <div class="px-6 py-4 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
         <h2 class="text-sm font-semibold text-gray-700">Horas acumuladas por departamento</h2>
         <p class="text-xs text-gray-400 mt-0.5">Tiempo total (creación → completado) de tareas terminadas en el período</p>
       </div>
       {% if dept_time_stats %}
       <div class="divide-y divide-gray-100">
         {% for d in dept_time_stats %}
-        <div class="flex items-center justify-between px-6 py-3">
+        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-4 sm:px-6 py-3">
           <div class="min-w-0">
             <p class="text-sm font-medium text-gray-800 truncate">{{ d.department }}</p>
             <p class="text-xs text-gray-400">{{ d.tasks }} tarea{{ 's' if d.tasks != 1 else '' }} completada{{ 's' if d.tasks != 1 else '' }} · promedio {{ d.avg_hours }} h/tarea</p>
@@ -174,7 +174,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="px-6 py-8 text-center text-sm text-gray-400 italic">Sin tareas completadas en el período.</div>
+      <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin tareas completadas en el período.</div>
       {% endif %}
     </div>
 
@@ -184,14 +184,14 @@
 
       <!-- Top users -->
       <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-100">
+        <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
           <h2 class="text-sm font-semibold text-gray-700">Usuarios más activos</h2>
           <p class="text-xs text-gray-400 mt-0.5">Basado en acciones registradas en el período</p>
         </div>
         {% if top_users %}
         <div class="divide-y divide-gray-100">
           {% for u in top_users %}
-          <div class="flex items-center justify-between px-6 py-3">
+          <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 px-4 sm:px-6 py-3">
             <div class="flex items-center gap-3 min-w-0">
               <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
                 {{ loop.index }}
@@ -208,20 +208,20 @@
           {% endfor %}
         </div>
         {% else %}
-        <div class="px-6 py-8 text-center text-sm text-gray-400 italic">Sin actividad en el período.</div>
+        <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin actividad en el período.</div>
         {% endif %}
       </div>
 
       <!-- Top searches -->
       <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-100">
+        <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
           <h2 class="text-sm font-semibold text-gray-700">Búsquedas frecuentes</h2>
           <p class="text-xs text-gray-400 mt-0.5">Consultas al buscador y al asistente IA</p>
         </div>
         {% if top_searches %}
         <div class="divide-y divide-gray-100">
           {% for s in top_searches %}
-          <div class="flex items-center justify-between px-6 py-3 gap-3">
+          <div class="flex flex-wrap sm:flex-nowrap items-center justify-between px-4 sm:px-6 py-3 gap-3">
             <div class="flex items-center gap-3 min-w-0">
               <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
                 {{ loop.index }}
@@ -242,7 +242,7 @@
           {% endfor %}
         </div>
         {% else %}
-        <div class="px-6 py-8 text-center text-sm text-gray-400 italic">Sin búsquedas en el período.</div>
+        <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin búsquedas en el período.</div>
         {% endif %}
       </div>
 
@@ -250,13 +250,13 @@
 
     <!-- ── Project status breakdown ─────────────────────────────────────── -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-      <div class="px-6 py-4 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
         <h2 class="text-sm font-semibold text-gray-700">Proyectos por estado (período)</h2>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
         {% set proj_labels = [("draft","Borrador","gray"),("active","Activo","green"),("on_hold","En pausa","yellow"),("completed","Completado","indigo")] %}
         {% for key, label, color in proj_labels %}
-        <div class="px-6 py-5 text-center">
+        <div class="px-4 sm:px-6 py-5 text-center">
           <p class="text-2xl font-bold text-{{ color }}-600">{{ project_stats.by_status[key] if key in project_stats.by_status else 0 }}</p>
           <p class="text-xs text-gray-500 mt-1">{{ label }}</p>
         </div>

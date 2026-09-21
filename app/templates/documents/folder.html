@@ -2,7 +2,7 @@
 {% block title %}{{ folder.name if folder else 'Carpetas' }}{% endblock %}
 
 {% block content %}
-<div class="flex-1 overflow-y-auto p-6">
+<div class="flex-1 overflow-y-auto p-4 sm:p-6">
   <div class="max-w-3xl mx-auto">
 
     <!-- Breadcrumb -->
@@ -131,7 +131,7 @@
       {% if folder_docs %}
       <div class="divide-y divide-gray-100">
         {% for doc in folder_docs %}
-        <div class="flex items-center justify-between py-2 gap-3">
+        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between py-2 gap-3">
           <div class="min-w-0">
             <p class="text-sm text-gray-800 truncate">{{ doc.title }}</p>
             <p class="text-xs text-gray-400">{{ 'Google Drive' if doc.is_drive else (doc.content_type or 'archivo') }}</p>

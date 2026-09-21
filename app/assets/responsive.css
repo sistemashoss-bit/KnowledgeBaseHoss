@@ -1,0 +1,49 @@
+/* Shared layout rules for the public pages and the application. */
+.app-shell { height: 100vh; height: 100dvh; overflow: hidden; }
+.app-main { min-width: 0; min-height: 0; overflow-wrap: anywhere; }
+.app-main > .flex-1 { min-height: 0; min-width: 0; }
+#app-sidebar { overflow-y: auto; overscroll-behavior: contain; }
+.mobile-menu-backdrop { display: none; }
+.chat-widget { bottom: max(1rem, env(safe-area-inset-bottom)); right: 1rem; }
+.chat-widget-panel {
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(560px, calc(100vh - 100px));
+  max-height: min(560px, calc(100dvh - 100px));
+}
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.table-scroll table { min-width: 40rem; }
+input, select, textarea { max-width: 100%; min-width: 0; }
+.grid > * { min-width: 0; }
+.responsive-modal { max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
+
+@media (max-width: 1023px) {
+  #app-sidebar {
+    display: none;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(18rem, calc(100vw - 3rem));
+    z-index: 60;
+  }
+  .menu-open #app-sidebar { display: flex; }
+  .menu-open .mobile-menu-backdrop { display: block; }
+  #app-sidebar .notification-panel { left: 0; width: 100vw; height: 100vh; height: 100dvh; }
+}
+
+@media (max-width: 639px) {
+  /* 16px prevents automatic input zoom on iOS. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  select, textarea { font-size: 16px !important; }
+  body .mobile-form-row { flex-direction: column; align-items: stretch; }
+  body .mobile-form-row > * { width: 100%; }
+  .app-main .chat-header { flex-wrap: wrap; gap: .5rem; }
+  .app-main .chat-header-title { flex: 1 0 calc(100% - 3rem); }
+  .chat-composer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+  .app-main { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+@media (pointer: coarse) {
+  button, a[role="button"], nav a, input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select {
+    min-height: 44px;
+  }
+  button { min-width: 44px; }
+}

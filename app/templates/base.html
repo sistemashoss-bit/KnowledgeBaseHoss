@@ -3,19 +3,32 @@
 <head>
   <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>{% block title %}HOSS Conocimiento{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
+  <script defer src="{{ url_for('assets', path='navigation.js').path }}?v=1"></script>
   <style>[x-cloak] { display: none !important; }</style>
 </head>
-<body class="h-full flex">
+<body class="app-shell flex flex-col lg:flex-row">
+  <header data-menu-background class="lg:hidden shrink-0 flex items-center gap-3 bg-slate-900 text-white px-4 h-14">
+    <button id="mobile-menu-toggle" type="button" aria-controls="app-sidebar" aria-expanded="false"
+            aria-label="Abrir menú de navegación" class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-800">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </button>
+    <a href="/" class="font-semibold text-sm">HOSS Conocimiento</a>
+  </header>
+  <div data-menu-close class="mobile-menu-backdrop fixed inset-0 z-[55] bg-black/50" aria-hidden="true"></div>
 
   <!-- Sidebar -->
-  <aside {% if current_user %}x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')"{% endif %}
-         class="w-64 bg-slate-900 flex flex-col shrink-0 min-h-screen">
+  <aside id="app-sidebar" aria-label="Menú de navegación" {% if current_user %}x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')"{% endif %}
+         class="app-sidebar w-64 bg-slate-900 flex flex-col shrink-0">
+    <button type="button" data-menu-close class="lg:hidden self-end px-4 py-2 text-slate-200" aria-label="Cerrar menú de navegación">Cerrar ✕</button>
     <div class="px-6 py-5 border-b border-slate-700">
       <a href="/" class="flex items-center justify-center">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
@@ -186,7 +199,7 @@
              x-transition:leave="transition ease-in duration-150"
              x-transition:leave-start="opacity-100 translate-x-0"
              x-transition:leave-end="opacity-0 -translate-x-2"
-             class="fixed top-0 left-64 h-screen w-80 bg-white shadow-2xl z-50 flex flex-col border-l border-gray-200">
+             class="notification-panel fixed top-0 left-64 h-screen w-80 bg-white shadow-2xl z-50 flex flex-col border-l border-gray-200">
 
           <!-- Cabecera -->
           <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-slate-50 shrink-0">
@@ -415,16 +428,16 @@
   </aside>
 
   <!-- Main content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
+  <main data-menu-background class="app-main flex-1 flex flex-col overflow-hidden">
     {% block content %}{% endblock %}
   </main>
 
   {% block ai_widget %}
   <!-- ── Floating AI chat widget ─────────────────────────────────────────── -->
-  <div x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
+  <div data-menu-background x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
        @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
-       class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+       class="chat-widget fixed z-50 flex flex-col items-end gap-3">
 
     <!-- Chat panel -->
     <div x-show="open" x-cloak
@@ -434,8 +447,7 @@
          x-transition:leave="transition ease-in duration-150"
          x-transition:leave-start="opacity-100 translate-y-0 scale-100"
          x-transition:leave-end="opacity-0 translate-y-3 scale-95"
-         class="w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
-         style="max-height: min(560px, calc(100vh - 100px));">
+         class="chat-widget-panel bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
 
       <!-- Header -->
       <div class="bg-blue-600 px-4 py-3 flex items-center gap-3 shrink-0">

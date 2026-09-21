@@ -2,10 +2,10 @@
 {% block title %}Búsquedas{% endblock %}
 
 {% block content %}
-<div class="flex-1 overflow-y-auto p-6">
+<div class="flex-1 overflow-y-auto p-4 sm:p-6">
   <div class="max-w-5xl mx-auto space-y-4">
 
-    <div class="flex items-center justify-between">
+    <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
       <h1 class="text-xl font-bold text-gray-900">Historial de búsquedas</h1>
       <span class="text-sm text-gray-400">{{ total }} búsquedas</span>
     </div>
@@ -23,7 +23,7 @@
       {% endif %}
     </form>
 
-    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div class="table-scroll bg-white rounded-xl border border-gray-200">
       {% if logs %}
       <table class="w-full text-sm">
         <thead>

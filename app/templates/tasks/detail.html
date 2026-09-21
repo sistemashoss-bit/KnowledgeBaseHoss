@@ -23,7 +23,7 @@
 {% endmacro %}
 
 {% block content %}
-<div class="flex-1 overflow-y-auto p-8 bg-gray-50">
+<div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
   <div class="max-w-3xl mx-auto">
 
     <!-- Breadcrumb -->
@@ -37,7 +37,7 @@
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
 
       <!-- Task header -->
-      <div class="px-6 py-5 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-5 border-b border-gray-100">
         <div class="flex items-start justify-between gap-4">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
@@ -148,8 +148,8 @@
 
       <!-- Time in status -->
       {% if status_durations.breakdown or status_durations.total_seconds is not none %}
-      <div class="px-6 py-4 border-b border-gray-100">
-        <div class="flex items-center justify-between mb-2">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-2">
           <p class="text-xs text-gray-400">Tiempo por estado</p>
           {% if status_durations.total_seconds is not none %}
           <p class="text-xs text-gray-400">Total: <span class="font-medium text-gray-700">{{ duration_label(status_durations.total_seconds) }}</span></p>
@@ -168,7 +168,7 @@
 
       <!-- Description -->
       {% if task.description %}
-      <div class="px-6 py-5 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-5 border-b border-gray-100">
         <p class="text-xs text-gray-400 mb-2">Descripción</p>
         <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ task.description }}</p>
       </div>
@@ -176,7 +176,7 @@
 
       <!-- Documento a revisar -->
       {% if task.document %}
-      <div class="px-6 py-5 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-5 border-b border-gray-100">
         <p class="text-xs text-gray-400 mb-2">Documento a revisar</p>
         <a href="/documents/{{ task.document.id }}/view" target="_blank" rel="noopener"
            class="inline-flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors max-w-full">
@@ -216,7 +216,7 @@
       {% endif %}
 
       <!-- Assignment panel -->
-      <div class="px-6 py-5 {% if task.description %}{% else %}border-t border-gray-100{% endif %}">
+      <div class="px-4 sm:px-6 py-5 {% if task.description %}{% else %}border-t border-gray-100{% endif %}">
         <div class="flex flex-wrap items-start gap-6">
 
           <div class="min-w-0">
@@ -284,7 +284,7 @@
 
         {% if can_edit %}
         <div id="panel-assign" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <form hx-post="/tasks/{{ task.id }}/assign" hx-target="body" class="grid grid-cols-2 gap-3 items-end">
+          <form hx-post="/tasks/{{ task.id }}/assign" hx-target="body" class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
             {% if is_admin %}
             <div>
               <label class="block text-xs font-medium text-gray-700 mb-1">Departamento</label>
@@ -307,7 +307,7 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="col-span-2 flex justify-end">
+            <div class="sm:col-span-2 flex justify-end">
               <button type="submit"
                       class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
                 Guardar asignación
@@ -321,7 +321,7 @@
 
     <!-- Evidences -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
         <h2 class="text-sm font-semibold text-gray-700">Evidencias</h2>
         <span class="text-xs text-gray-400">{{ task.evidences | length }} archivo(s)</span>
       </div>
@@ -329,7 +329,7 @@
       {% if task.evidences %}
       <div class="divide-y divide-gray-100">
         {% for ev in task.evidences %}
-        <div class="flex items-center justify-between px-6 py-3 gap-3">
+        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between px-4 sm:px-6 py-3 gap-3">
           <div class="flex items-center gap-3 min-w-0">
             <!-- Icon by type -->
             {% if ev.content_type.startswith('image/') %}
@@ -377,11 +377,11 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="px-6 py-6 text-center text-sm text-gray-400 italic">Sin evidencias subidas.</div>
+      <div class="px-4 sm:px-6 py-6 text-center text-sm text-gray-400 italic">Sin evidencias subidas.</div>
       {% endif %}
 
       <!-- Upload form -->
-      <div class="px-6 py-4 bg-gray-50 border-t border-gray-100"
+      <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100"
            x-data="{
              items: [],
              dragging: false,
@@ -456,7 +456,7 @@
             </template>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <button type="submit" :disabled="!items.length"
                     class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed text-white rounded-lg text-xs font-medium transition-colors shrink-0">
               Subir<span x-show="items.length" x-text="' (' + items.length + ')'"></span>
@@ -472,7 +472,7 @@
 
     <!-- Comments -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div class="px-6 py-4 border-b border-gray-100">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
         <h2 class="text-sm font-semibold text-gray-700">Comentarios</h2>
       </div>
 
@@ -482,14 +482,14 @@
           {% include "tasks/_comment.html" %}
           {% endfor %}
         {% else %}
-        <div class="px-6 py-6 text-center text-sm text-gray-400 italic" id="no-comments">
+        <div class="px-4 sm:px-6 py-6 text-center text-sm text-gray-400 italic" id="no-comments">
           Sin comentarios aún.
         </div>
         {% endif %}
       </div>
 
       <!-- Add comment -->
-      <div class="px-6 py-4 bg-gray-50 border-t border-gray-100">
+      <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100">
         <form hx-post="/tasks/{{ task.id }}/comments"
               hx-target="#comments-list"
               hx-swap="beforeend"

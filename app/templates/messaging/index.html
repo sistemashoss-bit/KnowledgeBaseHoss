@@ -3,10 +3,10 @@
 {% block ai_widget %}{% endblock %}
 
 {% block content %}
-<div class="flex-1 flex overflow-hidden">
+<div class="flex-1 min-h-0 min-w-0 flex overflow-hidden">
 
   <!-- ── Conversation list ──────────────────────────────────────────── -->
-  <aside class="w-72 shrink-0 bg-white border-r border-gray-200 flex flex-col">
+  <aside aria-label="Conversaciones" class="w-full md:w-64 xl:w-72 shrink-0 bg-white border-r border-gray-200 {% if active_conv %}hidden md:flex{% else %}flex{% endif %} flex-col min-h-0">
 
     <!-- Header + actions -->
     <div class="px-4 py-4 border-b border-gray-100">
@@ -125,12 +125,13 @@
   </aside>
 
   <!-- ── Message area ───────────────────────────────────────────────── -->
-  <div class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+  <div class="flex-1 min-w-0 min-h-0 {% if active_conv %}flex{% else %}hidden md:flex{% endif %} flex-col overflow-hidden bg-gray-50">
 
     {% if active_conv %}
+    <a href="/messaging/" class="md:hidden shrink-0 flex items-center gap-2 px-4 py-3 bg-white text-blue-700 text-sm font-medium border-b border-gray-100">← Conversaciones</a>
     <!-- Chat header -->
     <div x-data="{ showMembers: false }" class="bg-white border-b border-gray-200 shrink-0">
-      <div class="px-6 py-3.5 flex items-center gap-3">
+      <div class="chat-header px-4 sm:px-6 py-3.5 flex items-center gap-3">
         {% if active_conv.type == 'group' %}
           {% if active_conv.avatar_key %}
         <img src="{{ group_avatar_url(active_conv.avatar_key) }}" alt=""
@@ -159,7 +160,7 @@
         </div>
           {% endif %}
         {% endif %}
-        <div class="flex-1 min-w-0">
+        <div class="chat-header-title flex-1 min-w-0">
           <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>
           <p class="text-xs text-gray-400 flex items-center gap-1.5">
             {% if active_conv.type == 'group' %}
@@ -243,7 +244,7 @@
       </div>
 
       {% if active_conv.type == 'group' %}
-      <div x-show="showMembers" x-cloak class="border-t border-gray-100 bg-gray-50 px-6 py-4 space-y-3">
+      <div x-show="showMembers" x-cloak class="border-t border-gray-100 bg-gray-50 px-4 sm:px-6 py-4 space-y-3">
 
         <!-- Current members -->
         <div>
@@ -310,7 +311,7 @@
            hx-get="/messaging/{{ active_conv.id }}/poll"
            hx-trigger="sse:message, refreshFeed from:body, every 30s"
            hx-swap="innerHTML scroll:bottom"
-           class="absolute inset-0 overflow-y-auto px-6 py-4">
+           class="absolute inset-0 overflow-y-auto px-4 sm:px-6 py-4">
         {% include "messaging/_feed.html" %}
       </div>
       <script>
@@ -345,7 +346,7 @@
     </div>
 
     <!-- Input bar -->
-    <div class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+    <div class="chat-composer bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
             hx-target="#send-form"
@@ -420,7 +421,7 @@
 
 <!-- ── Modal: Nuevo mensaje directo ─────────────────────────────────────── -->
 <div id="modal-dm" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-4 sm:p-6 responsive-modal">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-base font-semibold text-gray-900">Nuevo mensaje directo</h2>
       <button onclick="document.getElementById('modal-dm').classList.add('hidden')"
@@ -489,7 +490,7 @@
 
 <!-- ── Modal: Nuevo grupo ────────────────────────────────────────────────── -->
 <div id="modal-group" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-4 sm:p-6 responsive-modal overflow-y-auto">
     <div class="flex items-center justify-between mb-5">
       <h2 class="text-base font-semibold text-gray-900">Nuevo grupo</h2>
       <button onclick="document.getElementById('modal-group').classList.add('hidden')"
@@ -510,7 +511,7 @@
 
       <!-- Scope filters (double as group metadata) -->
       {% if departments or zones %}
-      <div class="grid grid-cols-{% if departments and zones %}2{% else %}1{% endif %} gap-3">
+      <div class="grid grid-cols-1 {% if departments and zones %}sm:grid-cols-2{% endif %} gap-3">
         {% if zones %}
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Zona</label>
@@ -593,7 +594,7 @@
 <!-- ── Modal: Editar grupo ──────────────────────────────────────────────── -->
 {% if active_conv and active_conv.type == 'group' %}
 <div id="modal-edit-group" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-4 sm:p-6 responsive-modal">
     <div class="flex items-center justify-between mb-5">
       <h2 class="text-base font-semibold text-gray-900">Editar grupo</h2>
       <button onclick="document.getElementById('modal-edit-group').classList.add('hidden')"
@@ -655,7 +656,7 @@
 <!-- Shared files panel -->
 <div id="modal-files" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] flex flex-col">
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+    <div class="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-100 shrink-0">
       <h2 class="text-lg font-semibold text-gray-900">Archivos compartidos</h2>
       <button onclick="document.getElementById('modal-files').classList.add('hidden')"
               class="text-gray-400 hover:text-gray-600">
@@ -664,7 +665,7 @@
         </svg>
       </button>
     </div>
-    <div id="files-body" class="px-6 py-4 overflow-y-auto flex-1"></div>
+    <div id="files-body" class="px-4 sm:px-6 py-4 overflow-y-auto flex-1"></div>
   </div>
 </div>
 
@@ -779,7 +780,7 @@ function convFilter() {
 <!-- ── LiveKit: Call Modal ────────────────────────────────────────────────── -->
 <div id="lk-modal" class="hidden fixed inset-0 z-[60] flex flex-col bg-gray-900">
   <!-- Header -->
-  <div class="flex items-center justify-between px-6 py-4 bg-gray-800 border-b border-gray-700 shrink-0">
+  <div class="flex items-center justify-between px-4 sm:px-6 py-4 bg-gray-800 border-b border-gray-700 shrink-0">
     <div>
       <p id="lk-title" class="text-white font-semibold text-sm"></p>
       <p id="lk-status" class="text-gray-400 text-xs mt-0.5"></p>

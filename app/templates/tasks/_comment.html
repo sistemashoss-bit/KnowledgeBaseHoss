@@ -1,6 +1,6 @@
 {% set is_author = current_user and comment.user_id == current_user.id %}
 {% set can_manage = is_author or can_edit|default(false) %}
-<div id="comment-{{ comment.id }}" class="flex gap-3 px-6 py-4" x-data="{ editing: false }">
+<div id="comment-{{ comment.id }}" class="flex gap-3 px-4 sm:px-6 py-4" x-data="{ editing: false }">
   <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
     {{ comment.user.email[0].upper() if comment.user else "?" }}
   </div>
