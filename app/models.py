@@ -545,6 +545,8 @@ class Conversation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     type = Column(String(10), nullable=False, default=CONV_DIRECT)
     name = Column(String(150), nullable=True)
+    # Foto de grupo (bucket de chats, sube/gestiona knowledge). Null = sin foto (icono genérico).
+    avatar_key = Column(String(500), nullable=True)
 
     # Scope for group conversations
     zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)

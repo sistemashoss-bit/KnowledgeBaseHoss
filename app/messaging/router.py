@@ -800,6 +800,63 @@ def create_group(
     return RedirectResponse(f"/messaging/{conv.id}", status_code=302)
 
 
+@router.post("/{conv_id}/edit")
+async def edit_group(
+    conv_id: str,
+    request: Request,
+    name: str = Form(...),
+    photo: UploadFile | None = File(None),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if not verify_csrf_token(csrf_token, str(current_user.id)):
+        raise HTTPException(403, "Invalid CSRF token")
+
+    conv = db.query(Conversation).filter(
+        Conversation.id == conv_id,
+        Conversation.type == CONV_GROUP,
+    ).first()
+    if not conv:
+        raise HTTPException(404)
+
+    is_creator = str(conv.created_by) == str(current_user.id)
+    is_superadmin = current_user.role == ROLE_SUPERADMIN
+    if not (is_creator or is_superadmin):
+        raise HTTPException(403)
+
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "El nombre no puede estar vacío")
+    conv.name = name
+
+    if photo is not None and photo.filename:
+        if not (photo.content_type or "").startswith("image/"):
+            raise HTTPException(400, "La foto debe ser una imagen")
+        content = await photo.read()
+        if len(content) > MAX_CHAT_FILE_BYTES:
+            raise HTTPException(400, "Imagen demasiado grande (máx 50 MB)")
+        old_key = conv.avatar_key
+        ext = os.path.splitext(_safe_filename(photo.filename))[1] or ".jpg"
+        new_key = f"group-avatars/{conv.id}/{uuid.uuid4()}{ext}"
+        storage.upload_chat_file(new_key, content, photo.content_type)
+        conv.avatar_key = new_key
+        if old_key:
+            try:
+                storage.delete_chat_file(old_key)
+            except Exception:
+                pass
+
+    db.commit()
+    audit.log_action(
+        "group_edit", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id, resource_name=conv.name,
+    )
+    return RedirectResponse(f"/messaging/{conv_id}", status_code=302)
+
+
 @router.post("/{conv_id}/members")
 def add_member(
     conv_id: str,

@@ -51,6 +51,17 @@ def _evidence_url(key: str, filename: str) -> str:
 
 
 templates.env.globals["evidence_url"] = _evidence_url
+
+
+def _group_avatar_url(key: str | None) -> str | None:
+    # Foto de grupo: sube/gestiona knowledge (bucket de chats), a diferencia del
+    # avatar de usuario (dueño hoss-api, bucket aparte). Ver avatar_url arriba.
+    if not key:
+        return None
+    return _storage.get_chat_file_url(key, "avatar", inline=True)
+
+
+templates.env.globals["group_avatar_url"] = _group_avatar_url
 # Markup(...) es obligatorio: sin marcarlo como seguro, el autoescape de Jinja
 # convierte las comillas del JSON en &#34;, dejando el <script> con JS inválido
 # (rompe silenciosamente cualquier `const x = {{ ... | tojson }}` — los gráficos
