@@ -31,10 +31,20 @@
       </div>
 
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Contraseña</label>
-        <input type="password" name="password" required autocomplete="current-password"
-               class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 text-sm"
-               placeholder="••••••••" />
+        <label for="password" class="block text-sm font-medium text-slate-300 mb-1">Contraseña</label>
+        <div class="relative">
+          <input id="password" type="password" name="password" required autocomplete="current-password"
+                 class="w-full pl-3 pr-12 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 text-sm"
+                 placeholder="••••••••" />
+          <button id="toggle-password" type="button" aria-controls="password" aria-label="Mostrar contraseña" aria-pressed="false"
+                  class="absolute inset-y-0 right-0 flex items-center px-3 text-slate-300 hover:text-white rounded-r-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
+            <svg aria-hidden="true" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+              <path id="password-eye-slash" d="m3 3 18 18" class="hidden" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <button type="submit"
@@ -43,5 +53,16 @@
       </button>
     </form>
   </div>
+  <script>
+    const passwordInput = document.getElementById('password');
+    const togglePassword = document.getElementById('toggle-password');
+    togglePassword.addEventListener('click', () => {
+      const visible = passwordInput.type === 'password';
+      passwordInput.type = visible ? 'text' : 'password';
+      document.getElementById('password-eye-slash').classList.toggle('hidden', !visible);
+      togglePassword.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      togglePassword.setAttribute('aria-pressed', String(visible));
+    });
+  </script>
 </body>
 </html>
