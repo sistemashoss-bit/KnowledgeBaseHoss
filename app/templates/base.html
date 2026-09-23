@@ -372,23 +372,28 @@
     <!-- User info -->
     <div class="px-4 py-4 border-t border-slate-700">
       {% if current_user %}
+      {% set sidebar_name = (current_user.name or '')|trim or 'Usuario' %}
       <div class="flex items-center gap-3 mb-3">
         {% if current_user.avatar_key %}
         <img src="{{ avatar_url(current_user.avatar_key) }}"
              alt="" class="w-8 h-8 rounded-full object-cover shrink-0" />
         {% else %}
         <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
-          {{ current_user.email[0].upper() }}
+          {{ sidebar_name[0].upper() }}
         </div>
         {% endif %}
-        <div class="overflow-hidden">
-          <p class="text-white text-xs font-medium truncate">{{ current_user.email }}</p>
+        <div class="min-w-0 flex-1 overflow-hidden">
+          <p class="text-white text-xs font-medium leading-4 line-clamp-2 [overflow-wrap:anywhere]" title="{{ sidebar_name }}">{{ sidebar_name }}</p>
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
       </div>
-      <form id="logout-form" method="post" action="/auth/logout">
-        <button class="w-full text-left text-slate-400 hover:text-white text-xs px-2 py-1 rounded hover:bg-slate-800 transition-colors">
-          Cerrar sesión
+      <form id="logout-form" method="post" action="/auth/logout" class="flex justify-center">
+        <button type="submit" aria-label="Cerrar sesión" title="Cerrar sesión"
+                class="w-11 h-11 inline-flex items-center justify-center rounded-full text-slate-300 bg-slate-800 hover:text-red-300 hover:bg-red-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v9" />
+            <path d="M6.34 5.34a8 8 0 1 0 11.32 0" />
+          </svg>
         </button>
       </form>
       <script>
