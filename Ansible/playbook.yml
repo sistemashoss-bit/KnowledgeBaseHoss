@@ -45,6 +45,45 @@
         enabled: true
         state: started       
         
+    # Antes de quitar el login por contraseña, confirmar que hoss puede entrar con llave
+    - name: Verificar que hoss tiene llaves SSH autorizadas
+      stat:
+        path: /home/hoss/.ssh/authorized_keys
+      register: hoss_authorized_keys
+
+    - name: Abortar si hoss no tiene llaves SSH (evita quedarse fuera del servidor)
+      assert:
+        that:
+          - hoss_authorized_keys.stat.exists
+          - hoss_authorized_keys.stat.size > 0
+        fail_msg: "/home/hoss/.ssh/authorized_keys no existe o esta vacio; no se endurece SSH"
+
+    - name: Asegurar directorio de privilegios de sshd (necesario para sshd -t)
+      file:
+        path: /run/sshd
+        state: directory
+        mode: '0755'
+
+    # Prefijo 00- para que gane sobre 50-cloud-init.conf (sshd usa el primer valor que lee)
+    - name: Hardening de SSH
+      copy:
+        dest: /etc/ssh/sshd_config.d/00-hardening.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitEmptyPasswords no
+          PubkeyAuthentication yes
+          MaxAuthTries 3
+          LoginGraceTime 30
+          X11Forwarding no
+          AllowUsers hoss
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Recargar SSH
+
     - name: Habilitar Docker
       service:
         name: docker
@@ -93,3 +132,9 @@
         docker-compose up -d --force-recreate
       args:
         chdir: /home/hoss/app
+
+  handlers:
+    - name: Recargar SSH
+      service:
+        name: ssh
+        state: reloaded
