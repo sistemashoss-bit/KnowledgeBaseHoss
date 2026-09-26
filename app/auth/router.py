@@ -49,7 +49,16 @@ async def login(
             status_code=429,
         )
 
-    user = await _resolve_user(email, password, db)
+    try:
+        user = await _resolve_user(email, password, db)
+    except hoss.AccessDenied:
+        # Credenciales válidas sin permiso del sitio: no suma al rate-limit.
+        has_users = db.query(User).count() > 0
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"has_users": has_users, "error": "No tienes acceso"},
+            status_code=403,
+        )
 
     if not user or not user.is_active:
         vk.record_login_failure(email)
@@ -79,13 +88,22 @@ def logout():
 
 @router.post("/sso")
 async def sso_handoff(
+    request: Request,
     token: str = Form(...),
     db: Session = Depends(get_db),
 ):
     """Recibe el accessToken de hoss-api (el que NextAuth ya guarda en la sesión
     de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
     login. El token viaja por POST para no filtrarlo en URL/referer/logs."""
-    identity = await hoss.introspect_session(token)
+    try:
+        identity = await hoss.introspect_session(token)
+    except hoss.AccessDenied:
+        has_users = db.query(User).count() > 0
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"has_users": has_users, "error": "No tienes acceso"},
+            status_code=403,
+        )
     if not identity:
         return RedirectResponse("/auth/login", status_code=302)
 
