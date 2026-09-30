@@ -42,6 +42,15 @@ resource "google_compute_firewall" "allow_ssh" {
 }
 
 
+# IP estática: sin esto la VM usa una IP efímera que cambia al detenerla o
+# redimensionarla, y hay que actualizar el DNS en cPanel. `address` reserva la
+# IP que ya tiene la VM (GCP permite promover una efímera en uso a estática).
+resource "google_compute_address" "static_ip" {
+  name    = "hosscomunicacion-ip"
+  region  = "us-central1"
+  address = "136.65.155.81"
+}
+
 resource "google_compute_instance" "vm_instance" {
   name                      = "hosscomunicacion"
   machine_type              = "e2-small"
@@ -59,6 +68,7 @@ resource "google_compute_instance" "vm_instance" {
   network_interface {
     network = "default"
     access_config {
+      nat_ip = google_compute_address.static_ip.address
     }
   }
   metadata = {
