@@ -131,16 +131,24 @@
       {% if folder_docs %}
       <div class="divide-y divide-gray-100">
         {% for doc in folder_docs %}
-        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between py-2 gap-3">
+        <div class="flex flex-wrap sm:flex-nowrap items-center justify-between py-2 gap-3"
+             x-data="{ open: false }" @keydown.escape.window="open = false">
           <div class="min-w-0">
             <p class="text-sm text-gray-800 truncate">{{ doc.title }}</p>
             <p class="text-xs text-gray-400">{{ 'Google Drive' if doc.is_drive else (doc.content_type or 'archivo') }}</p>
           </div>
           <div class="flex items-center gap-1 shrink-0">
+            {% if doc.previewable %}
+            <button type="button" @click="open = true"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+              Vista
+            </button>
+            {% else %}
             <a href="/documents/{{ doc.id }}/view" target="_blank" rel="noopener"
                class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
               Ver
             </a>
+            {% endif %}
             {% if doc.can_manage %}
             <a href="/documents/{{ doc.id }}/edit?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else '')) | urlencode }}" class="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="Editar">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -150,6 +158,29 @@
             </a>
             {% endif %}
           </div>
+
+          {% if doc.previewable %}
+          <div x-show="open" x-cloak
+               class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+               role="dialog" aria-modal="true" aria-label="Vista de {{ doc.title }}"
+               @click.self="open = false">
+            <div class="w-full max-w-3xl h-[70vh] max-h-[720px] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
+              <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 shrink-0">
+                <h3 class="text-sm font-semibold text-gray-800 truncate">{{ doc.title }}</h3>
+                <button type="button" @click="open = false" aria-label="Cerrar vista"
+                        class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              <template x-if="open">
+                <iframe src="{{ doc.preview_url }}" title="Vista de {{ doc.title }}"
+                        class="w-full flex-1 bg-gray-50" referrerpolicy="no-referrer" allow="autoplay"></iframe>
+              </template>
+            </div>
+          </div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
