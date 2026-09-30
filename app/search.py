@@ -12,7 +12,14 @@ def _embedding_dim() -> int:
 def get_client() -> OpenSearch:
     global _client
     if _client is None:
-        _client = OpenSearch(settings.opensearch_url, use_ssl=True, verify_certs=False)
+        _client = OpenSearch(
+            settings.opensearch_url,
+            use_ssl=True,
+            verify_certs=False,
+            timeout=5,
+            max_retries=1,
+            retry_on_timeout=False,
+        )
     return _client
 
 

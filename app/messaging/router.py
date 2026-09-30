@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
-from app.auth.utils import decode_token, generate_csrf_token, verify_csrf_token
+from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, storage, valkey_client as vk
 from app.messaging import realtime
@@ -22,8 +22,6 @@ from app.models import (
     ROLE_SUPERADMIN, ROLE_ADMIN, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
-
-MAX_CHAT_FILE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 _ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
 
@@ -576,7 +574,7 @@ def call_cancel(
 
 
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
-async def send_message(
+def send_message(
     conv_id: str,
     request: Request,
     content: str = Form(default=""),
@@ -598,6 +596,8 @@ async def send_message(
     if not is_participant:
         raise HTTPException(403)
 
+    storage.check_upload_sizes(*files)
+
     content = content.strip()
     valid_files = [f for f in files if f.filename]
     if not content and not valid_files:
@@ -613,9 +613,7 @@ async def send_message(
     db.flush()
 
     for f in valid_files:
-        data = await f.read()
-        if len(data) > MAX_CHAT_FILE_BYTES:
-            continue
+        data = f.file.read()
         safe = _safe_filename(f.filename)
         key = f"chats/{conv_id}/{msg.id}/{uuid.uuid4()}_{safe}"
         storage.upload_chat_file(key, data, f.content_type or "application/octet-stream")
@@ -731,14 +729,11 @@ def download_attachment(
 @router.post("/direct/{target_user_id}")
 def start_direct(
     target_user_id: str,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     target = db.query(User).filter(User.id == target_user_id, User.is_active == True).first()
     if not target:
@@ -761,7 +756,6 @@ def create_group(
     department_id: str = Form(""),
     zone_id: str = Form(""),
     branch_id: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -769,8 +763,6 @@ def create_group(
         raise HTTPException(401)
     if current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN):
         raise HTTPException(403)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     conv = Conversation(
         id=uuid.uuid4(),
@@ -801,19 +793,16 @@ def create_group(
 
 
 @router.post("/{conv_id}/edit")
-async def edit_group(
+def edit_group(
     conv_id: str,
     request: Request,
     name: str = Form(...),
     photo: UploadFile | None = File(None),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     conv = db.query(Conversation).filter(
         Conversation.id == conv_id,
@@ -827,6 +816,8 @@ async def edit_group(
     if not (is_creator or is_superadmin):
         raise HTTPException(403)
 
+    storage.check_upload_sizes(photo)
+
     name = name.strip()
     if not name:
         raise HTTPException(400, "El nombre no puede estar vacío")
@@ -835,9 +826,7 @@ async def edit_group(
     if photo is not None and photo.filename:
         if not (photo.content_type or "").startswith("image/"):
             raise HTTPException(400, "La foto debe ser una imagen")
-        content = await photo.read()
-        if len(content) > MAX_CHAT_FILE_BYTES:
-            raise HTTPException(400, "Imagen demasiado grande (máx 50 MB)")
+        content = photo.file.read()
         old_key = conv.avatar_key
         ext = os.path.splitext(_safe_filename(photo.filename))[1] or ".jpg"
         new_key = f"group-avatars/{conv.id}/{uuid.uuid4()}{ext}"
@@ -862,14 +851,11 @@ def add_member(
     conv_id: str,
     request: Request,
     user_id: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     conv = db.query(Conversation).filter(
         Conversation.id == conv_id,
@@ -910,14 +896,11 @@ def remove_member(
     conv_id: str,
     request: Request,
     user_id: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     conv = db.query(Conversation).filter(
         Conversation.id == conv_id,
@@ -957,15 +940,12 @@ def remove_member(
 def delete_conversation(
     conv_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """Delete a direct chat for both parties: messages, attachment rows and files."""
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     conv = db.query(Conversation).filter(Conversation.id == conv_id).first()
     if not conv:

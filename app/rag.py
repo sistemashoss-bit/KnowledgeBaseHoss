@@ -197,7 +197,7 @@ def index_document(
         })
 
     if actions:
-        bulk(client, actions)
+        bulk(client, actions, request_timeout=60)
 
 
 def update_document_metadata(
@@ -239,6 +239,7 @@ def update_document_metadata(
     try:
         client.update_by_query(
             index=search_module.CHUNKS_INDEX,
+            request_timeout=60,
             body={
                 "query": {"term": {"document_id": doc_id}},
                 "script": {
@@ -274,6 +275,7 @@ def delete_document_from_index(doc_id: str) -> None:
     try:
         client.delete_by_query(
             index=search_module.CHUNKS_INDEX,
+            request_timeout=30,
             body={"query": {"term": {"document_id": doc_id}}},
         )
     except Exception:

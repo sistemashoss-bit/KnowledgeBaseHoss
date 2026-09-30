@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_superadmin
-from app.auth.utils import generate_csrf_token, verify_csrf_token
+from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app import audit
 from app.auth import hoss
@@ -146,12 +146,9 @@ def _apply_org_sync(db: Session, data: dict) -> dict:
 @router.post("/zones/sync")
 async def sync_org(
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     token = vk.get_hoss_token(current_user.id)
     if not token:
@@ -177,12 +174,9 @@ async def sync_org(
 def create_zone(
     request: Request,
     name: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Zone, _slugify(name))
     zone = Zone(id=uuid.uuid4(), name=name.strip(), slug=slug)
     db.add(zone)
@@ -199,12 +193,9 @@ def edit_zone(
     zone_id: str,
     request: Request,
     name: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     zone = db.query(Zone).filter(Zone.id == zone_id).first()
     if not zone:
         raise HTTPException(404)
@@ -249,12 +240,9 @@ def create_branch(
     request: Request,
     name: str = Form(...),
     zone_id: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     slug = _unique_slug(db, Branch, _slugify(name))
     branch = Branch(id=uuid.uuid4(), name=name.strip(), slug=slug, zone_id=zone_id if zone_id else None)
     db.add(branch)
@@ -272,12 +260,9 @@ def edit_branch(
     request: Request,
     name: str = Form(...),
     zone_id: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(require_superadmin),
 ):
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(404)

@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app import push
 from app.auth.deps import get_current_user
-from app.auth.utils import verify_csrf_token
 from app.config import settings
 from app.database import get_db
 from app.models import (
@@ -312,8 +311,6 @@ def push_subscribe(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token((payload or {}).get("csrf_token", ""), str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     endpoint = (payload or {}).get("endpoint")
     keys = (payload or {}).get("keys") or {}
     p256dh, auth = keys.get("p256dh"), keys.get("auth")
@@ -341,8 +338,6 @@ def push_unsubscribe(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token((payload or {}).get("csrf_token", ""), str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     endpoint = (payload or {}).get("endpoint")
     if endpoint:
         db.query(PushSubscription).filter(

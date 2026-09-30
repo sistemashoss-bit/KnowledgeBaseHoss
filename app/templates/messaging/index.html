@@ -352,7 +352,7 @@
             hx-target="#send-form"
             hx-swap="none"
             hx-encoding="multipart/form-data"
-            hx-on::after-request="this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); document.getElementById('msg-input').focus()"
+            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); } document.getElementById('msg-input').focus()"
             class="flex flex-col gap-2">
 
         <!-- File preview bar -->

@@ -2,9 +2,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from html import escape
+
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -42,7 +46,14 @@ async def lifespan(app: FastAPI):
 
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="Knowledge Base", version="1.0.0", lifespan=lifespan)
+from app.auth.deps import require_csrf  # noqa: E402
+
+app = FastAPI(
+    title="Knowledge Base",
+    version="1.0.0",
+    lifespan=lifespan,
+    dependencies=[Depends(require_csrf)],
+)
 app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parent / "app" / "assets"), name="assets")
 app.state.limiter = limiter
 
@@ -55,6 +66,25 @@ def service_worker():
     path = Path(__file__).resolve().parent / "app" / "assets" / "sw.js"
     return FileResponse(path, media_type="application/javascript")
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def file_too_large_handler(request: Request, exc: StarletteHTTPException):
+    # 413 (archivo > 50 MB, ver storage.check_upload_sizes): mensaje legible en
+    # vez del JSON crudo. htmx recibe texto plano (base.html lo muestra en alert).
+    if exc.status_code != 413:
+        return await http_exception_handler(request, exc)
+    if request.headers.get("HX-Request"):
+        return PlainTextResponse(exc.detail, status_code=413)
+    return HTMLResponse(
+        '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>Archivo demasiado grande</title>'
+        '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 16px">'
+        '<h1 style="font-size:1.25rem">Archivo demasiado grande</h1>'
+        f'<p>{escape(exc.detail)}</p>'
+        '<p><a href="javascript:history.back()">← Volver</a></p></div>',
+        status_code=413,
+    )
 
 from app.auth.router import router as auth_router
 from app.documents.router import router as documents_router

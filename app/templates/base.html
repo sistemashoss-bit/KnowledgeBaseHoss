@@ -12,6 +12,31 @@
   <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
   <script defer src="{{ url_for('assets', path='navigation.js').path }}?v=1"></script>
   <style>[x-cloak] { display: none !important; }</style>
+  {% if current_user %}
+  <meta name="csrf-token" content="{{ csrf_for(current_user.id) }}" />
+  <script>
+    // CSRF (validado en app/auth/deps.py require_csrf): toda petición htmx y
+    // todo fetch al mismo origen que modifica lleva el header X-CSRF-Token.
+    (function () {
+      var token = document.querySelector('meta[name="csrf-token"]').content;
+      document.addEventListener('htmx:configRequest', function (e) {
+        e.detail.headers['X-CSRF-Token'] = token;
+      });
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        init = init || {};
+        var method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        var url = new URL(input instanceof Request ? input.url : input, location.href);
+        if (url.origin === location.origin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+          var headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+          headers.set('X-CSRF-Token', token);
+          init = Object.assign({}, init, { headers: headers });
+        }
+        return origFetch.call(this, input, init);
+      };
+    })();
+  </script>
+  {% endif %}
 </head>
 <body class="app-shell flex flex-col lg:flex-row">
   <header data-menu-background class="lg:hidden shrink-0 flex items-center gap-3 bg-slate-900 text-white px-4 h-14">
@@ -1084,6 +1109,45 @@
       box.addEventListener('click', function (e) { if (e.target !== img) close(); });
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && !box.classList.contains('hidden')) close();
+      });
+    })();
+  </script>
+  <script>
+    // Límite de 50 MB por archivo (mismo que app/storage.py MAX_UPLOAD_BYTES).
+    // Se valida en el navegador para no subir de balde; el servidor valida igual.
+    (function () {
+      var MAX = 50 * 1024 * 1024;
+      function oversized(root) {
+        var inputs = root.matches && root.matches('input[type=file]')
+          ? [root] : root.querySelectorAll('input[type=file]:not([disabled])');
+        var bad = [];
+        inputs.forEach(function (i) {
+          Array.prototype.forEach.call(i.files || [], function (f) {
+            if (f.size > MAX) bad.push('• ' + f.name + ' (' + (Math.ceil(f.size / 104857.6) / 10).toFixed(1) + ' MB)');
+          });
+        });
+        return bad;
+      }
+      function warn(bad) {
+        alert('Estos archivos superan el límite de 50 MB por archivo:\n\n' + bad.join('\n') +
+              '\n\nQuítalos o comprímelos antes de enviar.');
+      }
+      document.addEventListener('change', function (e) {
+        if (!e.target.matches || !e.target.matches('input[type=file]')) return;
+        var bad = oversized(e.target);
+        if (bad.length) warn(bad);
+      }, true);
+      // Fase de captura: corre antes que htmx/Alpine y bloquea el envío.
+      document.addEventListener('submit', function (e) {
+        var bad = oversized(e.target);
+        if (!bad.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        warn(bad);
+      }, true);
+      // Formularios htmx: htmx no muestra respuestas de error; el 413 del servidor sí.
+      document.addEventListener('htmx:responseError', function (e) {
+        if (e.detail.xhr.status === 413) alert(e.detail.xhr.responseText);
       });
     })();
   </script>

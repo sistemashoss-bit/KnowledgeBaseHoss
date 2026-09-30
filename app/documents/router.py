@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_auth, require_role
-from app.auth.utils import generate_csrf_token, verify_csrf_token
+from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app.models import (
     Branch, Department, Document, DocumentAllowedUser, Folder, FolderAllowedUser, User, Zone,
@@ -364,7 +364,7 @@ def upload_form(
 
 
 @router.post("/upload")
-async def upload_document(
+def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
     title: str = Form(...),
@@ -374,14 +374,12 @@ async def upload_document(
     is_work_document: bool = Form(default=False),
     folder_id: str = Form(default=""),
     allowed_user_ids: list[str] = Form(default=[]),
-    csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
     file: UploadFile = File(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
+    storage.check_upload_sizes(file)
     if status not in STATUSES:
         raise HTTPException(400, f"Status must be one of: {STATUSES}")
 
@@ -450,7 +448,7 @@ async def upload_document(
         content_type_for_index = "drive"
         text = ""  # sin archivo: indexable solo por título/descripción
     else:
-        content = await file.read()
+        content = file.file.read()
         file_key = f"{dept.slug}/{doc_id}/{file.filename}"
         storage.upload_file(file_key, content, file.content_type or "application/octet-stream")
         text = rag.extract_text(content, file.filename or "file")
@@ -550,7 +548,7 @@ def edit_form(
 
 
 @router.post("/{doc_id}/edit")
-async def edit_document(
+def edit_document(
     doc_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
@@ -560,15 +558,13 @@ async def edit_document(
     is_work_document: bool = Form(default=False),
     folder_id: str = Form(default=""),
     allowed_user_ids: list[str] = Form(default=[]),
-    csrf_token: str = Form(...),
     drive_url: str = Form(default=""),
     return_to: str = Form(default=""),
     file: UploadFile = File(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
+    storage.check_upload_sizes(file)
 
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
@@ -634,7 +630,7 @@ async def edit_document(
                 raise HTTPException(400, "El link no parece de Google Drive/Docs.")
             doc.drive_url = drive_url
     elif file and file.filename:
-        content = await file.read()
+        content = file.file.read()
         if content:
             new_file_key = f"{dept.slug if dept else 'misc'}/{doc_id}/{file.filename}"
             if doc.file_key:
@@ -706,7 +702,6 @@ def move_document_to_folder(
     doc_id: str,
     background_tasks: BackgroundTasks,
     folder_id: str = Form(default=""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -714,8 +709,6 @@ def move_document_to_folder(
     lo saca de la carpeta). Usado por el drag & drop en la pestaña "trabajo"
     de /documents/mine; misma regla que el selector de carpeta al editar:
     solo el admin dueño del documento, y solo si es de trabajo."""
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
@@ -790,12 +783,9 @@ def share_document(
     request: Request,
     background_tasks: BackgroundTasks,
     target_user_id: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(404)
@@ -828,12 +818,9 @@ def revoke_document_share(
     target_user_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(404)
@@ -901,13 +888,10 @@ def download_document(
 def delete_document(
     doc_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     return_to: str = Form(default=""),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(404, "Document not found")
@@ -974,12 +958,9 @@ def create_folder(
     request: Request,
     name: str = Form(...),
     parent_id: str = Form(default=""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     name = name.strip()
     if not name:
@@ -1016,12 +997,9 @@ def rename_folder(
     folder_id: str,
     request: Request,
     name: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     folder = db.query(Folder).filter(Folder.id == folder_id).first()
     if not folder:
@@ -1125,12 +1103,9 @@ def delete_folder(
     folder_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     folder = db.query(Folder).filter(Folder.id == folder_id).first()
     if not folder:
         raise HTTPException(404)
@@ -1246,12 +1221,9 @@ def share_folder(
     share_mode: str = Form("all"),
     document_ids: list[str] = Form([]),
     subfolder_ids: list[str] = Form([]),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     folder = db.query(Folder).filter(Folder.id == folder_id).first()
     if not folder:
         raise HTTPException(404)
@@ -1336,12 +1308,9 @@ def revoke_folder_share(
     target_user_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not verify_csrf_token(csrf_token, str(user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     folder = db.query(Folder).filter(Folder.id == folder_id).first()
     if not folder:
         raise HTTPException(404)

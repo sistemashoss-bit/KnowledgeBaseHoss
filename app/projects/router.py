@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
-from app.auth.utils import generate_csrf_token, verify_csrf_token
+from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app import audit
 from app.models import (
@@ -114,14 +114,11 @@ def create_project(
     zone_id: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     project = Project(
         id=uuid.uuid4(),

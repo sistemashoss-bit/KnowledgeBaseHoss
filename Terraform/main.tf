@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    local = {
+      source  = "hashicorp/local"
+      version = ">= 2.5.2"
+    }
+  }
+}
+
 provider "google" {
   project = "carbide-tenure-428618-v7"
   region  = "us-central1"
@@ -34,9 +43,10 @@ resource "google_compute_firewall" "allow_ssh" {
 
 
 resource "google_compute_instance" "vm_instance" {
-  name         = "hosscomunicacion"
-  machine_type = "e2-micro"
-  tags         = ["hosscomunicacion-web"]
+  name                      = "hosscomunicacion"
+  machine_type              = "e2-small"
+  tags                      = ["hosscomunicacion-web"]
+  allow_stopping_for_update = true
 
   boot_disk {
     initialize_params {

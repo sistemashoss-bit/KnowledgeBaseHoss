@@ -1,6 +1,30 @@
+import math
+
 import boto3
 from botocore.config import Config
+from fastapi import HTTPException, UploadFile
 from app.config import settings
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB por archivo
+
+
+def check_upload_sizes(*files: UploadFile | None) -> None:
+    """Rechaza (413) si algún archivo supera MAX_UPLOAD_BYTES. Llamar antes de
+    cualquier efecto (DB, Wasabi) para no dejar subidas a medias."""
+    for f in files:
+        if not f or not f.filename:
+            continue
+        size = f.size
+        if size is None:
+            f.file.seek(0, 2)
+            size = f.file.tell()
+            f.file.seek(0)
+        if size > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                413,
+                f'El archivo "{f.filename}" pesa {math.ceil(size / 104857.6) / 10:.1f} MB; '
+                f"el límite es {MAX_UPLOAD_BYTES // 1048576} MB por archivo.",
+            )
 
 
 def _client():
@@ -10,7 +34,12 @@ def _client():
         aws_access_key_id=settings.wasabi_access_key,
         aws_secret_access_key=settings.wasabi_secret_key,
         region_name=settings.wasabi_region,
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            connect_timeout=5,
+            read_timeout=30,
+            retries={"max_attempts": 2},
+        ),
     )
 
 

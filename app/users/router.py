@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import require_role
-from app.auth.utils import generate_csrf_token, verify_csrf_token
+from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
 from app.permissions import can_manage_user
@@ -170,12 +170,9 @@ def create_user_html(
     branch_id: str = Form(default=""),
     zone_ids: list[str] = Form(default=[]),
     branch_ids: list[str] = Form(default=[]),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if not verify_csrf_token(csrf_token, str(actor.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     if actor.role == ROLE_ADMIN:
         role = ROLE_EMPLOYEE
@@ -215,12 +212,9 @@ def create_user_html(
 @mgmt_router.post("/{user_id}/toggle")
 def toggle_user(
     user_id: str,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if not verify_csrf_token(csrf_token, str(actor.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     target = db.query(User).filter(User.id == user_id).first()
     if not target or not can_manage_user(actor, target):
         raise HTTPException(403, "Access denied")
@@ -239,12 +233,9 @@ def edit_user(
     branch_id: str = Form(default=""),
     zone_ids: list[str] = Form(default=[]),
     branch_ids: list[str] = Form(default=[]),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if not verify_csrf_token(csrf_token, str(actor.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     target = db.query(User).filter(User.id == user_id).first()
     if not target or not can_manage_user(actor, target):
         raise HTTPException(403, "Access denied")

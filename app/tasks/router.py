@@ -10,7 +10,7 @@ from sqlalchemy import false, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
-from app.auth.utils import decode_token, generate_csrf_token, verify_csrf_token
+from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, rag, storage
 from app.documents.router import _preview_meta
@@ -24,8 +24,6 @@ from app.models import (
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
 )
 from app.templating import templates
-
-MAX_EVIDENCE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _safe_filename(name: str) -> str:
@@ -356,7 +354,7 @@ async def tasks_stream(request: Request):
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("/")
-async def create_task(
+def create_task(
     request: Request,
     title: str = Form(...),
     description: str = Form(""),
@@ -369,15 +367,13 @@ async def create_task(
     due_date: str = Form(""),
     next_url: str = Form(""),
     tag_ids: list[str] = Form(default=[]),
-    csrf_token: str = Form(...),
     evidences: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
+    storage.check_upload_sizes(*evidences)
     _validate_target_scope(current_user, db, department_id, assigned_to, required=False)
 
     task = Task(
@@ -409,9 +405,7 @@ async def create_task(
     for f in evidences:
         if not f.filename:
             continue
-        content = await f.read()
-        if len(content) > MAX_EVIDENCE_BYTES:
-            continue
+        content = f.file.read()
         safe = _safe_filename(f.filename)
         key = f"tasks/{task.id}/{uuid.uuid4()}_{safe}"
         storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
@@ -563,18 +557,15 @@ async def task_stream(task_id: str, request: Request):
 # ── Evidences ─────────────────────────────────────────────────────────────────
 
 @router.post("/{task_id}/evidences")
-async def upload_evidences(
+def upload_evidences(
     task_id: str,
     request: Request,
     files: list[UploadFile] = File(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -582,14 +573,12 @@ async def upload_evidences(
     if not _tasks_query(current_user, db).filter(Task.id == task_id).first():
         raise HTTPException(403)
 
-    errors = []
+    storage.check_upload_sizes(*files)
+
     for f in files:
         if not f.filename:
             continue
-        content = await f.read()
-        if len(content) > MAX_EVIDENCE_BYTES:
-            errors.append(f"{f.filename}: excede 50 MB")
-            continue
+        content = f.file.read()
         safe = _safe_filename(f.filename)
         key = f"tasks/{task_id}/{uuid.uuid4()}_{safe}"
         storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
@@ -632,14 +621,11 @@ def delete_evidence(
     task_id: str,
     evidence_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     ev = db.query(TaskEvidence).filter(
         TaskEvidence.id == evidence_id,
@@ -755,15 +741,12 @@ def update_status(
 def archive_task(
     task_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     next_url: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task or not _can_update_status(current_user, task, db):
         raise HTTPException(403)
@@ -785,15 +768,12 @@ def archive_task(
 def unarchive_task(
     task_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     next_url: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task or not _can_update_status(current_user, task, db):
         raise HTTPException(403)
@@ -976,14 +956,11 @@ def edit_comment(
     comment_id: str,
     request: Request,
     content: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     comment = db.query(TaskComment).filter(
         TaskComment.id == comment_id, TaskComment.task_id == task_id
@@ -1020,14 +997,11 @@ def delete_comment(
     task_id: str,
     comment_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     comment = db.query(TaskComment).filter(
         TaskComment.id == comment_id, TaskComment.task_id == task_id
@@ -1085,7 +1059,6 @@ def create_tag(
     name: str = Form(...),
     color: str = Form("gray"),
     department_id: str = Form(...),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1093,8 +1066,6 @@ def create_tag(
         raise HTTPException(401)
     if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(403)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     if not db.query(Department).filter(Department.id == department_id).first():
         raise HTTPException(404, "Department not found")
@@ -1126,7 +1097,6 @@ def edit_tag(
     request: Request,
     name: str = Form(...),
     color: str = Form("gray"),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1134,8 +1104,6 @@ def edit_tag(
         raise HTTPException(401)
     if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(403)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
     if not tag:
@@ -1164,7 +1132,6 @@ def edit_tag(
 def delete_tag(
     tag_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1172,8 +1139,6 @@ def delete_tag(
         raise HTTPException(401)
     if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(403)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     tag = db.query(TaskTag).filter(TaskTag.id == tag_id).first()
     if not tag:
@@ -1445,7 +1410,6 @@ def create_recurring(
     days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1453,8 +1417,6 @@ def create_recurring(
         raise HTTPException(401)
     if not _is_manager(current_user):
         raise HTTPException(403)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     _validate_target_scope(current_user, db, department_id, assigned_to)
     freq, dow, dom, custom_days = _parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
@@ -1503,14 +1465,11 @@ def edit_recurring(
     days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
 
     rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
     if not rt:
@@ -1546,14 +1505,11 @@ def edit_recurring(
 def toggle_recurring(
     rt_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
     if not rt:
         raise HTTPException(404)
@@ -1573,14 +1529,11 @@ def toggle_recurring(
 def delete_recurring(
     rt_id: str,
     request: Request,
-    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if not verify_csrf_token(csrf_token, str(current_user.id)):
-        raise HTTPException(403, "Invalid CSRF token")
     rt = db.query(RecurringTask).filter(RecurringTask.id == rt_id).first()
     if not rt:
         raise HTTPException(404)

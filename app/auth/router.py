@@ -9,7 +9,6 @@ from app.auth.utils import (
     create_access_token,
     generate_csrf_token,
     set_auth_cookie,
-    verify_csrf_token,
 )
 from app.database import get_db
 from app import valkey_client as vk
