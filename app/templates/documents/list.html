@@ -3,54 +3,71 @@
 
 {% macro doc_grid(docs, csrf_token, empty_message, query) %}
 {% if docs %}
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
   {% for doc in docs %}
-  <div class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow flex flex-col{{ ' kb-doc-card cursor-grab active:cursor-grabbing' if doc.can_assign_folder }}"
+  {% set content_type = (doc.content_type or '') | lower %}
+  <article class="group bg-white rounded-xl border border-gray-200 p-3.5 hover:border-blue-200 hover:shadow-md hover:shadow-gray-200/60 transition-all duration-200 flex flex-col{{ ' kb-doc-card cursor-grab active:cursor-grabbing' if doc.can_assign_folder }}"
        {% if doc.can_assign_folder %}draggable="true" data-doc-id="{{ doc.id }}"{% endif %}>
-    <!-- Badges -->
-    <div class="flex flex-wrap items-center gap-2 mb-2">
+    <div class="flex items-start gap-2.5 mb-2.5">
+      <!-- Identificador visual del tipo de archivo -->
+      <div class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center font-bold text-[8px] tracking-wide
+        {% if doc.is_drive %}bg-emerald-100 text-emerald-700
+        {% elif 'pdf' in content_type %}bg-red-100 text-red-700
+        {% elif content_type.startswith('image/') %}bg-violet-100 text-violet-700
+        {% elif 'word' in content_type or 'document' in content_type %}bg-blue-100 text-blue-700
+        {% elif 'sheet' in content_type or 'excel' in content_type %}bg-green-100 text-green-700
+        {% else %}bg-gray-100 text-gray-600{% endif %}">
+        {% if doc.is_drive %}DRIVE
+        {% elif 'pdf' in content_type %}PDF
+        {% elif content_type.startswith('image/') %}IMG
+        {% elif 'word' in content_type or 'document' in content_type %}DOC
+        {% elif 'sheet' in content_type or 'excel' in content_type %}XLS
+        {% else %}
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8m-4-6l6 6m-6-6v6h6"/>
+        </svg>
+        {% endif %}
+      </div>
+      <div class="min-w-0 flex-1">
+        <h3 class="font-semibold text-gray-900 text-sm leading-5 line-clamp-2 group-hover:text-blue-700 transition-colors">{{ doc.title }}</h3>
+        <p class="text-[11px] text-gray-400 mt-1 truncate">
+          {% if doc.is_drive %}Google Drive{% else %}{{ doc.content_type or "Archivo" }}{% endif %}
+        </p>
+      </div>
+    </div>
+
+    {% if doc.description %}
+    <p class="text-xs leading-4 text-gray-500 line-clamp-2 min-h-[2rem] mb-2.5">{{ doc.description }}</p>
+    {% else %}
+    <p class="text-xs leading-4 text-gray-300 min-h-[2rem] mb-2.5 italic">Sin descripción</p>
+    {% endif %}
+
+    <!-- Alcance y clasificación -->
+    <div class="flex flex-wrap items-center gap-1 mb-2.5 min-h-[1.25rem]">
       {% if doc.status == "public" %}
-      <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">público</span>
+      <span class="px-2 py-0.5 rounded-full bg-green-50 border border-green-100 text-green-700 text-[11px] font-medium">Público</span>
       {% elif doc.status == "employee" %}
-      <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">empleado</span>
+      <span class="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-[11px] font-medium">Empleados</span>
       {% else %}
-      <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">personas específicas</span>
+      <span class="px-2 py-0.5 rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-[11px] font-medium">Personas específicas</span>
       {% endif %}
 
       {% if doc.department_name %}
-      <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs">{{ doc.department_name }}</span>
+      <span class="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600 text-[11px]">{{ doc.department_name }}</span>
       {% endif %}
 
       {% if doc.is_work_document %}
-      <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">trabajo</span>
-      {% endif %}
-
-      {% if doc.is_drive %}
-      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.156-2.828a4 4 0 015.656 0 4 4 0 010 5.656l-1.5 1.5"/>
-        </svg>
-        Drive
-      </span>
+      <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 text-[11px] font-medium">Trabajo</span>
       {% endif %}
     </div>
 
-    <h3 class="font-semibold text-gray-900 text-sm mb-1 line-clamp-2">{{ doc.title }}</h3>
-
-    {% if doc.description %}
-    <p class="text-xs text-gray-500 line-clamp-2 flex-1 mb-3">{{ doc.description }}</p>
-    {% else %}
-    <div class="flex-1"></div>
-    {% endif %}
-
-    <div x-data="{ open: false }" @keydown.escape.window="open = false">
-      <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mt-2 pt-2 border-t border-gray-100">
-        <span class="text-xs text-gray-400">{% if doc.is_drive %}Google Drive{% else %}{{ doc.content_type or "archivo" }}{% endif %}</span>
-        <div class="flex flex-wrap items-center gap-1">
+    <div class="mt-auto" x-data="{ open: false }" @keydown.escape.window="open = false">
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-gray-100">
+        <div class="flex flex-wrap items-center gap-1.5">
           {% if doc.previewable %}
           {# Abre una ventana de vista sin alterar el tamaño de la tarjeta. #}
           <button type="button" @click="open = true"
-                  class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
             </svg>
@@ -60,7 +77,7 @@
           {# No previsualizable (office, etc.): se conserva "Ver" para abrir en pestaña #}
           <a href="/documents/{{ doc.id }}/view"
              target="_blank" rel="noopener"
-             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+             class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
             </svg>
@@ -71,7 +88,7 @@
           {# Abrir el Drive original en otra pestaña (/view redirige al drive_url) #}
           <a href="/documents/{{ doc.id }}/view"
              target="_blank" rel="noopener"
-             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+             class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition-colors">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
             </svg>
@@ -79,7 +96,7 @@
           </a>
           {% else %}
           <a href="/documents/{{ doc.id }}/download"
-             class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-medium transition-colors">
+             class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition-colors">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
             </svg>
@@ -88,14 +105,14 @@
           {% endif %}
           {% if doc.can_manage %}
           <a href="/documents/{{ doc.id }}/share"
-             class="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="Compartir">
+             class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Compartir">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
             </svg>
           </a>
           <a href="/documents/{{ doc.id }}/edit?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else '')) | urlencode }}"
-             class="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="Editar">
+             class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Editar">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -105,7 +122,7 @@
                 onsubmit="return confirm('¿Eliminar este documento?')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <input type="hidden" name="return_to" value="{{ request.url.path ~ ('?' ~ request.url.query if request.url.query else '') }}" />
-            <button type="submit" class="p-1 text-gray-400 hover:text-red-500 transition-colors" title="Eliminar">
+            <button type="submit" class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
               </svg>
@@ -139,7 +156,7 @@
       </div>
       {% endif %}
     </div>
-  </div>
+  </article>
   {% endfor %}
 </div>
 {% else %}
