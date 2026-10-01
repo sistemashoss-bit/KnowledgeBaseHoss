@@ -3,6 +3,16 @@
 .app-main { min-width: 0; min-height: 0; overflow-wrap: anywhere; }
 .app-main > .flex-1 { min-height: 0; min-width: 0; }
 #app-sidebar { overflow-y: auto; overscroll-behavior: contain; }
+#app-sidebar nav > a[aria-current="page"] {
+  background-color: #2563eb;
+  color: #fff;
+  box-shadow: inset 3px 0 0 #93c5fd;
+}
+#app-sidebar nav > a[aria-current="page"]:hover { background-color: #1d4ed8; }
+#app-sidebar nav > a:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
 .mobile-menu-backdrop { display: none; }
 .chat-widget { bottom: max(1rem, env(safe-area-inset-bottom)); right: 1rem; }
 .chat-widget-panel {

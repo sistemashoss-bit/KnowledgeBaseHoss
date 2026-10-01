@@ -9,7 +9,7 @@
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
+  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=2" />
   <script defer src="{{ url_for('assets', path='navigation.js').path }}?v=1"></script>
   <style>[x-cloak] { display: none !important; }</style>
   {% if current_user %}
@@ -61,8 +61,14 @@
       </a>
     </div>
 
+    {% set current_path = request.url.path.rstrip('/') %}
+    {% macro nav_current(section) -%}
+      {% set matches = current_path == section or current_path.startswith(section ~ '/') %}
+      {% set more_specific = (section == '/documents' and (current_path == '/documents/mine' or current_path.startswith('/documents/mine/'))) or (section == '/tasks' and (current_path == '/tasks/tags' or current_path.startswith('/tasks/tags/'))) %}
+      {% if matches and not more_specific %}aria-current="page"{% endif %}
+    {%- endmacro %}
     <nav class="flex-1 px-4 py-4 space-y-1">
-      <a href="/documents/"
+      <a href="/documents/" {{ nav_current('/documents') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -72,7 +78,7 @@
       </a>
 
       {% if current_user %}
-      <a href="/documents/mine"
+      <a href="/documents/mine" {{ nav_current('/documents/mine') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -83,7 +89,7 @@
       {% endif %}
 
       {% if current_user and current_user.role in ("superadmin", "admin") %}
-      <a href="/users/"
+      <a href="/users/" {{ nav_current('/users') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -94,7 +100,7 @@
       {% endif %}
 
       {% if current_user and current_user.role == "superadmin" %}
-      <a href="/logs/audit"
+      <a href="/logs/audit" {{ nav_current('/logs/audit') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -102,7 +108,7 @@
         </svg>
         Auditorias
       </a>
-      <a href="/logs/searches"
+      <a href="/logs/searches" {{ nav_current('/logs/searches') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -113,7 +119,7 @@
       {% endif %}
 
       {% if current_user %}
-      <a href="/tasks/"
+      <a href="/tasks/" {{ nav_current('/tasks') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -127,7 +133,7 @@
           <span class="sr-only" x-text="assignedTaskCount + ' tareas asignadas con avisos sin leer'"></span>
         </span>
       </a>
-      <a href="/projects/"
+      <a href="/projects/" {{ nav_current('/projects') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -135,7 +141,7 @@
         </svg>
         Proyectos
       </a>
-      <a href="/messaging/"
+      <a href="/messaging/" {{ nav_current('/messaging') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -152,7 +158,7 @@
       {% endif %}
 
       {% if current_user and current_user.role in ("superadmin", "admin") %}
-      <a href="/reports/"
+      <a href="/reports/" {{ nav_current('/reports') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -163,7 +169,7 @@
       {% endif %}
 
       {% if current_user and current_user.role == "superadmin" %}
-      <a href="/departments/"
+      <a href="/departments/" {{ nav_current('/departments') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -171,7 +177,7 @@
         </svg>
         Departamentos
       </a>
-      <a href="/org/zones/"
+      <a href="/org/zones/" {{ nav_current('/org/zones') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -179,7 +185,7 @@
         </svg>
         Zonas y Sucursales
       </a>
-      <a href="/tasks/tags/"
+      <a href="/tasks/tags/" {{ nav_current('/tasks/tags') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -383,7 +389,7 @@
       </div>
       <!-- ── /Notificaciones ───────────────────────────────────────────────── -->
 
-      <a href="/auth/profile"
+      <a href="/auth/profile" {{ nav_current('/auth/profile') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
