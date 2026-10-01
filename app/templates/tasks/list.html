@@ -131,7 +131,7 @@
       {% set tabs = [('assigned', 'Asignadas a mí'), ('created', 'Yo asigné')] %}
       {% if is_admin %}{% set tabs = tabs + [('dept', 'Departamento')] %}{% endif %}
       {% for key, label in tabs %}
-      <a href="/tasks/?tab={{ key }}"
+      <a href="/tasks/?tab={{ key }}{% if search %}&amp;search={{ search|urlencode }}{% endif %}"
          class="px-4 py-2.5 text-sm font-medium -mb-px border-b-2 transition-colors {% if tab == key %}border-blue-600 text-blue-700{% else %}border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300{% endif %}">
         {{ label }}
       </a>
@@ -147,9 +147,22 @@
       {% endif %}
     </div>
 
-    {% if tab in ['assigned', 'created'] or filter_departments or filter_users %}
-    <form method="get" class="flex flex-wrap items-center gap-2 mb-5">
+    <form method="get" action="/tasks/" role="search" aria-label="Buscar tareas" class="flex flex-wrap items-center gap-2 mb-5">
       <input type="hidden" name="tab" value="{{ tab }}" />
+      <div class="w-full flex flex-col sm:flex-row gap-2 mb-2">
+        <div class="relative flex-1 min-w-0">
+          <label for="task-search" class="sr-only">Buscar tareas por título o descripción</label>
+          <svg aria-hidden="true" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input id="task-search" type="search" name="search" value="{{ search }}" placeholder="Buscar por título o descripción…"
+                 class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <button type="submit" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors">Buscar</button>
+        {% if search %}
+        <a href="/tasks/?tab={{ tab }}&amp;dept_id={{ filter_dept_id|urlencode }}&amp;user_id={{ filter_user_id|urlencode }}" class="px-3 py-2.5 text-sm text-gray-600 hover:text-blue-700">Borrar búsqueda</a>
+        {% endif %}
+      </div>
       {% if tab in ['assigned', 'created'] or filter_departments %}
       <select name="dept_id" aria-label="Filtrar por departamento" onchange="this.form.submit()"
               class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
@@ -169,14 +182,19 @@
       </select>
       {% endif %}
       {% if filter_dept_id or filter_user_id %}
-      <a href="/tasks/?tab={{ tab }}" class="px-3 py-2 text-sm text-gray-500 hover:text-gray-800">Limpiar</a>
+      <a href="/tasks/?tab={{ tab }}{% if search %}&amp;search={{ search|urlencode }}{% endif %}" class="px-3 py-2 text-sm text-gray-500 hover:text-gray-800">Limpiar filtros</a>
       {% endif %}
     </form>
-    {% endif %}
 
     {% set pnames = {'urgent':'Urgente','high':'Alta','medium':'Media','low':'Baja'} %}
 
     <div id="tasks-content">
+    {% if search %}
+    <p role="status" class="mb-4 text-sm text-gray-600 break-words">
+      {% if total %}{{ total }} resultado(s) para “{{ search }}” en esta vista.
+      {% else %}No se encontraron tareas para “{{ search }}”. Prueba otro texto o revisa los filtros seleccionados.{% endif %}
+    </p>
+    {% endif %}
     <!-- Kanban view -->
     <div id="view-kanban">
       {% if can_drag %}

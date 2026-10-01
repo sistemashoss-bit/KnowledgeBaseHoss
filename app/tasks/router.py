@@ -177,6 +177,7 @@ def list_tasks(
     tab: str = "",
     dept_id: str = "",
     user_id: str = "",
+    search: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -260,6 +261,12 @@ def list_tasks(
         q = q.filter(Task.department_id == selected_department.id)
         filter_dept_id = dept_id
 
+    search = search.strip()
+    if search:
+        q = q.filter(or_(
+            Task.title.icontains(search, autoescape=True),
+            Task.description.icontains(search, autoescape=True),
+        ))
     tasks = q.order_by(Task.created_at.desc()).all()
 
     # Group into Kanban columns keyed by status.
@@ -276,6 +283,7 @@ def list_tasks(
             "columns": columns,
             "tasks": tasks,
             "total": len(tasks),
+            "search": search,
             "tab": tab,
             "is_admin": is_admin,
             "can_drag": can_drag,
