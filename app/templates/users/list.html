@@ -30,6 +30,12 @@
         </div>
 
         {% if current_user.role == "superadmin" %}
+        {% if org_managed %}
+        <input type="hidden" name="role" value="employee" />
+        <p class="md:col-span-2 text-xs text-gray-500">
+          El rol y el departamento se toman de su puesto en hoss al iniciar sesión.
+        </p>
+        {% else %}
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
           <select name="role"
@@ -46,6 +52,7 @@
             {% for dept in departments %}<option value="{{ dept.id }}">{{ dept.name }}</option>{% endfor %}
           </select>
         </div>
+        {% endif %}
 
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Sucursal</label>
@@ -234,6 +241,12 @@
                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500" />
                   </div>
 
+                  {% if org_managed %}
+                  <p class="text-xs text-gray-500">
+                    Rol y departamento: se administran desde su puesto en hoss.
+                  </p>
+
+                  {% else %}
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Rol</label>
                     <select name="role"
@@ -254,6 +267,7 @@
                       {% endfor %}
                     </select>
                   </div>
+                  {% endif %}
 
                   <div>
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Sucursal</label>

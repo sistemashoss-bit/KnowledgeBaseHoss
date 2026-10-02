@@ -5,10 +5,10 @@ JWT_SECRET de hoss: valida credenciales llamando a un solo endpoint que
 devuelve la identidad verificada.
 
     POST /sso/verify-auth {email, password, site}
-        -> {corporate_id, id, email, first_name, last_name, role, avatar_key, avatar_url}
+        -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
 
     GET  /sso/identity?site=<site>   (Authorization: Bearer <sesion_hoss>)
-        -> {corporate_id, id, email, first_name, last_name, role, avatar_key, avatar_url}
+        -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
 
     Ambas responden 403 si el usuario no tiene el permiso del sitio en hoss
     (knowledge_access); se levanta AccessDenied.

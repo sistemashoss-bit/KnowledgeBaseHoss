@@ -12,10 +12,21 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import require_role
 from app.auth.utils import generate_csrf_token
+from app.config import settings
 from app.database import get_db
 from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
 from app.permissions import can_manage_user
 from app.templating import templates
+
+
+def org_managed_by_hoss() -> bool:
+    """Con SSO activo, rol y departamento los dicta hoss-api (puesto del usuario) y
+    se sincronizan en cada login (auth/provisioning): editarlos aquí se perdería.
+    Sin SSO, knowledge los administra localmente."""
+    return bool(settings.hoss_api_url)
+
+
+ORG_MANAGED_DETAIL = "El rol y el departamento se administran desde hoss (puesto del usuario)"
 
 # ── JSON API (Swagger) ────────────────────────────────────────────────────────
 
@@ -59,6 +70,8 @@ def create_user_api(
 ):
     if data.role not in ROLES:
         raise HTTPException(400, f"role must be one of {ROLES}")
+    if org_managed_by_hoss() and (data.role != ROLE_EMPLOYEE or data.department_id):
+        raise HTTPException(409, ORG_MANAGED_DETAIL)
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, "Email already registered")
     u = User(
@@ -91,6 +104,8 @@ def update_user_api(
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(404)
+    if org_managed_by_hoss() and (data.role is not None or data.department_id is not None):
+        raise HTTPException(409, ORG_MANAGED_DETAIL)
     if data.email is not None:
         u.email = data.email
     if data.role is not None:
@@ -157,6 +172,7 @@ def user_management(
             "current_user": actor,
             "csrf_token": csrf,
             "roles": ROLES,
+            "org_managed": org_managed_by_hoss(),
         },
     )
 
@@ -182,11 +198,18 @@ def create_user_html(
     elif role not in ROLES:
         raise HTTPException(400, "Invalid role")
 
+    if org_managed_by_hoss():
+        # Llegan de hoss al primer login. El depto del admin se conserva solo para
+        # que lo vea en su lista mientras tanto (hoss lo reemplaza si el puesto tiene).
+        role = ROLE_EMPLOYEE
+        if actor.role != ROLE_ADMIN:
+            department_id = ""
+
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(400, "Email already registered")
 
     # Pre-aprovisionamiento: se crea sin credencial. Al entrar por hoss (SSO) se
-    # enlaza por email y conserva este rol/depto. corporate_id queda null hasta entonces.
+    # enlaza por email y toma rol/depto de hoss. corporate_id queda null hasta entonces.
     new_user = User(
         id=uuid.uuid4(),
         email=email,
@@ -248,9 +271,10 @@ def edit_user(
             if db.query(User).filter(User.email == email.strip(), User.id != target.id).first():
                 raise HTTPException(400, "Email already in use")
             target.email = email.strip()
-        if role and role in ROLES:
-            target.role = role
-        target.department_id = department_id or None
+        if not org_managed_by_hoss():
+            if role and role in ROLES:
+                target.role = role
+            target.department_id = department_id or None
         target.branch_id = branch_id or None
 
         # Replace zone assignments

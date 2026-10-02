@@ -136,6 +136,9 @@ class Department(Base):
     __tablename__ = "departments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Identidad global del departamento en hoss-api (mismo nombre que allá). hoss es
+    # el dueño; se llena al sincronizar. Null si el departamento es solo local.
+    global_department_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
