@@ -13,16 +13,9 @@ from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, Department, U
 _SITE_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE}
 
 
-def _department_from_identity(identity: dict, db: Session):
-    """Departamento local para el `department` de hoss: por global_department_id,
-    o enlaza por nombre uno local aún sin id global, o lo crea. None si hoss no
-    manda departamento (puesto sin departamento todavía)."""
-    hoss_dept = identity.get("department") or {}
-    gid = hoss_dept.get("global_department_id")
-    name = (hoss_dept.get("name") or "").strip()
-    if not gid or not name:
-        return None
-
+def upsert_department(db: Session, gid, name: str) -> Department:
+    """Departamento local para uno de hoss: por global_department_id, o enlaza por
+    nombre uno local aún sin id global, o lo crea. hoss es el dueño del nombre."""
     dept = db.query(Department).filter(Department.global_department_id == gid).first()
     if not dept:
         dept = (
@@ -32,27 +25,48 @@ def _department_from_identity(identity: dict, db: Session):
         )
         if dept:
             dept.global_department_id = gid
-    if not dept:
-        from app.zones.router import _slugify, _unique_slug
+    if dept:
+        dept.name = name
+        return dept
 
-        dept = Department(
-            id=uuid.uuid4(), global_department_id=gid, name=name,
-            slug=_unique_slug(db, Department, _slugify(name)),
-        )
-        db.add(dept)
-        db.flush()
+    from app.zones.router import _slugify, _unique_slug
+
+    dept = Department(
+        id=uuid.uuid4(), global_department_id=gid, name=name,
+        slug=_unique_slug(db, Department, _slugify(name)),
+    )
+    db.add(dept)
+    db.flush()
     return dept
 
 
+def _department_from_identity(identity: dict, db: Session):
+    """Departamento local del puesto que manda hoss. None si hoss no manda
+    departamento (puesto sin departamento todavía)."""
+    hoss_dept = identity.get("department") or {}
+    gid = hoss_dept.get("global_department_id")
+    name = (hoss_dept.get("name") or "").strip()
+    if not gid or not name:
+        return None
+    return upsert_department(db, gid, name)
+
+
 def _sync_org(user: User, identity: dict, db: Session) -> bool:
-    """hoss-api es dueño del rol (derivado del puesto: site_role) y del
-    departamento (el del puesto). Devuelve True si cambió algo.
+    """hoss-api es dueño del puesto, del rol (derivado del puesto: site_role) y
+    del departamento (el del puesto). Devuelve True si cambió algo.
 
     - site_role ausente (hoss sin esa versión) o desconocido: no se toca el rol.
     - Puesto sin departamento en hoss: se conserva el departamento local, para no
       dejar sin acceso a nadie mientras se clasifican los puestos.
     """
     changed = False
+    # position ausente (hoss sin esa versión): no se toca; null: puesto sin asignar.
+    if "position" in identity:
+        position_name = (identity["position"] or {}).get("name")
+        if user.position_name != position_name:
+            user.position_name = position_name
+            changed = True
+
     site_role = identity.get("site_role")
     if site_role in _SITE_ROLES and user.role != site_role:
         user.role = site_role

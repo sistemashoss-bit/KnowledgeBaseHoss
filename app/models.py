@@ -168,6 +168,9 @@ class User(Base):
     role = Column(String(20), nullable=False, default=ROLE_EMPLOYEE)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    # Puesto en hoss-api (su rol allá), refrescado en cada login (SSO). Solo se
+    # muestra: los permisos aquí salen de `role` (site_role que manda hoss).
+    position_name = Column(String(100), nullable=True)
     # Llave del avatar en Wasabi (bucket hossavatars), provista por hoss-api en el
     # payload de identidad (SSO). knowledge comparte el mismo Wasabi, así que firma
     # la URL localmente al renderizar (ver templating._avatar_url).

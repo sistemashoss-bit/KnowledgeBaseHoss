@@ -4,13 +4,35 @@
 {% block content %}
 <div class="flex-1 overflow-y-auto p-4 sm:p-6" x-data="{ editFor: null }">
   <div class="max-w-3xl mx-auto">
-    <h1 class="text-xl font-bold text-gray-900 mb-6">Departamentos</h1>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <h1 class="text-xl font-bold text-gray-900">Departamentos</h1>
+      <!-- hoss es el dueño del catálogo: los departamentos se sincronizan (o llegan con
+           el puesto de cada usuario al iniciar sesión), no se crean aquí. -->
+      <form method="post" action="/departments/sync"
+            onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Sincronizando…';">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit"
+                class="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-60">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Sincronizar con hoss
+        </button>
+      </form>
+    </div>
 
-    <!-- hoss es el dueño del catálogo: los departamentos llegan con el puesto de
-         cada usuario al iniciar sesión (auth/provisioning), no se crean aquí. -->
+    {% if sync_msg %}
+    <div class="mb-6 px-4 py-3 rounded-lg border text-sm
+                {% if sync_msg[0] == 'ok' %}bg-green-50 border-green-200 text-green-700
+                {% else %}bg-red-50 border-red-200 text-red-700{% endif %}">
+      {{ sync_msg[1] }}
+    </div>
+    {% endif %}
+
     <p class="text-sm text-gray-500 mb-6">
-      Los departamentos se administran en hoss y se agregan aquí cuando un usuario con
-      ese puesto inicia sesión.
+      Los departamentos se administran en hoss. También se agregan aquí cuando un
+      usuario con ese puesto inicia sesión.
     </p>
 
     <!-- Department list -->
@@ -99,7 +121,7 @@
       </table>
       {% else %}
       <div class="text-center py-12 text-gray-400 text-sm">
-        No hay departamentos todavía.
+        No hay departamentos todavía. Usa «Sincronizar con hoss» para traerlos.
       </div>
       {% endif %}
     </div>

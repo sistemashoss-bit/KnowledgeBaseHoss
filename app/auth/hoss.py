@@ -120,3 +120,23 @@ async def fetch_org(session_token: str) -> dict | None:
             return {"regions": regions, "branches": branches}
     except httpx.HTTPError:
         return None
+
+
+async def fetch_departments(session_token: str) -> list | None:
+    """Trae los departamentos de hoss con el token del staff (requiere
+    view_departments en hoss). Cada uno trae su global_department_id, con el que
+    knowledge lo mapea. None si algo falla (token expirado/sin permiso, hoss caído)."""
+    base = settings.hoss_api_url.rstrip("/")
+    if not base or not session_token:
+        return None
+
+    headers = {"Authorization": f"Bearer {session_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(f"{base}/departments", headers=headers)
+            if resp.status_code != 200:
+                return None
+            departments = resp.json()
+            return departments if isinstance(departments, list) else None
+    except httpx.HTTPError:
+        return None

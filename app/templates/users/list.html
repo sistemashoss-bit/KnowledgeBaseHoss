@@ -170,6 +170,9 @@
             <!-- Organisation -->
             <td class="px-4 py-3">
               <div class="flex flex-col gap-1">
+                {% if u.position_name %}
+                <span class="text-xs font-medium text-gray-900">{{ u.position_name }}</span>
+                {% endif %}
                 {% if u.department %}
                 <span class="text-xs text-gray-700">{{ u.department.name }}</span>
                 {% endif %}
@@ -182,7 +185,7 @@
                 {% for ub in u.user_branches %}
                 <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-xs">{{ ub.branch.name }}</span>
                 {% endfor %}
-                {% if not u.department and not u.branch and not u.user_zones and not u.user_branches %}
+                {% if not u.position_name and not u.department and not u.branch and not u.user_zones and not u.user_branches %}
                 <span class="text-xs text-gray-300">—</span>
                 {% endif %}
               </div>
