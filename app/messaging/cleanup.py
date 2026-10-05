@@ -81,13 +81,13 @@ def purge_old_logs(days: int) -> tuple[int, int]:
 
 
 def archive_done_tasks(days: int) -> int:
-    """Archive tasks sitting in DONE for `days` without changes. Returns count archived."""
+    """Archive tasks that have been DONE for `days` (by completed_at). Returns count archived."""
     db = SessionLocal()
     try:
         cutoff = datetime.utcnow() - timedelta(days=days)
         archived = (
             db.query(Task)
-            .filter(Task.status == TASK_DONE, Task.archived_at.is_(None), Task.updated_at < cutoff)
+            .filter(Task.status == TASK_DONE, Task.archived_at.is_(None), Task.completed_at < cutoff)
             .update({Task.archived_at: datetime.utcnow()}, synchronize_session=False)
         )
         db.commit()

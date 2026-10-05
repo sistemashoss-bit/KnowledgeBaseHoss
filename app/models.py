@@ -378,6 +378,9 @@ class Task(Base):
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Cuándo pasó a "Listo"; NULL mientras no esté en ese estado. El job diario
+    # de archivado cuenta los días desde aquí.
+    completed_at = Column(DateTime, nullable=True)
     # Set cuando la tarea se saca del tablero (manual o por el job diario de
     # archivado); NULL = visible en el Kanban.
     archived_at = Column(DateTime, nullable=True)

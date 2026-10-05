@@ -399,6 +399,8 @@ def create_task(
     )
     db.add(task)
     db.flush()
+    if task.status == TASK_DONE:
+        task.completed_at = task.created_at
     db.add(TaskStatusHistory(
         id=uuid.uuid4(),
         task_id=task.id,
@@ -711,6 +713,7 @@ def update_status(
         raise HTTPException(403, "Solo quien asignó la tarea o un superadmin puede aprobarla")
     task.status = status
     if status != prev:
+        task.completed_at = datetime.utcnow() if status == TASK_DONE else None
         db.add(TaskStatusHistory(
             id=uuid.uuid4(),
             task_id=task.id,

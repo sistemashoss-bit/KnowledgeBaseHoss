@@ -121,6 +121,11 @@
             {% else %}Listo{% endif %}
           </p>
           {% endif %}
+          {% if task.status == "done" and task.completed_at %}
+          <p class="text-xs text-gray-400 mt-0.5">
+            Finalizada <time datetime="{{ task.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ task.completed_at.strftime('%d/%m/%Y %H:%M') }}</time>
+          </p>
+          {% endif %}
         </div>
 
         <div class="px-5 py-4">
