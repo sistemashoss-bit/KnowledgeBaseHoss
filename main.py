@@ -6,7 +6,7 @@ from html import escape
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -56,6 +56,39 @@ app = FastAPI(
 )
 app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parent / "app" / "assets"), name="assets")
 app.state.limiter = limiter
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    # Postgres es indispensable (503 si falla). Valkey es opcional: la app
+    # funciona sin él, así que solo se reporta su estado.
+    from sqlalchemy import text
+    from app.config import settings
+    from app.database import engine
+    from app import valkey_client as vk
+
+    checks = {}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "down"
+
+    if not settings.valkey_url:
+        checks["valkey"] = "disabled"
+    else:
+        try:
+            r = vk._get()
+            checks["valkey"] = "ok" if r is not None and r.ping() else "down"
+        except Exception:
+            checks["valkey"] = "down"
+
+    ok = checks["database"] == "ok"
+    return JSONResponse(
+        {"status": "ok" if ok else "error", "checks": checks},
+        status_code=200 if ok else 503,
+    )
 
 
 @app.get("/sw.js", include_in_schema=False)
