@@ -14,7 +14,7 @@ from app.auth.deps import require_role
 from app.auth.utils import generate_csrf_token
 from app.config import settings
 from app.database import get_db
-from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
+from app.models import ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
 from app.permissions import can_manage_user
 from app.templating import templates
 
@@ -153,7 +153,7 @@ def user_management(
         users = (
             db.query(User)
             .options(*opts)
-            .filter(User.department_id == actor.department_id, User.role == ROLE_EMPLOYEE)
+            .filter(User.department_id == actor.department_id, User.role.in_((ROLE_EMPLOYEE, ROLE_AUDITOR)))
             .order_by(User.email)
             .all()
         )

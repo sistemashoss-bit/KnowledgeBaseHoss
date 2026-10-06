@@ -8,9 +8,9 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_SUPERADMIN, Department, User
+from app.models import ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, Department, User
 
-_SITE_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE}
+_SITE_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE}
 
 
 def upsert_department(db: Session, gid, name: str) -> Department:

@@ -166,16 +166,16 @@ def can_enter_folder(user: "User | None", folder: "Folder") -> bool:
 
 def can_manage_user(actor: "User", target: "User") -> bool:
     """Who can disable/reset-password another user."""
-    from app.models import ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE
+    from app.models import ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_AUDITOR
 
     if str(actor.id) == str(target.id):
         return False  # nobody manages themselves here
     if actor.role == ROLE_SUPERADMIN:
         return True  # superadmin manages everyone
     if actor.role == ROLE_ADMIN:
-        # admin manages only employees in their own department
+        # admin manages only employees (auditores incluidos) in their own department
         return (
-            target.role == ROLE_EMPLOYEE
+            target.role in (ROLE_EMPLOYEE, ROLE_AUDITOR)
             and str(target.department_id) == str(actor.department_id)
         )
     return False
@@ -185,7 +185,7 @@ def visible_tasks_query(user: "User", db):
     """SQLAlchemy query for tasks visible to this user, with eager loads."""
     from sqlalchemy import or_
     from sqlalchemy.orm import joinedload
-    from app.models import Task, ROLE_SUPERADMIN
+    from app.models import Task, ROLE_SUPERADMIN, ROLE_AUDITOR
 
     q = db.query(Task).options(
         joinedload(Task.assignee),
@@ -193,7 +193,7 @@ def visible_tasks_query(user: "User", db):
         joinedload(Task.department),
         joinedload(Task.project),
     )
-    if user.role == ROLE_SUPERADMIN:
+    if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         return q
     conditions = [
         Task.created_by == user.id,

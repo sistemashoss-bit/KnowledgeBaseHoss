@@ -9,7 +9,10 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 ROLE_SUPERADMIN = "superadmin"
 ROLE_ADMIN = "admin"
 ROLE_EMPLOYEE = "employee"
-ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE]
+# Auditor: un empleado más de su departamento (lo gestiona su admin), pero con
+# lectura de tareas y reportes de todos los departamentos.
+ROLE_AUDITOR = "auditor"
+ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE]
 
 # ── Document status constants ─────────────────────────────────────────────────
 # 'department' y 'admin' se retiraron: el propio department_id ya acota la

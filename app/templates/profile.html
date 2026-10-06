@@ -16,7 +16,7 @@
 
 {% block content %}
 {% set profile_name = (current_user.name or '')|trim %}
-{% set role_label = {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'employee': 'Empleado'}.get(current_user.role, current_user.role) %}
+{% set role_label = {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(current_user.role, current_user.role) %}
 {% set branch = current_user.branch %}
 <div class="flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-8">
   <div class="max-w-3xl mx-auto space-y-6 pb-20">

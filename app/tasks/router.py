@@ -19,7 +19,7 @@ from app.permissions import build_access_filter, can_access_document
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
     TaskStatusHistory, TaskTag, TaskTagAssignment, User,
-    ROLE_SUPERADMIN, ROLE_ADMIN,
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
 )
@@ -35,7 +35,10 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 # ── Visibility helpers ────────────────────────────────────────────────────────
 
-def _tasks_query(user: User, db: Session, include_archived: bool = True):
+def _tasks_query(user: User, db: Session, include_archived: bool = True, *, audit: bool = False):
+    """Tareas visibles para el usuario. `audit=True` solo en vistas de lectura:
+    ahí el auditor ve las de todos los departamentos; para participar
+    (comentar, subir evidencias) conserva el alcance normal de empleado."""
     q = db.query(Task).options(
         joinedload(Task.assignee),
         joinedload(Task.created_by_user),
@@ -43,7 +46,7 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True):
         joinedload(Task.project),
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     )
-    if user.role != ROLE_SUPERADMIN:
+    if user.role != ROLE_SUPERADMIN and not (audit and user.role == ROLE_AUDITOR):
         conditions = [
             Task.created_by == user.id,
             Task.assigned_to == user.id,
@@ -185,9 +188,11 @@ def list_tasks(
         return RedirectResponse("/auth/login", status_code=302)
 
     is_admin = current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+    is_auditor = current_user.role == ROLE_AUDITOR
 
-    # Available tabs — "dept" only for admins/superadmins.
-    valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else [])
+    # Available tabs — "dept" only for admins/superadmins; "all" (solo lectura,
+    # todos los departamentos) para auditores.
+    valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else []) + (["all"] if is_auditor else [])
     if tab not in valid_tabs:
         tab = "assigned"
 
@@ -220,6 +225,9 @@ def list_tasks(
         can_drag = True  # the assignee may move their own tasks between statuses
     elif tab == "created":
         q = base.filter(Task.created_by == current_user.id)
+        can_drag = False
+    elif tab == "all":  # auditor: todas las tareas, solo lectura
+        q = base
         can_drag = False
     else:  # dept
         # Mismo organigrama que las plantillas recurrentes:
@@ -254,7 +262,7 @@ def list_tasks(
                 filter_user_id = user_id
         can_drag = False
 
-    if tab in ("assigned", "created"):
+    if tab in ("assigned", "created", "all"):
         filter_departments = departments
     selected_department = next((d for d in filter_departments if str(d.id) == dept_id), None)
     if selected_department is not None:
@@ -286,6 +294,7 @@ def list_tasks(
             "search": search,
             "tab": tab,
             "is_admin": is_admin,
+            "is_auditor": is_auditor,
             "can_drag": can_drag,
             "departments": departments,
             "users": users,
@@ -316,7 +325,7 @@ def list_archived_tasks(
         return RedirectResponse("/auth/login", status_code=302)
 
     tasks = (
-        _tasks_query(current_user, db)
+        _tasks_query(current_user, db, audit=True)
         .filter(Task.archived_at.isnot(None))
         .order_by(Task.archived_at.desc())
         .all()
@@ -485,9 +494,14 @@ def task_detail(
         return RedirectResponse("/tasks/", status_code=302)
 
     # Verify visibility
-    visible = _tasks_query(current_user, db).filter(Task.id == task_id).first()
+    visible = _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first()
     if not visible:
         raise HTTPException(403)
+    # El auditor puede ver tareas ajenas a su alcance, pero no participar en ellas.
+    can_participate = (
+        current_user.role != ROLE_AUDITOR
+        or _tasks_query(current_user, db).filter(Task.id == task_id).first() is not None
+    )
 
     users = _assignable_users_query(current_user, db).all()
     departments = db.query(Department).order_by(Department.name).all()
@@ -522,6 +536,7 @@ def task_detail(
             "can_update_status": _can_update_status(current_user, task, db),
             "is_admin": current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN),
             "can_approve": _can_approve_task(current_user, task),
+            "can_participate": can_participate,
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
@@ -551,7 +566,7 @@ async def task_stream(task_id: str, request: Request):
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
-        visible = user and _tasks_query(user, db).filter(Task.id == task_id).first()
+        visible = user and _tasks_query(user, db, audit=True).filter(Task.id == task_id).first()
     finally:
         db.close()
     if not visible:
@@ -674,7 +689,7 @@ def download_evidence(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not _tasks_query(current_user, db).filter(Task.id == task_id).first():
+    if not _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first():
         raise HTTPException(403)
 
     ev = db.query(TaskEvidence).filter(

@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import (
     AuditLog, Branch, Department, Project, SearchLog,
     Task, User, UserBranch, UserZone, Zone,
-    ROLE_SUPERADMIN, ROLE_ADMIN,
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, PROJECT_STATUSES,
 )
 from app.templating import templates
@@ -37,9 +37,9 @@ def _dept_ids_for_branches(branch_ids: list, db: Session) -> list:
 def _resolve_scope(current_user, zone_id: str, department_id: str, db: Session):
     """
     Returns (allowed_dept_ids, forced_zone_id, forced_dept_id).
-    allowed_dept_ids=None means no restriction (superadmin, all).
+    allowed_dept_ids=None means no restriction (superadmin/auditor, all).
     """
-    if current_user.role == ROLE_SUPERADMIN:
+    if current_user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         if zone_id:
             ids = _dept_ids_for_zone(zone_id, db)
             return ids, zone_id, ""
@@ -240,7 +240,7 @@ def reports_dashboard(
     if current_user.role == ROLE_ADMIN and not current_user.department_id:
         # Admin without department — nothing to scope
         pass
-    elif current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN):
+    elif current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR):
         # Employees: only allow if they have zone or branch assignments
         has_zones = db.query(UserZone).filter(UserZone.user_id == current_user.id).first()
         has_branches = db.query(UserBranch).filter(UserBranch.user_id == current_user.id).first()
@@ -264,16 +264,18 @@ def reports_dashboard(
     dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db)
     tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db)
 
-    # Proyectos, usuarios más activos y búsquedas frecuentes: solo superadmin.
-    # (top_users/top_searches además son globales, sin acotar por depto, así
-    # que ni deben calcularse para un admin — verían actividad de toda la
-    # empresa, no solo la de su departamento).
-    if current_user.role == ROLE_SUPERADMIN:
+    # Proyectos: superadmin y auditor. Usuarios más activos y búsquedas
+    # frecuentes: solo superadmin (salen del audit log, son globales sin acotar
+    # por depto — actividad de uso de la plataforma, no de los departamentos).
+    is_org_wide = current_user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR)
+    if is_org_wide:
         project_stats = _project_stats(dept_ids, dt_from, dt_to, db)
+    else:
+        project_stats = {"total": 0, "active_total": 0, "by_status": {}}
+    if current_user.role == ROLE_SUPERADMIN:
         top_users = _top_users(dt_from, dt_to, db)
         top_searches = _top_searches(dt_from, dt_to, db)
     else:
-        project_stats = {"total": 0, "active_total": 0, "by_status": {}}
         top_users = []
         top_searches = []
 
@@ -290,15 +292,16 @@ def reports_dashboard(
     priority_keys = ["low", "medium", "high", "urgent"]
     priority_data = [task_stats["by_priority"].get(k, 0) for k in priority_keys]
 
-    # Filter options for superadmin
-    zones = db.query(Zone).order_by(Zone.name).all() if current_user.role == ROLE_SUPERADMIN else []
-    departments = db.query(Department).order_by(Department.name).all() if current_user.role == ROLE_SUPERADMIN else []
+    # Filter options for superadmin/auditor
+    zones = db.query(Zone).order_by(Zone.name).all() if is_org_wide else []
+    departments = db.query(Department).order_by(Department.name).all() if is_org_wide else []
 
     return templates.TemplateResponse(
         request,
         "reports/dashboard.html",
         {
             "current_user": current_user,
+            "is_org_wide": is_org_wide,
             # filters
             "zones": zones,
             "departments": departments,

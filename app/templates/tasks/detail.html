@@ -385,6 +385,7 @@
       <div class="px-4 sm:px-6 py-6 text-center text-sm text-gray-400 italic">Sin evidencias subidas.</div>
       {% endif %}
 
+      {% if can_participate %}
       <!-- Upload form -->
       <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100"
            x-data="{
@@ -473,6 +474,7 @@
           </div>
         </form>
       </div>
+      {% endif %}
     </div>
 
     <!-- Comments -->
@@ -493,6 +495,7 @@
         {% endif %}
       </div>
 
+      {% if can_participate %}
       <!-- Add comment -->
       <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100">
         <form hx-post="/tasks/{{ task.id }}/comments"
@@ -512,6 +515,7 @@
           </button>
         </form>
       </div>
+      {% endif %}
     </div>
 
   </div>

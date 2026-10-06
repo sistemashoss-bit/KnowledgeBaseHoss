@@ -130,6 +130,7 @@
     <div class="flex flex-wrap items-center gap-1 mb-5 border-b border-gray-200">
       {% set tabs = [('assigned', 'Asignadas a mí'), ('created', 'Yo asigné')] %}
       {% if is_admin %}{% set tabs = tabs + [('dept', 'Departamento')] %}{% endif %}
+      {% if is_auditor %}{% set tabs = tabs + [('all', 'Todos los departamentos')] %}{% endif %}
       {% for key, label in tabs %}
       <a href="/tasks/?tab={{ key }}{% if search %}&amp;search={{ search|urlencode }}{% endif %}"
          class="px-4 py-2.5 text-sm font-medium -mb-px border-b-2 transition-colors {% if tab == key %}border-blue-600 text-blue-700{% else %}border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300{% endif %}">
@@ -163,7 +164,7 @@
         <a href="/tasks/?tab={{ tab }}&amp;dept_id={{ filter_dept_id|urlencode }}&amp;user_id={{ filter_user_id|urlencode }}" class="px-3 py-2.5 text-sm text-gray-600 hover:text-blue-700">Borrar búsqueda</a>
         {% endif %}
       </div>
-      {% if tab in ['assigned', 'created'] or filter_departments %}
+      {% if tab in ['assigned', 'created', 'all'] or filter_departments %}
       <select name="dept_id" aria-label="Filtrar por departamento" onchange="this.form.submit()"
               class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
         <option value="">Todos los departamentos</option>
