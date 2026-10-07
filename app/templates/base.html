@@ -474,6 +474,8 @@
   <div data-menu-background x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
        @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
+       @click.outside="menu = false"
+       @keydown.escape.window="menu = false"
        class="chat-widget fixed z-50 flex flex-col items-end gap-3">
 
     <!-- Chat panel -->
@@ -570,16 +572,50 @@
       </div>
     </div>
 
+    <!-- Menú de widgets: MAX o reporte (solo con sesión; sin ella el botón abre MAX directo) -->
+    <div x-show="menu" x-cloak
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 translate-y-3 scale-95"
+         x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+         x-transition:leave-end="opacity-0 translate-y-3 scale-95"
+         role="menu" aria-label="Elegir asistente"
+         class="flex flex-col items-end gap-2 origin-bottom-right">
+      <button type="button" role="menuitem" @click="openMax()"
+              class="group flex items-center gap-3 pl-4 pr-1.5 py-1.5 bg-white rounded-full shadow-lg border border-gray-200 hover:border-blue-300 hover:shadow-xl transition-all">
+        <span class="text-right leading-tight">
+          <span class="block text-sm font-semibold text-gray-800">MAX</span>
+          <span class="block text-xs text-gray-400">Busca en los documentos</span>
+        </span>
+        <span class="w-10 h-10 rounded-full bg-blue-600 group-hover:bg-blue-500 flex items-center justify-center overflow-hidden transition-colors">
+          <img src="{{ url_for('assets', path='mascota.png') }}" alt="" class="w-full h-full object-contain" />
+        </span>
+      </button>
+      <button type="button" role="menuitem" @click="openReport()"
+              class="group flex items-center gap-3 pl-4 pr-1.5 py-1.5 bg-white rounded-full shadow-lg border border-gray-200 hover:border-blue-300 hover:shadow-xl transition-all">
+        <span class="text-right leading-tight">
+          <span class="block text-sm font-semibold text-gray-800">Reportar un problema</span>
+          <span class="block text-xs text-gray-400">Crea una tarea con captura</span>
+        </span>
+        <span class="w-10 h-10 rounded-full bg-blue-600 group-hover:bg-blue-500 text-white flex items-center justify-center transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <path d="M8 2l1.88 1.88M14.12 3.88L16 2M9 7.13v-1a3 3 0 116 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 014-4h4a4 4 0 014 4v3c0 3.3-2.7 6-6 6zM12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/>
+          </svg>
+        </span>
+      </button>
+    </div>
+
     <!-- Toggle FAB -->
-    <button type="button" @click="toggle()"
-            :aria-label="open ? 'Cerrar asistente de IA' : 'Abrir asistente de IA'"
-            :aria-expanded="open"
+    <button type="button" @click="fabClick()"
+            :aria-label="(open || menu || report) ? 'Cerrar' : (canReport ? 'Abrir asistentes' : 'Abrir asistente de IA')"
+            :aria-expanded="open || menu || report"
             class="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95">
-      <img x-show="!open"
+      <img x-show="!(open || menu || report)"
            src="{{ url_for('assets', path='mascota.png') }}"
            alt=""
            class="w-full h-full object-contain" />
-      <svg x-show="open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg x-show="open || menu || report" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
       </svg>
     </button>
@@ -592,11 +628,17 @@
     }
   </style>
   <script>
+    // Widget de reportes (repo report-widget, mismo archivo que usan las otras
+    // apps). Sin botón propio: se abre desde el menú del botón de MAX.
+    const REPORT_WIDGET_SRC = 'https://storage.googleapis.com/hoss-cdn/report-widget/v1/report-widget.js';
+
     function chatWidget(userId) {
       const key = userId ? `kb_chat_${userId}` : 'kb_chat_anon';
       return {
         open: false, loading: false, msgs: 0,
+        menu: false, report: false, canReport: false,
         init() {
+          if (userId) this.loadReportWidget();
           try {
             const saved = localStorage.getItem(key);
             if (saved) {
@@ -621,6 +663,34 @@
           localStorage.removeItem(key);
         },
         toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
+        // El botón cierra lo que esté abierto; si no hay nada, abre el menú
+        // (o MAX directo si el reporte no está disponible).
+        fabClick() {
+          if (this.open) { this.open = false; return; }
+          if (this.report) { window.HossReport.close(); return; }
+          if (!this.canReport) { this.toggle(); return; }
+          this.menu = !this.menu;
+        },
+        openMax() { this.menu = false; this.toggle(); },
+        openReport() { this.menu = false; window.HossReport.open(); },
+        loadReportWidget() {
+          const s = document.createElement('script');
+          s.src = REPORT_WIDGET_SRC;
+          s.async = true;
+          s.onload = () => {
+            if (!window.HossReport) return;
+            window.HossReport.init({
+              endpoint: '/api/issue-reports',
+              app: 'knowledge',
+              button: false,
+              offsetBottom: 68,
+              headers: async () => ({ 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }),
+              onOpenChange: (open) => { this.report = open; },
+            });
+            this.canReport = true;
+          };
+          document.head.appendChild(s);
+        },
         scrollBottom() { this.$nextTick(() => { const el = this.$refs.feed; if (el) el.scrollTop = el.scrollHeight; }); }
       };
     }
