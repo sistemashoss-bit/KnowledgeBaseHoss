@@ -88,6 +88,23 @@ def clear_login_failures(email: str) -> None:
         pass
 
 
+# ── Rate limiting genérico (ventana fija) ─────────────────────────────────────
+
+def hit_rate_limit(key: str, limit: int, window: int) -> bool:
+    """Cuenta un intento en `key` y devuelve True si ya pasó de `limit` dentro
+    de `window` segundos. Sin Valkey no limita."""
+    r = _get()
+    if r is None:
+        return False
+    try:
+        count = r.incr(f"rl:{key}")
+        if count == 1:
+            r.expire(f"rl:{key}", window)
+        return int(count) > limit
+    except Exception:
+        return False
+
+
 # ── RAG response cache ────────────────────────────────────────────────────────
 
 _RAG_TTL = 600  # 10 minutes

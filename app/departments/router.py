@@ -79,6 +79,7 @@ def edit_department(
     dept_id: str,
     name: str = Form(...),
     branch_id: str = Form(default=""),
+    triage_description: str = Form(default=""),
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN)),
 ):
@@ -87,6 +88,7 @@ def edit_department(
         raise HTTPException(404)
     dept.name = name.strip()
     dept.branch_id = branch_id or None
+    dept.triage_description = triage_description.strip() or None
     db.commit()
     return RedirectResponse("/departments/", status_code=302)
 

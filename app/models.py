@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 # ── Role constants ────────────────────────────────────────────────────────────
@@ -145,6 +145,10 @@ class Department(Base):
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    # Qué tipo de problemas atiende, para que Jev clasifique los reportes del
+    # widget. Local a knowledge (hoss no lo conoce). Sin descripción, el
+    # departamento no participa en la clasificación.
+    triage_description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     branch = relationship("Branch", back_populates="departments")
@@ -369,6 +373,11 @@ class Task(Base):
     priority = Column(String(10), nullable=False, default=PRIORITY_MEDIUM)
     # True si nació de una plantilla recurrente; False si se asignó manualmente.
     is_recurring = Column(Boolean, nullable=False, default=False)
+    # App desde la que se levantó con el widget de reportes (p. ej. "hoss-front");
+    # NULL si se creó en knowledge. `context` guarda lo técnico que capturó el
+    # widget (url, navegador, errores de consola) y la clasificación de Jev.
+    source_app = Column(String(50), nullable=True)
+    context = Column(JSONB, nullable=True)
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)

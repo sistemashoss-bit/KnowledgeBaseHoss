@@ -54,6 +54,37 @@ app = FastAPI(
     lifespan=lifespan,
     dependencies=[Depends(require_csrf)],
 )
+
+
+class ReportsCORSMiddleware:
+    """CORS solo para el widget de reportes (/api/issue-reports), solo para los
+    orígenes de REPORT_WIDGET_ORIGINS y sin credenciales: el widget se
+    autentica con el Bearer de hoss, nunca con la cookie de knowledge. El resto
+    de rutas no expone CORS."""
+
+    PREFIX = "/api/issue-reports"
+
+    def __init__(self, app):
+        from starlette.middleware.cors import CORSMiddleware
+        from app.config import settings
+
+        self.app = app
+        self.cors = CORSMiddleware(
+            app,
+            allow_origins=settings.report_widget_origin_list,
+            allow_methods=["POST"],
+            allow_headers=["Authorization"],
+            allow_credentials=False,
+            max_age=600,
+        )
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith(self.PREFIX):
+            return await self.cors(scope, receive, send)
+        return await self.app(scope, receive, send)
+
+
+app.add_middleware(ReportsCORSMiddleware)
 app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parent / "app" / "assets"), name="assets")
 app.state.limiter = limiter
 
@@ -131,6 +162,7 @@ from app.projects.router import router as projects_router
 from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
 from app.notifications.router import router as notifications_router
+from app.issue_reports.router import router as issue_reports_router
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import build_access_filter
@@ -152,6 +184,7 @@ app.include_router(projects_router)
 app.include_router(messaging_router)
 app.include_router(reports_router)
 app.include_router(notifications_router)
+app.include_router(issue_reports_router)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)

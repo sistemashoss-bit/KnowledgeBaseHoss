@@ -50,7 +50,12 @@
         <tbody class="divide-y divide-gray-100">
           {% for dept in departments %}
           <tr class="hover:bg-gray-50">
-            <td class="px-4 py-3 font-medium text-gray-900">{{ dept.name }}</td>
+            <td class="px-4 py-3">
+              <p class="font-medium text-gray-900">{{ dept.name }}</p>
+              {% if dept.triage_description %}
+              <p class="text-xs text-gray-400 mt-0.5 line-clamp-2" title="{{ dept.triage_description }}">{{ dept.triage_description }}</p>
+              {% endif %}
+            </td>
             <td class="px-4 py-3">
               {% if dept.branch %}
               <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
@@ -100,6 +105,14 @@
                       </option>
                       {% endfor %}
                     </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-0.5">Qué reportes atiende</label>
+                    <textarea name="triage_description" rows="3" maxlength="1000"
+                              placeholder="Ej.: Software, sistemas, computadoras, impresoras, internet y apps internas (hoss, knowledge)"
+                              class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500">{{ dept.triage_description or "" }}</textarea>
+                    <p class="text-[11px] text-gray-400 mt-0.5">La IA usa este texto para enviar aquí los reportes del widget. Sin texto, el departamento no recibe reportes automáticos.</p>
                   </div>
 
                   <div class="flex gap-2 pt-1">

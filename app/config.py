@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     openrouter_api_key: str
     openrouter_model: str = "qwen/qwen3.7-flash"
 
+    # Widget de reportes: Jev (TypeSafe) vía OpenRouter, con la misma API key,
+    # clasifica departamento y severidad. Versión fijada (no el alias -latest)
+    # para que los umbrales no cambien solos con un release nuevo.
+    jev_model: str = "typesafe/jev-1.13"
+    jev_timeout_seconds: float = 8.0
+    # Departamento al que cae un reporte cuando Jev no está seguro o falla.
+    report_triage_department: str = "Sistemas"
+    # Orígenes (coma-separados) que pueden llamar /api/issue-reports desde el
+    # widget, p. ej. "https://app.hoss.com.mx,https://meta.hoss.com.mx".
+    report_widget_origins: str = ""
+
     # Voyage AI (embeddings + rerank)
     voyage_api_key: str
     voyage_embedding_model: str = "voyage-4-large"
@@ -66,6 +77,10 @@ class Settings(BaseSettings):
     vapid_public_key: str = ""
     vapid_private_key: str = ""
 
+
+    @property
+    def report_widget_origin_list(self) -> list[str]:
+        return [o.strip().rstrip("/") for o in self.report_widget_origins.split(",") if o.strip()]
 
     @property
     def sqlalchemy_url(self) -> str:

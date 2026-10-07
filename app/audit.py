@@ -44,6 +44,7 @@ ACTION_LABELS: dict[str, str] = {
     "task_tag_create": "Creación de etiqueta",
     "task_tag_update": "Edición de etiqueta",
     "task_tag_delete": "Eliminación de etiqueta",
+    "issue_report": "Reporte desde widget",
     # Tareas recurrentes
     "recurring_create": "Creación de tarea recurrente",
     "recurring_update": "Edición de tarea recurrente",

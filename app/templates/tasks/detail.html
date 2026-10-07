@@ -179,6 +179,52 @@
       </div>
       {% endif %}
 
+      <!-- Contexto del widget de reportes -->
+      {% if task.context %}
+      {% set ctx = task.context %}
+      <div class="px-4 sm:px-6 py-5 border-b border-gray-100" x-data="{ showErrors: false }">
+        <p class="text-xs text-gray-400 mb-2">
+          Reportado desde <span class="font-medium text-gray-600">{{ task.source_app }}</span>{% if ctx.app_version %} v{{ ctx.app_version }}{% endif %}
+        </p>
+        <dl class="grid grid-cols-1 sm:grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
+          {% if ctx.url %}
+          <dt class="text-xs text-gray-400 sm:pt-0.5">Página</dt>
+          <dd class="min-w-0">
+            <a href="{{ ctx.url }}" target="_blank" rel="noopener noreferrer"
+               class="text-blue-600 hover:text-blue-500 break-all">{{ ctx.page_title or ctx.url }} ↗</a>
+          </dd>
+          {% endif %}
+          {% if ctx.element %}
+          <dt class="text-xs text-gray-400 sm:pt-0.5">Elemento</dt>
+          <dd class="min-w-0"><code class="text-xs bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5 break-all">{{ ctx.element }}</code></dd>
+          {% endif %}
+          {% if ctx.browser %}
+          <dt class="text-xs text-gray-400 sm:pt-0.5">Navegador</dt>
+          <dd class="text-gray-700 text-xs sm:pt-0.5">{{ ctx.browser }}{% if ctx.viewport %} · {{ ctx.viewport }}{% endif %}</dd>
+          {% endif %}
+          {% if ctx.jev %}
+          <dt class="text-xs text-gray-400 sm:pt-0.5">Clasificación IA</dt>
+          <dd class="text-gray-700 text-xs sm:pt-0.5">
+            {% if ctx.jev.department %}departamento {{ (ctx.jev.department.confidence * 100) | round | int }}% seguro · {% endif %}
+            severidad {{ "%.1f" | format(ctx.jev.severity.score) }}/3
+            <span class="text-gray-400">({{ ctx.jev.model }})</span>
+          </dd>
+          {% endif %}
+        </dl>
+        {% if ctx.recent_errors %}
+        <button type="button" @click="showErrors = !showErrors"
+                class="mt-3 inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-500">
+          <span x-text="showErrors ? 'Ocultar errores de consola' : 'Ver errores de consola ({{ ctx.recent_errors | length }})'"></span>
+        </button>
+        <ul x-show="showErrors" x-cloak class="mt-2 space-y-1">
+          {% for err in ctx.recent_errors %}
+          <li class="text-xs font-mono text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1 break-all whitespace-pre-wrap">{{ err }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <!-- Documento a revisar -->
       {% if task.document %}
       <div class="px-4 sm:px-6 py-5 border-b border-gray-100">
