@@ -117,8 +117,7 @@ def run_cleanup() -> dict | None:
     }
 
 
-def _seconds_until(hour: int) -> float:
-    now = datetime.utcnow()
+def _seconds_until(hour: int, now: datetime) -> float:
     nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
     if nxt <= now:
         nxt += timedelta(days=1)
@@ -131,27 +130,44 @@ def run_recurring_generation() -> int | None:
     Returns the number of tasks created, or None if another instance claimed
     today's run.
     """
-    from app.tasks.recurring import generate_due_tasks
+    from app.tasks.recurring import generate_due_tasks, local_now
 
-    if vk.available() and not vk.try_acquire_daily_lock("recurring_task_gen"):
+    today = local_now().date()
+    # Lock por fecha: con una sola llave y TTL de 24 h, una corrida que caía
+    # milisegundos antes que la del día anterior encontraba el lock vivo y se saltaba.
+    if vk.available() and not vk.try_acquire_daily_lock(f"recurring_task_gen:{today.isoformat()}"):
         return None
-    return generate_due_tasks()
+    return generate_due_tasks(today)
 
 
 async def scheduler_loop() -> None:
-    """Fire the daily jobs once a day at settings.cleanup_hour_utc. Never raises out."""
+    """Fire the daily purge once a day at settings.cleanup_hour_utc. Never raises out."""
     while True:
         try:
-            await asyncio.sleep(_seconds_until(settings.cleanup_hour_utc))
+            await asyncio.sleep(_seconds_until(settings.cleanup_hour_utc, datetime.utcnow()))
             result = await asyncio.to_thread(run_cleanup)
             if result is not None:
                 logger.info("daily cleanup: %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("daily scheduler job failed")
+            # Avoid a hot loop if the clock math / DB keeps failing.
+            await asyncio.sleep(3600)
+
+
+async def recurring_scheduler_loop() -> None:
+    """Generate recurring tasks once a day at settings.recurring_hour_local. Never raises out."""
+    from app.tasks.recurring import local_now
+
+    while True:
+        try:
+            await asyncio.sleep(_seconds_until(settings.recurring_hour_local, local_now()))
             generated = await asyncio.to_thread(run_recurring_generation)
             if generated is not None:
                 logger.info("recurring tasks generated: %s", generated)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("daily scheduler job failed")
-            # Avoid a hot loop if the clock math / DB keeps failing.
+            logger.exception("recurring task scheduler failed")
             await asyncio.sleep(3600)

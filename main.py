@@ -20,29 +20,37 @@ async def lifespan(app: FastAPI):
     from app.database import engine
     from app.models import Base
     from app import search as search_module
-    from app.messaging.cleanup import scheduler_loop
+    from app.messaging.cleanup import recurring_scheduler_loop, scheduler_loop
 
     Base.metadata.create_all(bind=engine)
     search_module.ensure_indices()
 
-    # Catch-up: si el server reinició pasada la hora del scheduler, genera hoy.
+    # Catch-up: si el server reinició pasada la hora de generación, genera hoy.
+    # Antes de esa hora no: las tareas del día no deben aparecer antes de tiempo.
     # Idempotente gracias a RecurringTask.last_generated_on.
     try:
-        from app.tasks.recurring import generate_due_tasks
-        await asyncio.to_thread(generate_due_tasks)
+        from app.config import settings
+        from app.tasks.recurring import generate_due_tasks, local_now
+        if local_now().hour >= settings.recurring_hour_local:
+            await asyncio.to_thread(generate_due_tasks)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("startup recurring generation failed")
 
-    cleanup_task = asyncio.create_task(scheduler_loop())
+    background = [
+        asyncio.create_task(scheduler_loop()),
+        asyncio.create_task(recurring_scheduler_loop()),
+    ]
     try:
         yield
     finally:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
+        for task in background:
+            task.cancel()
+        for task in background:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 limiter = Limiter(key_func=get_remote_address)

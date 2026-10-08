@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     message_retention_days: int = 30
     cleanup_hour_utc: int = 3  # daily purge runs at this UTC hour
 
+    # Hora local del negocio (México no tiene horario de verano desde 2022 → UTC-6 fijo).
+    local_utc_offset_hours: int = -6
+    recurring_hour_local: int = 6  # las tareas recurrentes se generan a esta hora local
+
     # Audit / search log retention
     audit_retention_days: int = 60
 

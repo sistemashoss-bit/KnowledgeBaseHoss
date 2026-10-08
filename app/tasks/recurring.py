@@ -10,9 +10,10 @@ tarea del día aunque el generador corra varias veces o el server reinicie.
 import calendar
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from app import audit
+from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
 from app.models import (
@@ -22,6 +23,11 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def local_now() -> datetime:
+    """Hora actual en la zona del negocio (settings.local_utc_offset_hours)."""
+    return datetime.now(timezone(timedelta(hours=settings.local_utc_offset_hours)))
 
 
 def _due_today(rt: RecurringTask, today: date) -> bool:
@@ -56,7 +62,7 @@ def generate_due_tasks(today: date | None = None) -> int:
 
     Devuelve el número de tareas creadas. Seguro de correr varias veces al día.
     """
-    today = today or date.today()
+    today = today or local_now().date()
     db = SessionLocal()
     created = 0
     try:
