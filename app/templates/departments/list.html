@@ -42,8 +42,8 @@
         <thead>
           <tr class="bg-gray-50 border-b border-gray-200">
             <th class="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Nombre</th>
-            <th class="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Sucursal</th>
-            <th class="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Usuarios</th>
+            <th class="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide whitespace-nowrap">Sucursal</th>
+            <th class="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide whitespace-nowrap">Usuarios</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
@@ -56,27 +56,27 @@
               <p class="text-xs text-gray-400 mt-0.5 line-clamp-2" title="{{ dept.triage_description }}">{{ dept.triage_description }}</p>
               {% endif %}
             </td>
-            <td class="px-4 py-3">
+            <td class="px-4 py-3 whitespace-nowrap">
               {% if dept.branch %}
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium whitespace-nowrap">
                 {{ dept.branch.name }}
               </span>
               {% else %}
-              <span class="text-xs text-gray-400">Corporativo</span>
+              <span class="text-xs text-gray-400 whitespace-nowrap">Corporativo</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-gray-500 text-xs">{{ dept.users | length }}</td>
+            <td class="px-4 py-3 text-gray-500 text-xs text-center">{{ dept.users | length }}</td>
             <td class="px-4 py-3 text-right">
               <div class="flex items-center justify-end gap-2">
                 <button @click="editFor = editFor === '{{ dept.id }}' ? null : '{{ dept.id }}'"
-                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors">
+                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors whitespace-nowrap">
                   Editar
                 </button>
                 <form method="post" action="/departments/{{ dept.id }}/delete"
                       onsubmit="return confirm('¿Eliminar {{ dept.name }}?')">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button type="submit"
-                          class="text-xs text-red-500 hover:text-red-700 font-medium transition-colors">
+                          class="text-xs text-red-500 hover:text-red-700 font-medium transition-colors whitespace-nowrap">
                     Eliminar
                   </button>
                 </form>
