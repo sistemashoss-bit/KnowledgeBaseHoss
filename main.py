@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     # Catch-up: si el server reinició pasada la hora de generación, genera hoy.
     # Antes de esa hora no: las tareas del día no deben aparecer antes de tiempo.
     # Idempotente gracias a RecurringTask.last_generated_on.
+    # Cometario
     try:
         from app.config import settings
         from app.tasks.recurring import generate_due_tasks, local_now
