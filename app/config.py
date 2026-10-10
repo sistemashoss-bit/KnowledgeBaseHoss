@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     vapid_public_key: str = ""
     vapid_private_key: str = ""
 
+    # Servicio central de notificaciones (notificationservice, vía RabbitMQ).
+    # Vacío = no se publican; las notificaciones propias de knowledge siguen igual.
+    # public_url: base para volver absolutas las URLs (se abren desde la extensión).
+    rabbitmq_url: str = ""
+    public_url: str = "https://comunicacion.hoss.com.mx"
+
 
     @property
     def report_widget_origin_list(self) -> list[str]:

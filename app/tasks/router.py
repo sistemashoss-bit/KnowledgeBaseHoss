@@ -446,6 +446,7 @@ def create_task(
             title=f"{actor} te asignó una tarea",
             body=task.title,
             url=f"/tasks/{task.id}",
+            kind="task_assigned",
         )
     realtime.notify_tasks()
     audit.log_action(
@@ -637,6 +638,7 @@ def upload_evidences(
                     title=f"{actor} subió evidencia",
                     body=task.title,
                     url=f"/tasks/{task_id}",
+                    kind="task_evidence",
                 )
     return RedirectResponse(f"/tasks/{task_id}", status_code=302)
 
@@ -742,7 +744,10 @@ def update_status(
     push_title = f"{actor} aprobó tu tarea" if is_approval else f"{actor} cambió el estado"
     for uid in {task.assigned_to, task.created_by}:
         if uid and str(uid) != str(current_user.id):
-            realtime.notify_user(uid, title=push_title, body=task.title, url=f"/tasks/{task_id}")
+            realtime.notify_user(
+                uid, title=push_title, body=task.title, url=f"/tasks/{task_id}",
+                kind="task_approved" if is_approval else "task_status",
+            )
     realtime.notify_tasks()
     realtime.notify_task(task_id)
     audit.log_action(
@@ -848,6 +853,7 @@ def assign_task(
             title=f"{actor} te asignó una tarea",
             body=task.title,
             url=f"/tasks/{task_id}",
+            kind="task_assigned",
         )
     realtime.notify_tasks()
     realtime.notify_task(task_id)
@@ -957,6 +963,7 @@ def add_comment(
                 title=f"{actor} comentó",
                 body=comment.content[:120],
                 url=f"/tasks/{task.id}",
+                kind="task_comment",
             )
     realtime.notify_task(task.id)
     audit.log_action(

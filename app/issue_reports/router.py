@@ -200,7 +200,10 @@ async def create_issue_report(
         ]
         actor = user.name or user.email
         for uid in admin_ids:
-            realtime.notify_user(uid, title=f"Nuevo reporte de {actor}", body=task.title, url=f"/tasks/{task.id}")
+            realtime.notify_user(
+                uid, title=f"Nuevo reporte de {actor}", body=task.title, url=f"/tasks/{task.id}",
+                kind="issue_report",
+            )
     realtime.notify_tasks()
     audit.log_action(
         "issue_report", user=user, request=request,
