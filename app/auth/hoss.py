@@ -1,16 +1,13 @@
 """Cliente de SSO contra hoss-api.
 
 hoss-api es el proveedor de identidad del staff. knowledge NO comparte el
-JWT_SECRET de hoss: valida credenciales llamando a un solo endpoint que
-devuelve la identidad verificada.
-
-    POST /sso/verify-auth {email, password, site}
-        -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
+JWT_SECRET de hoss: el token que llega por el handoff de hoss-front se valida
+preguntándole a hoss-api por la identidad.
 
     GET  /sso/identity?site=<site>   (Authorization: Bearer <sesion_hoss>)
         -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
 
-    Ambas responden 403 si el usuario no tiene el permiso del sitio en hoss
+    Responde 403 si el usuario no tiene el permiso del sitio en hoss
     (knowledge_access); se levanta AccessDenied.
 
     avatar_key: llave del avatar en Wasabi (bucket compartido hossavatars); knowledge
@@ -29,34 +26,9 @@ class AccessDenied(Exception):
     """Identidad válida en hoss, pero sin permiso de acceso a este sitio (403)."""
 
 
-async def verify_auth(email: str, password: str) -> dict | None:
-    """Devuelve la identidad si las credenciales son válidas en hoss; None si no.
-    Levanta AccessDenied si son válidas pero el usuario no tiene acceso al sitio."""
-    base = settings.hoss_api_url.rstrip("/")
-    if not base:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{base}/sso/verify-auth",
-                json={"email": email, "password": password, "site": SITE},
-            )
-            if resp.status_code == 403:
-                raise AccessDenied()
-            if resp.status_code != 200:
-                return None
-            identity = resp.json()
-            if not identity.get("corporate_id"):
-                return None
-            return identity
-    except httpx.HTTPError:
-        return None
-
-
 async def introspect_session(session_token: str) -> dict | None:
     """Valida una sesión existente de hoss (cookie de .hoss.com.mx) y devuelve
-    la identidad, con el mismo shape que verify_auth. Base del SSO silencioso:
+    la identidad. Base del SSO silencioso:
     knowledge NO valida el token localmente, se lo pregunta a hoss-api.
     Levanta AccessDenied si el usuario no tiene acceso al sitio."""
     base = settings.hoss_api_url.rstrip("/")

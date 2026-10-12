@@ -21,7 +21,7 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 - **Autenticación** — JWT en cookies httpOnly, Argon2id, TOTP opcional por usuario (2FA de dos pasos). **SSO opcional con hoss-api** como proveedor de identidad del staff (con aprovisionamiento automático de usuarios)
 - **Avatares** — bucket separado en Wasabi, redimensionado a 256×256 JPEG con Pillow
 - **Audit log** — registro de todas las acciones y búsquedas, con retención configurable (visible solo para superadmin)
-- **Rate limiting** — intentos de login fallidos bloqueados vía Valkey; límite por IP con SlowAPI
+- **Rate limiting** — límite por IP con SlowAPI
 
 ## Stack
 
@@ -46,8 +46,8 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 - **Voyage AI** — API key para embeddings y reranking de la búsqueda
 
 **Opcionales:**
-- **Valkey / Redis** — caché de respuestas RAG, rate limiting de login y canal de mensajería en tiempo real (SSE). La app funciona sin él con degradación graceful, pero el timbre de llamadas requiere Valkey
-- **hoss-api** — proveedor de identidad para SSO del staff. Si `HOSS_API_URL` queda vacío, se usa solo autenticación local
+- **Valkey / Redis** — caché de respuestas RAG y canal de mensajería en tiempo real (SSE). La app funciona sin él con degradación graceful, pero el timbre de llamadas requiere Valkey
+- **hoss-api** — proveedor de identidad del staff. No hay login propio: se entra desde la extensión (o el menú de hoss-front) por `POST /auth/sso`; sin sesión `/auth/login` solo muestra el aviso
 
 ## Variables de entorno
 
@@ -86,7 +86,7 @@ VOYAGE_API_KEY=
 
 # Opcionales
 VALKEY_URL=valkeys://default:password@host:port
-HOSS_API_URL=                 # SSO con hoss-api; vacío = solo auth local
+HOSS_API_URL=                 # SSO con hoss-api
 # MESSAGE_RETENTION_DAYS=30
 # AUDIT_RETENTION_DAYS=60
 # CLEANUP_HOUR_UTC=3

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -13,67 +13,27 @@ from app.auth.utils import (
 from app.database import get_db
 from app import valkey_client as vk
 from app.auth import hoss
-from app.models import Department, User
+from app.models import Department
 from app.templating import templates
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
+# Sin formulario propio: se entra desde la extensión (o el menú de hoss-front) por
+# /auth/sso. Sin sesión solo se muestra el aviso.
 
-@router.get("/login", response_class=HTMLResponse)
-def login_page(
-    request: Request,
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
+def _access_page(request: Request, error: str | None = None, status_code: int = 200):
+    return templates.TemplateResponse(
+        request, "access.html", {"error": error}, status_code=status_code
+    )
+
+
+@router.get("/login")
+def login_page(request: Request, user=Depends(get_current_user)):
     if user:
         return RedirectResponse("/documents/", status_code=302)
-    has_users = db.query(User).count() > 0
-    return templates.TemplateResponse(request, "login.html", {"has_users": has_users})
-
-
-@router.post("/login")
-async def login(
-    request: Request,
-    email: str = Form(...),
-    password: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    if vk.is_rate_limited(email):
-        has_users = db.query(User).count() > 0
-        return templates.TemplateResponse(
-            request, "login.html",
-            {"has_users": has_users, "error": "Demasiados intentos fallidos. Intenta en 5 minutos."},
-            status_code=429,
-        )
-
-    try:
-        user = await _resolve_user(email, password, db)
-    except hoss.AccessDenied:
-        # Credenciales válidas sin permiso del sitio: no suma al rate-limit.
-        has_users = db.query(User).count() > 0
-        return templates.TemplateResponse(
-            request, "login.html",
-            {"has_users": has_users, "error": "No tienes acceso"},
-            status_code=403,
-        )
-
-    if not user or not user.is_active:
-        vk.record_login_failure(email)
-        has_users = db.query(User).count() > 0
-        return templates.TemplateResponse(
-            request, "login.html",
-            {"has_users": has_users, "error": "Credenciales incorrectas"},
-            status_code=400,
-        )
-
-    vk.clear_login_failures(email)
-
-    token = create_access_token(str(user.id), user.role, user.department_id)
-    resp = RedirectResponse("/documents/", status_code=302)
-    set_auth_cookie(resp, token)
-    return resp
+    return _access_page(request)
 
 
 @router.post("/logout")
@@ -97,18 +57,13 @@ async def sso_handoff(
     try:
         identity = await hoss.introspect_session(token)
     except hoss.AccessDenied:
-        has_users = db.query(User).count() > 0
-        return templates.TemplateResponse(
-            request, "login.html",
-            {"has_users": has_users, "error": "No tienes acceso"},
-            status_code=403,
-        )
+        return _access_page(request, "No tienes acceso a Knowledge Base.", 403)
     if not identity:
-        return RedirectResponse("/auth/login", status_code=302)
+        return _access_page(request, "Tu sesión de Hoss expiró.", 401)
 
     user = provision_from_identity(identity, db)
     if not user or not user.is_active:
-        return RedirectResponse("/auth/login", status_code=302)
+        return _access_page(request, "Tu usuario está desactivado.", 403)
 
     # Guardamos el accessToken de hoss para reusarlo en llamadas server-to-server
     # (p. ej. sincronizar sucursales/regiones). hoss valida su expiración al usarlo.
@@ -146,12 +101,3 @@ def profile_page(
 # firma la URL al renderizar. La subida del avatar vive en hoss-api
 # (POST /users/me/avatar).
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _resolve_user(email: str, password: str, db: Session):
-    """Full SSO: autentica contra hoss y aprovisiona/enlaza el usuario local."""
-    identity = await hoss.verify_auth(email, password)
-    if not identity:
-        return None
-    return provision_from_identity(identity, db)

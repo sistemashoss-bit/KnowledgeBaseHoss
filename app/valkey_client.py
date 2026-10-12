@@ -1,6 +1,6 @@
 """
 Valkey (Redis-compatible) client.
-Used for: login rate limiting + RAG response cache + user presence.
+Used for: RAG response cache + user presence.
 Falls back gracefully if VALKEY_URL is not configured.
 """
 import hashlib
@@ -41,49 +41,6 @@ def publish(channel: str, message: str = "new") -> None:
         return
     try:
         r.publish(channel, message)
-    except Exception:
-        pass
-
-
-# ── Login rate limiting ───────────────────────────────────────────────────────
-
-_MAX_ATTEMPTS = 5
-_WINDOW = 300  # 5 minutes
-
-
-def is_rate_limited(email: str) -> bool:
-    r = _get()
-    if r is None:
-        return False
-    try:
-        key = f"login_fail:{email.lower()}"
-        count = r.get(key)
-        return int(count or 0) >= _MAX_ATTEMPTS
-    except Exception:
-        return False
-
-
-def record_login_failure(email: str) -> int:
-    r = _get()
-    if r is None:
-        return 0
-    try:
-        key = f"login_fail:{email.lower()}"
-        pipe = r.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, _WINDOW)
-        count, _ = pipe.execute()
-        return int(count)
-    except Exception:
-        return 0
-
-
-def clear_login_failures(email: str) -> None:
-    r = _get()
-    if r is None:
-        return
-    try:
-        r.delete(f"login_fail:{email.lower()}")
     except Exception:
         pass
 

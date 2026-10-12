@@ -9,8 +9,8 @@ from app import valkey_client as vk
 
 CSRF_HEADER = "X-CSRF-Token"
 _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-# Sin sesión todavía (login/SSO) o cerrarla: no hay token de usuario que validar.
-_CSRF_EXEMPT_PATHS = {"/auth/login", "/auth/logout", "/auth/sso"}
+# Sin sesión todavía (SSO) o cerrarla: no hay token de usuario que validar.
+_CSRF_EXEMPT_PATHS = {"/auth/logout", "/auth/sso"}
 
 
 async def require_csrf(request: Request) -> None:

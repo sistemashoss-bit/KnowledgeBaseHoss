@@ -50,7 +50,6 @@ class Settings(BaseSettings):
     csrf_secret: str
 
     # SSO con hoss-api (proveedor de identidad del staff).
-    # Si queda vacío, knowledge usa solo autenticación local.
     hoss_api_url: str = ""
 
     # OpenRouter (LLM for Q&A)

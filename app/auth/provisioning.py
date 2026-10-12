@@ -1,7 +1,6 @@
 """JIT provisioning de usuarios a partir de una identidad verificada por hoss.
 
-Compartido entre el login con credenciales (auth/router) y el SSO silencioso
-por cookie de hoss (auth/deps), para tener una sola fuente de verdad.
+Lo usa el handoff SSO desde hoss-front (POST /auth/sso en auth/router).
 """
 import uuid
 

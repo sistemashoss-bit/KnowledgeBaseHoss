@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-900">
+<head>
+  <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Acceso — Knowledge Base</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-full flex items-center justify-center px-4 py-8">
+  <div class="w-full max-w-sm text-center">
+    <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
+         alt="HOSS" class="h-12 w-auto object-contain mx-auto brightness-0 invert" />
+    {% if error %}
+    <div class="mt-8 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+      {{ error }}
+    </div>
+    {% endif %}
+    <p class="mt-6 text-slate-300 text-sm">
+      Ingresa desde la extensión de Hoss en tu navegador.
+    </p>
+  </div>
+</body>
+</html>
