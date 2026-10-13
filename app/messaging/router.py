@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
-from app import audit, storage, valkey_client as vk
+from app import audit, notification_bus, storage, valkey_client as vk
 from app.messaging import realtime
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
@@ -245,8 +245,19 @@ def _mark_read(conv_id, user_id, db: Session):
         .first()
     )
     if p:
+        # Se llama en cada poll del chat abierto: solo se avisa a
+        # notificationservice cuando de verdad había algo sin leer.
+        unread = db.query(Message.id).filter(
+            Message.conversation_id == conv_id,
+            Message.sender_id != user_id,
+        )
+        if p.last_read_at:
+            unread = unread.filter(Message.created_at > p.last_read_at)
+        had_unread = unread.first() is not None
         p.last_read_at = datetime.utcnow()
         db.commit()
+        if had_unread:
+            notification_bus.publish_read(conv_id, user_id)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -635,13 +646,24 @@ def send_message(
     # Poke each recipient's notification bell (SSE refresh trigger) + push.
     actor = current_user.name or current_user.email
     push_body = content[:120] if content else "Archivo adjunto"
-    for uid in _other_participant_ids(conv_id, current_user.id, db):
+    recipient_ids = _other_participant_ids(conv_id, current_user.id, db)
+    for uid in recipient_ids:
         realtime.notify_user(
             uid,
             title=f"Nuevo mensaje de {actor}",
             body=push_body,
             url=f"/messaging/{conv_id}",
         )
+    conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
+    notification_bus.publish_message(
+        conv_id,
+        (conv.name or "Grupo sin nombre") if conv.type == CONV_GROUP else None,
+        current_user,
+        recipient_ids,
+        msg.id,
+        push_body,
+        f"/messaging/{conv_id}",
+    )
 
     if valid_files:
         audit.log_action(
@@ -990,6 +1012,7 @@ def delete_conversation(
 
     # Wake up the other party's open view so it stops polling a dead chat.
     vk.publish(realtime.channel(conv_id), "deleted")
+    notification_bus.publish_deleted(conv_id)
 
     audit.log_action(
         "conversation_delete", user=current_user, request=request,
