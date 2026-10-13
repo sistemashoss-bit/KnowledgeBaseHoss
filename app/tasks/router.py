@@ -903,6 +903,7 @@ def set_task_tags(
 def delete_task(
     task_id: str,
     request: Request,
+    back: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -920,7 +921,9 @@ def delete_task(
         "task_delete", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=title,
     )
-    return HTMLResponse(headers={"HX-Redirect": "/tasks/"})
+    # Vuelve a la lista de origen (tab/filtros); solo rutas propias de /tasks/.
+    redirect = back if back.startswith("/tasks/") and "//" not in back else "/tasks/"
+    return HTMLResponse(headers={"HX-Redirect": redirect})
 
 
 # ── Comments (HTMX append) ───────────────────────────────────────────────────

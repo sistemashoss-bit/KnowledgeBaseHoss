@@ -27,7 +27,7 @@
   <div class="max-w-3xl mx-auto">
 
     <!-- Breadcrumb -->
-    <a href="/tasks/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6 transition-colors">
+    <a href="/tasks/" data-tasks-back class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6 transition-colors">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
       </svg>
@@ -84,6 +84,7 @@
             {% endif %}
             {% if can_edit %}
             <button hx-delete="/tasks/{{ task.id }}"
+                    hx-vals="js:{back: tasksBackUrl()}"
                     hx-confirm="¿Eliminar esta tarea y sus comentarios?"
                     hx-target="body"
                     class="text-red-400 hover:text-red-600 text-xs px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
@@ -568,6 +569,15 @@
 </div>
 
 <script>
+  // Lista de tareas de la que se llegó (la guarda tasks/list.html), para
+  // "Volver a Tareas" y para la redirección al eliminar.
+  function tasksBackUrl() {
+    var url = '';
+    try { url = sessionStorage.getItem('tasks_back') || ''; } catch (e) {}
+    return url.indexOf('/tasks/') === 0 ? url : '/tasks/';
+  }
+  document.querySelectorAll('[data-tasks-back]').forEach(function (a) { a.href = tasksBackUrl(); });
+
 (function () {
   // Live updates (SSE over Valkey pub/sub): status/assign/tags/evidence/comment
   // changes made by anyone broadcast on this task's channel, so every open

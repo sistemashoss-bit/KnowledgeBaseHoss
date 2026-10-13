@@ -643,17 +643,11 @@ def send_message(
 
     # Real-time fan-out to every open client in this conversation.
     vk.publish(realtime.channel(conv_id))
-    # Poke each recipient's notification bell (SSE refresh trigger) + push.
-    actor = current_user.name or current_user.email
-    push_body = content[:120] if content else "Archivo adjunto"
+    # Poke each recipient's Mensajes badge (SSE refresh trigger).
+    preview = content[:120] if content else "Archivo adjunto"
     recipient_ids = _other_participant_ids(conv_id, current_user.id, db)
     for uid in recipient_ids:
-        realtime.notify_user(
-            uid,
-            title=f"Nuevo mensaje de {actor}",
-            body=push_body,
-            url=f"/messaging/{conv_id}",
-        )
+        realtime.notify_user(uid)
     conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
     notification_bus.publish_message(
         conv_id,
@@ -661,7 +655,7 @@ def send_message(
         current_user,
         recipient_ids,
         msg.id,
-        push_body,
+        preview,
         f"/messaging/{conv_id}",
     )
 

@@ -131,13 +131,6 @@ def health():
     )
 
 
-@app.get("/sw.js", include_in_schema=False)
-def service_worker():
-    # Servido en la raíz (no bajo /assets) para que su scope cubra todo el
-    # sitio — necesario para que Web Push llegue sin importar qué página
-    # esté abierta.
-    path = Path(__file__).resolve().parent / "app" / "assets" / "sw.js"
-    return FileResponse(path, media_type="application/javascript")
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 

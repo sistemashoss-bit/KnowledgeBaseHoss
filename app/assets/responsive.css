@@ -36,7 +36,6 @@ input, select, textarea { max-width: 100%; min-width: 0; }
   }
   .menu-open #app-sidebar { display: flex; }
   .menu-open .mobile-menu-backdrop { display: block; }
-  #app-sidebar .notification-panel { left: 0; width: 100vw; height: 100vh; height: 100dvh; }
 }
 
 @media (max-width: 639px) {

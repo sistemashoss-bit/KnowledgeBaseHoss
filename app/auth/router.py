@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, require_auth
 from app.auth.provisioning import provision_from_identity
 from app.auth.utils import (
-    clear_auth_cookie,
     create_access_token,
     generate_csrf_token,
     set_auth_cookie,
@@ -34,13 +33,6 @@ def login_page(request: Request, user=Depends(get_current_user)):
     if user:
         return RedirectResponse("/documents/", status_code=302)
     return _access_page(request)
-
-
-@router.post("/logout")
-def logout():
-    resp = RedirectResponse("/", status_code=302)
-    clear_auth_cookie(resp)
-    return resp
 
 
 # ── SSO handoff desde hoss-front ────────────────────────────────────────────────

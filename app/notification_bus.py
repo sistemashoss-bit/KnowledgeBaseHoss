@@ -11,7 +11,7 @@ notificationservice, que guarda una entrada por conversación con su contador de
 no leídos). Tipos: `message` (nuevo mensaje, recipients = los demás
 participantes), `read` (recipients = quien lo leyó) y `deleted`.
 
-Best-effort, igual que app.push: el publish corre en un hilo de fondo con su
+Best-effort: el publish corre en un hilo de fondo con su
 propia conexión (pika no es thread-safe) y cualquier falla se registra y se
 descarta — una notificación perdida nunca debe romper el request que la generó.
 Sin RABBITMQ_URL configurado es un no-op.

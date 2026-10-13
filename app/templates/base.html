@@ -51,7 +51,7 @@
   <div data-menu-close class="mobile-menu-backdrop fixed inset-0 z-[55] bg-black/50" aria-hidden="true"></div>
 
   <!-- Sidebar -->
-  <aside id="app-sidebar" aria-label="Menú de navegación" {% if current_user %}x-data="notifSystem('{{ current_user.id }}', '{{ csrf_for(current_user.id) }}')"{% endif %}
+  <aside id="app-sidebar" aria-label="Menú de navegación" {% if current_user %}x-data="navBadges()"{% endif %}
          class="app-sidebar w-64 bg-slate-900 flex flex-col shrink-0">
     <button type="button" data-menu-close class="lg:hidden self-end px-4 py-2 text-slate-200" aria-label="Cerrar menú de navegación">Cerrar ✕</button>
     <div class="px-6 py-5 border-b border-slate-700">
@@ -125,13 +125,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
         </svg>
-        <span class="flex-1">Tareas</span>
-        <span x-show="assignedTaskCount > 0" x-cloak
-              role="status" aria-live="polite" aria-atomic="true"
-              class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
-          <span aria-hidden="true" x-text="assignedTaskCount > 99 ? '99+' : assignedTaskCount"></span>
-          <span class="sr-only" x-text="assignedTaskCount + ' tareas asignadas con avisos sin leer'"></span>
-        </span>
+        Tareas
       </a>
       <a href="/projects/" {{ nav_current('/projects') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
@@ -196,199 +190,6 @@
       {% endif %}
 
       {% if current_user %}
-      <!-- ── Notificaciones ───────────────────────────────────────────────── -->
-      <div class="relative">
-
-        <button @click="open = !open"
-                class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-          <div class="relative w-4 h-4 shrink-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-            </svg>
-            <span x-show="total > 0" x-cloak
-                  x-text="total > 9 ? '9+' : total"
-                  class="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none pointer-events-none">
-            </span>
-          </div>
-          <span class="flex-1 text-left">Notificaciones</span>
-          <span x-show="total > 0" x-cloak
-                x-text="total"
-                class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
-          </span>
-        </button>
-
-        <!-- Backdrop para cerrar al hacer clic fuera -->
-        <div x-show="open" x-cloak @click="open = false"
-             class="fixed inset-0 z-40"></div>
-
-        <!-- Panel de notificaciones -->
-        <div x-show="open" x-cloak
-             x-transition:enter="transition ease-out duration-200"
-             x-transition:enter-start="opacity-0 -translate-x-2"
-             x-transition:enter-end="opacity-100 translate-x-0"
-             x-transition:leave="transition ease-in duration-150"
-             x-transition:leave-start="opacity-100 translate-x-0"
-             x-transition:leave-end="opacity-0 -translate-x-2"
-             class="notification-panel fixed top-0 left-64 h-screen w-80 bg-white shadow-2xl z-50 flex flex-col border-l border-gray-200">
-
-          <!-- Cabecera -->
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-slate-50 shrink-0">
-            <div class="flex items-center gap-2">
-              <h3 class="font-semibold text-slate-800 text-sm">Notificaciones</h3>
-              <span x-show="total > 0" x-cloak
-                    x-text="total"
-                    class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
-              </span>
-            </div>
-            <div class="flex items-center gap-3">
-              <button x-show="total > 0" x-cloak @click="dismissAll()"
-                      class="text-xs text-slate-500 hover:text-blue-600 transition-colors">
-                Limpiar todo
-              </button>
-              <button @click="open = false"
-                      class="text-slate-400 hover:text-slate-600 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- Lista -->
-          <div class="flex-1 overflow-y-auto divide-y divide-gray-50">
-
-            <template x-if="notifications.length === 0">
-              <div class="flex flex-col items-center justify-center h-48 text-slate-400 px-6 text-center">
-                <svg class="w-10 h-10 mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-                </svg>
-                <p class="text-sm font-medium text-slate-500">Sin notificaciones</p>
-                <p cl
-                
-                
-                ass="text-xs text-slate-400 mt-1">Todo al día</p>
-              </div>
-            </template>
-
-            <template x-for="n in notifications" :key="n.id">
-              <div class="group relative hover:bg-slate-50 transition-colors">
-                <a :href="n.url" @click="dismiss(n.id); open = false"
-                   class="flex gap-3 px-4 py-3 cursor-pointer">
-
-                  <!-- Ícono por tipo -->
-                  <div class="shrink-0 mt-0.5">
-                    <div :class="{
-                           'bg-blue-100 text-blue-600': ['task_assigned', 'task_evidence', 'message'].includes(n.type),
-                           'bg-amber-100  text-amber-600':  n.type === 'task_dept',
-                           'bg-emerald-100 text-emerald-600': n.type === 'task_status',
-                           'bg-green-100 text-green-600':  n.type === 'task_approved',
-                           'bg-sky-100   text-sky-600':    n.type === 'task_comment',
-                           'bg-red-100   text-red-600':    n.type === 'missed_call',
-                         }"
-                         class="w-8 h-8 rounded-full flex items-center justify-center">
-
-                      <template x-if="n.type === 'task_assigned'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'task_dept'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'task_status'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'task_approved'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'task_comment'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M7 8h10M7 12h6m-6 8l-4-4V5a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2H7z"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'task_evidence'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'message'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-1-3z"/>
-                        </svg>
-                      </template>
-                      <template x-if="n.type === 'missed_call'">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/>
-                        </svg>
-                      </template>
-                    </div>
-                  </div>
-
-                  <!-- Contenido -->
-                  <div class="flex-1 min-w-0 pr-4">
-                    <p class="text-sm font-semibold text-slate-800 leading-tight" x-text="n.title"></p>
-                    <p class="text-xs text-slate-500 mt-0.5 truncate" x-text="n.subtitle"></p>
-                    <p class="text-[10px] text-slate-400 mt-1" x-text="relTime(n.created_at)"></p>
-                  </div>
-                </a>
-
-                <!-- Botón descartar (visible al hover) -->
-                <button @click.stop="dismiss(n.id)" title="Descartar"
-                        class="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                  </svg>
-                </button>
-              </div>
-            </template>
-          </div>
-
-          <!-- Pie: Web Push + última actualización -->
-          <div class="shrink-0 px-4 py-2 border-t border-gray-100 bg-slate-50 space-y-1.5">
-            <template x-if="pushState === 'default'">
-              <button @click="enablePush()"
-                      class="w-full text-center text-[11px] font-medium text-blue-600 hover:text-blue-700 transition-colors">
-                Activar notificaciones fuera de la pestaña
-              </button>
-            </template>
-            <template x-if="pushState === 'subscribing'">
-              <p class="text-[11px] text-slate-400 text-center">Activando…</p>
-            </template>
-            <template x-if="pushState === 'enabled'">
-              <button @click="disablePush()"
-                      class="w-full text-center text-[11px] font-medium text-slate-500 hover:text-slate-700 transition-colors">
-                Desactivar notificaciones fuera de la pestaña
-              </button>
-            </template>
-            <template x-if="pushState === 'denied'">
-              <p class="text-[11px] text-slate-400 text-center">
-                Notificaciones del navegador bloqueadas — actívalas en los permisos del sitio.
-              </p>
-            </template>
-            <p class="text-[10px] text-slate-400 text-center">
-              Se mostrarán las últimas 48 h
-            </p>
-          </div>
-        </div>
-      </div>
-      <!-- ── /Notificaciones ───────────────────────────────────────────────── -->
-
       <a href="/auth/profile" {{ nav_current('/auth/profile') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -404,7 +205,7 @@
     <div class="px-4 py-4 border-t border-slate-700">
       {% if current_user %}
       {% set sidebar_name = (current_user.name or '')|trim or 'Usuario' %}
-      <div class="flex items-center gap-3 mb-3">
+      <div class="flex items-center gap-3">
         {% if current_user.avatar_key %}
         <img src="{{ avatar_url(current_user.avatar_key) }}"
              alt="" class="w-8 h-8 rounded-full object-cover shrink-0" />
@@ -418,46 +219,6 @@
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
       </div>
-      <form id="logout-form" method="post" action="/auth/logout" class="flex justify-center">
-        <button type="submit" aria-label="Cerrar sesión" title="Cerrar sesión"
-                class="w-full min-h-11 px-4 py-2 inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium text-slate-300 bg-slate-800 hover:text-red-300 hover:bg-red-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 transition-colors">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 3v9" />
-            <path d="M6.34 5.34a8 8 0 1 0 11.32 0" />
-          </svg>
-          <span>Cerrar sesión</span>
-        </button>
-      </form>
-      <script>
-        (function () {
-          var form = document.getElementById('logout-form');
-          if (!form) return;
-          form.addEventListener('submit', function (e) {
-            e.preventDefault();
-            try { localStorage.removeItem('kb_chat_{{ current_user.id }}'); } catch (err) {}
-
-            var done = function () { form.submit(); };
-            if (!('serviceWorker' in navigator)) { done(); return; }
-
-            navigator.serviceWorker.getRegistration('/sw.js').then(function (reg) {
-              if (!reg) return;
-              return reg.pushManager.getSubscription().then(function (sub) {
-                if (!sub) return;
-                // El push es por navegador/dispositivo, no por cuenta: si no lo
-                // soltamos aquí, el siguiente que inicie sesión en este equipo
-                // seguiría recibiendo los avisos de quien se acaba de ir.
-                return fetch('/api/push/unsubscribe', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ endpoint: sub.endpoint, csrf_token: '{{ csrf_for(current_user.id) }}' }),
-                }).catch(function () {}).then(function () {
-                  return sub.unsubscribe().catch(function () {});
-                });
-              });
-            }).catch(function () {}).then(done);
-          });
-        })();
-      </script>
       {% else %}
       <a href="/auth/login" class="text-slate-400 hover:text-white text-xs">Acceso empleados</a>
       {% endif %}
@@ -736,299 +497,39 @@
     })();
   </script>
 
+  <script>
+    // Web Push se retiró: suelta el service worker (y su suscripción) que hayan
+    // dejado registrado versiones anteriores.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(function (regs) { regs.forEach(function (r) { r.unregister(); }); })
+        .catch(function () {});
+    }
+  </script>
+
   {% if current_user %}
   <script>
-    function notifSystem(userId, csrfToken) {
-      const TTL = 2 * 24 * 60 * 60 * 1000; // 48 h en ms
-      const DB_NAME = `hoss_kb_${userId}`;   // IDB por usuario (aislado por navegador)
-      const STORE = 'notifs';
-      const LS_KEY = `hoss_notifs_${userId}`; // fallback si IndexedDB no está disponible
-
-      // ── Persistencia: IndexedDB (48h) con fallback a localStorage ──────────────
-      let _dbP = null;
-      function _db() {
-        if (_dbP) return _dbP;
-        _dbP = new Promise((resolve, reject) => {
-          let req;
-          try { req = indexedDB.open(DB_NAME, 1); } catch (e) { reject(e); return; }
-          req.onupgradeneeded = () => {
-            const d = req.result;
-            if (!d.objectStoreNames.contains(STORE)) {
-              const os = d.createObjectStore(STORE, { keyPath: 'id' });
-              os.createIndex('ts', 'ts');
-            }
-          };
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
-        return _dbP;
-      }
-      // Nota: sin `await` entre operaciones dentro de una misma transacción,
-      // para no toparse con el auto-commit de IndexedDB.
-      async function _getAll() {
-        const d = await _db();
-        return new Promise((resolve) => {
-          const rq = d.transaction(STORE, 'readonly').objectStore(STORE).getAll();
-          rq.onsuccess = () => resolve(rq.result || []);
-          rq.onerror = () => resolve([]);
-        });
-      }
-      async function _putMany(list) {
-        if (!list.length) return;
-        const d = await _db();
-        return new Promise((resolve) => {
-          const tx = d.transaction(STORE, 'readwrite');
-          const os = tx.objectStore(STORE);
-          list.forEach(r => os.put(r));
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-          tx.onabort = () => resolve();
-        });
-      }
-      async function _deleteMany(ids) {
-        if (!ids.length) return;
-        const d = await _db();
-        return new Promise((resolve) => {
-          const tx = d.transaction(STORE, 'readwrite');
-          const os = tx.objectStore(STORE);
-          ids.forEach(id => os.delete(id));
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        });
-      }
-
-      // Fallback en memoria + localStorage (solo si IDB falla).
-      let _idbOk = true;
-      let _mem = [];
-      function _lsLoad() {
-        try {
-          // El respaldo contiene únicamente avisos descartados.
-          return (JSON.parse(localStorage.getItem(LS_KEY) || '{"items":[]}').items || [])
-            .map(n => ({ ...n, dismissed: true }));
-        }
-        catch (e) { return []; }
-      }
-      function _lsSave(items) {
-        try { localStorage.setItem(LS_KEY, JSON.stringify({ items })); } catch (e) {}
-      }
-
-      const _norm = (n, ts, dismissed) => ({
-        id: n.id, type: n.type, title: n.title, subtitle: n.subtitle,
-        url: n.url, created_at: n.created_at,
-        ts: ts, dismissed: !!dismissed,
-      });
-
+    // Badge de Mensajes del sidebar. Las demás notificaciones se concentran en
+    // HossExtension (notificationservice).
+    function navBadges() {
       return {
-        open: false,
-        notifications: [],
-        total: 0,
         messageCount: 0,
-        pushState: 'unsupported', // 'unsupported' | 'default' | 'denied' | 'subscribing' | 'enabled'
 
-        get assignedTaskCount() {
-          return new Set(this.notifications
-            .filter(n => n.type === 'task_assigned').map(n => n.url)).size;
-        },
-
-        async init() {
-          try { await this._prune(); } catch (e) { _idbOk = false; }
-          _mem = _lsLoad();      // por si hubo fallback previo
-          await this._reload();
-          await this._fetch();
-          if (window.location.pathname.replace(/\/$/, '') === '/tasks') {
-            const assignedIds = this.notifications
-              .filter(n => n.type === 'task_assigned').map(n => n.id);
-            setTimeout(async () => {
-              if (window.location.pathname.replace(/\/$/, '') !== '/tasks') return;
-              for (const id of assignedIds) { await this.dismiss(id); }
-            }, 10000);
-          }
+        init() {
+          this._fetch();
           window.addEventListener('notif:refresh', () => this._fetch());
           window.addEventListener('htmx:afterSwap', (e) => {
-            if (e.detail.target.id === 'message-feed') return this._fetch();
+            if (e.detail.target.id === 'message-feed') this._fetch();
           });
-          // Notificaciones generadas en el cliente (p. ej. llamadas perdidas).
-          window.addEventListener('notif:add', (e) => this._add(e.detail));
           setInterval(() => this._fetch(), 180000);
-          this._initPush();
-        },
-
-        // ── Web Push (fuera de la pestaña) ──────────────────────────────────────
-        async _initPush() {
-          if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-            console.warn('[push] navegador sin soporte para Service Worker/Push');
-            return;
-          }
-          if (!window.isSecureContext) {
-            console.warn('[push] contexto no seguro (hace falta HTTPS o localhost) — Push deshabilitado');
-            return;
-          }
-          try {
-            const reg = await navigator.serviceWorker.register('/sw.js');
-            const sub = await reg.pushManager.getSubscription();
-            if (sub) {
-              // Ya había una suscripción de este navegador — el push es por
-              // dispositivo/origen, no por cuenta, así que pudo quedar de OTRA
-              // persona que usó sesión aquí antes. Reconfirma el dueño ante el
-              // servidor para que quede asociada a quien está autenticado ahora.
-              await this._registerSubscription(sub);
-              this.pushState = 'enabled';
-              return;
-            }
-            this.pushState = Notification.permission === 'denied' ? 'denied' : 'default';
-          } catch (e) {
-            console.error('[push] fallo registrando el service worker:', e);
-          }
-        },
-
-        _urlB64ToUint8Array(b64) {
-          const padding = '='.repeat((4 - (b64.length % 4)) % 4);
-          const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
-          const raw = atob(base64);
-          return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
-        },
-
-        async _registerSubscription(sub) {
-          try {
-            const subRes = await fetch('/api/push/subscribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...sub.toJSON(), csrf_token: csrfToken }),
-            });
-            if (!subRes.ok) console.error('[push] el servidor rechazó la suscripción:', subRes.status);
-          } catch (e) {
-            console.error('[push] no se pudo confirmar la suscripción con el servidor:', e);
-          }
-        },
-
-        async enablePush() {
-          this.pushState = 'subscribing';
-          try {
-            const perm = await Notification.requestPermission();
-            if (perm !== 'granted') {
-              console.warn('[push] permiso no concedido:', perm);
-              this.pushState = perm === 'denied' ? 'denied' : 'default';
-              return;
-            }
-
-            const keyRes = await fetch('/api/push/vapid-public-key');
-            if (!keyRes.ok) {
-              console.error('[push] el servidor no tiene VAPID configurado (', keyRes.status, ') — revisa VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY');
-              this.pushState = 'default';
-              return;
-            }
-            const { key } = await keyRes.json();
-
-            const reg = await navigator.serviceWorker.ready;
-            const sub = await reg.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: this._urlB64ToUint8Array(key),
-            });
-            await this._registerSubscription(sub);
-            this.pushState = 'enabled';
-          } catch (e) {
-            console.error('[push] fallo activando notificaciones:', e);
-            this.pushState = 'default';
-          }
-        },
-
-        async disablePush() {
-          try {
-            const reg = await navigator.serviceWorker.ready;
-            const sub = await reg.pushManager.getSubscription();
-            if (sub) {
-              await fetch('/api/push/unsubscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ endpoint: sub.endpoint, csrf_token: csrfToken }),
-              });
-              await sub.unsubscribe();
-            }
-          } finally { this.pushState = 'default'; }
-        },
-
-        async _prune() {
-          const cutoff = Date.now() - TTL;
-          const all = await _getAll();
-          const stale = all.filter(n => !n.ts || n.ts < cutoff).map(n => n.id);
-          await _deleteMany(stale);
-        },
-
-        _render(list) {
-          const cutoff = Date.now() - TTL;
-          const fresh = list.filter(n => n.ts >= cutoff && !n.dismissed)
-                            .sort((a, b) => b.ts - a.ts);
-          this.notifications = fresh;
-          this.total = fresh.length;
-        },
-
-        async _reload() {
-          try { this._render(await _getAll()); }
-          catch (e) { _idbOk = false; this._render(_mem); }
-        },
-
-        async _store(records) {
-          if (_idbOk) {
-            try { await _putMany(records); return; } catch (e) { _idbOk = false; }
-          }
-          // fallback: fusiona en memoria + persiste ids descartados en localStorage
-          const byId = {}; _mem.forEach(n => byId[n.id] = n);
-          records.forEach(n => byId[n.id] = n);
-          _mem = Object.values(byId);
-          _lsSave(_mem.filter(n => n.dismissed).map(n => ({ id: n.id, ts: n.ts })));
         },
 
         async _fetch() {
-          let data;
           try {
-            const res = await fetch('/api/notifications');
+            const res = await fetch('/api/messages/unread-count');
             if (!res.ok) return;
-            data = await res.json();
-          } catch (e) { return; }
-          // Cuenta las conversaciones que el servidor todavía considera sin leer.
-          this.messageCount = new Set(data.filter(n => n.type === 'message').map(n => n.url)).size;
-          try {
-            const existing = {};
-            (await (_idbOk ? _getAll() : Promise.resolve(_mem))).forEach(n => existing[n.id] = n);
-            const merged = data.map(n => {
-              const prev = existing[n.id];
-              const ts = prev ? prev.ts : (Date.parse(n.created_at) || Date.now());
-              return _norm(n, ts, prev ? prev.dismissed : false);
-            });
-            await this._store(merged);
+            this.messageCount = (await res.json()).count;
           } catch (e) {}
-          await this._reload();
-        },
-
-        async _add(n) {
-          if (!n || !n.id) return;
-          await this._store([_norm(n, Date.now(), false)]);
-          await this._reload();
-        },
-
-        async dismiss(id) {
-          const cur = this.notifications.find(n => n.id === id);
-          const rec = cur ? _norm(cur, cur.ts, true)
-                          : { id, dismissed: true, ts: Date.now() };
-          await this._store([rec]);
-          this.notifications = this.notifications.filter(n => n.id !== id);
-          this.total = this.notifications.length;
-        },
-
-        async dismissAll() {
-          const ids = this.notifications.map(n => n.id);
-          for (const id of ids) { await this.dismiss(id); }
-          this.open = false;
-        },
-
-        relTime(iso) {
-          const diff = Date.now() - new Date(iso).getTime();
-          const m = Math.floor(diff / 60000);
-          if (m < 1)  return 'Ahora mismo';
-          if (m < 60) return `Hace ${m}m`;
-          const h = Math.floor(m / 60);
-          if (h < 24) return `Hace ${h}h`;
-          return `Hace ${Math.floor(h / 24)}d`;
         },
       };
     }
@@ -1096,37 +597,22 @@
             if (this.incoming && this.incoming.call_id === d.call_id) return;
             this.incoming = d;
             clearTimeout(this._timer);
-            // Sin respuesta en 30s → llamada perdida.
+            // Sin respuesta en 30s se oculta el aviso.
             this._timer = setTimeout(() => {
               if (this.incoming && this.incoming.call_id === d.call_id) {
-                this._miss(this.incoming);
                 this.incoming = null;
               }
             }, 30000);
           } else if (d.type === 'call_cancel') {
             if (this.incoming && String(this.incoming.conv_id) === String(d.conv_id)) {
-              // El que llama colgó sin respuesta → llamada perdida.
-              this._miss(this.incoming);
+              // El que llama colgó sin respuesta.
               this.incoming = null;
               clearTimeout(this._timer);
             }
           } else if (d.type === 'notify') {
-            // Tell the notification bell to refresh instantly (shared SSE).
+            // Tell the Mensajes badge to refresh instantly (shared SSE).
             window.dispatchEvent(new CustomEvent('notif:refresh'));
           }
-        },
-
-        // Emite una notificación de llamada perdida (la persiste el notifSystem en IndexedDB).
-        _miss(call) {
-          if (!call) return;
-          window.dispatchEvent(new CustomEvent('notif:add', { detail: {
-            id: 'missed_call_' + call.call_id,
-            type: 'missed_call',
-            title: 'Llamada perdida',
-            subtitle: call.caller_name || 'Llamada',
-            url: '/messaging/' + call.conv_id,
-            created_at: new Date().toISOString(),
-          }}));
         },
 
         join() {
@@ -1139,7 +625,6 @@
         },
 
         dismiss() {
-          // "Descartar" = rechazo consciente; no se registra como perdida.
           this.incoming = null;
           clearTimeout(this._timer);
         },

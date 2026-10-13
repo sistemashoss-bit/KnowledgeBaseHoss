@@ -73,13 +73,6 @@ class Settings(BaseSettings):
     voyage_embedding_dim: int = 2048
     voyage_rerank_model: str = "rerank-2.5"
 
-    # Web Push (notificaciones fuera de la pestaña, vía service worker).
-    # Vacíos = push deshabilitado (silenciosamente): el resto de notificaciones
-    # (dropdown + SSE) sigue funcionando igual. El correo admin (claim VAPID
-    # "sub") no es secreto y no depende del entorno — está fijo en app/push.py.
-    vapid_public_key: str = ""
-    vapid_private_key: str = ""
-
     # Servicio central de notificaciones (notificationservice, vía RabbitMQ).
     # Vacío = no se publican; las notificaciones propias de knowledge siguen igual.
     # public_url: base para volver absolutas las URLs (se abren desde la extensión).

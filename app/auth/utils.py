@@ -21,10 +21,6 @@ def set_auth_cookie(response: Response, token: str) -> None:
     )
 
 
-def clear_auth_cookie(response: Response) -> None:
-    response.delete_cookie(AUTH_COOKIE)
-
-
 def create_access_token(user_id: str, role: str, department_id) -> str:
     expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes)
     return jwt.encode(

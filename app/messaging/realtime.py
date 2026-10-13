@@ -69,27 +69,21 @@ def user_channel(user_id) -> str:
 def notify_user(
     user_id, title: str | None = None, body: str = "", url: str = "/", kind: str | None = None,
 ) -> None:
-    """Push a lightweight 'refresh your notifications' signal to a user.
+    """Push a lightweight 'refresh your badges' signal to a user.
 
-    The client re-fetches /api/notifications on receipt. No-op (falls back to the
+    The client re-fetches /api/messages/unread-count on receipt. No-op (falls back to the
     client's slow poll) when Valkey is unavailable.
 
-    When `title` is given, this also sends a Web Push notification (service
-    worker) so it surfaces outside an open tab — best-effort, see app.push.
-
-    With `kind` (and `title`) it is also published to the central notification
+    With `kind` and `title` it is also published to the central notification
     service (app.notification_bus). Chat messages don't pass it: they'd flood
     the central inbox and already have their own unread counter.
     """
     from app import valkey_client as vk
     vk.publish(user_channel(user_id), json.dumps({"type": "notify"}))
 
-    if title:
-        from app import push
-        push.send_to_user(user_id, title, body, url)
-        if kind:
-            from app import notification_bus
-            notification_bus.publish(user_id, kind, title, body, url)
+    if title and kind:
+        from app import notification_bus
+        notification_bus.publish(user_id, kind, title, body, url)
 
 
 def tasks_channel() -> str:

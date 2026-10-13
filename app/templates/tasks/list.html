@@ -321,6 +321,8 @@
       try { saved = localStorage.getItem('tasks_view') || 'kanban'; } catch (e) {}
       setTasksView(saved);
     })();
+    // El detalle vuelve aquí (tab, búsqueda y filtros) al regresar o eliminar.
+    try { sessionStorage.setItem('tasks_back', location.pathname + location.search); } catch (e) {}
 
     // ── Live updates (SSE over Valkey pub/sub) ─────────────────────────────
     // Any create/status/assign/archive/tag/delete change anywhere broadcasts
