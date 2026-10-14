@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, require_auth
 from app.auth.provisioning import provision_from_identity
 from app.auth.utils import (
+    AUTH_COOKIE,
     create_access_token,
     generate_csrf_token,
     set_auth_cookie,
@@ -35,17 +38,50 @@ def login_page(request: Request, user=Depends(get_current_user)):
     return _access_page(request)
 
 
+# ── Logout ────────────────────────────────────────────────────────────────────
+def _safe_logout_next(next_url: str | None) -> str | None:
+    """Destino tras cerrar sesión: solo https dentro de hoss.com.mx (la cadena de
+    cierre de sesión de HossExtension pasa por cada sitio y termina en hoss-front)."""
+    if not next_url:
+        return None
+    parts = urlsplit(next_url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or not (host == "hoss.com.mx" or host.endswith(".hoss.com.mx")):
+        return None
+    return next_url
+
+
+@router.get("/logout")
+def logout(next: str | None = None):
+    """Borra la cookie de sesión. Es GET y sin CSRF a propósito: lo abre
+    HossExtension (o la app de escritorio) como navegación encadenada por todos
+    los sitios, y lo peor que puede hacer un tercero es cerrarte la sesión."""
+    resp = RedirectResponse(_safe_logout_next(next) or "/auth/login", status_code=302)
+    resp.delete_cookie(AUTH_COOKIE, httponly=True, samesite="lax")
+    return resp
+
+
 # ── SSO handoff desde hoss-front ────────────────────────────────────────────────
+
+def _safe_next(next_url: str | None) -> str | None:
+    """Solo rutas relativas de este sitio: evita usar el handoff como open redirect."""
+    if not next_url or not next_url.startswith("/") or next_url.startswith(("//", "/\\")):
+        return None
+    return next_url
+
 
 @router.post("/sso")
 async def sso_handoff(
     request: Request,
     token: str = Form(...),
+    next: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """Recibe el accessToken de hoss-api (el que NextAuth ya guarda en la sesión
     de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
-    login. El token viaja por POST para no filtrarlo en URL/referer/logs."""
+    login. El token viaja por POST para no filtrarlo en URL/referer/logs.
+    `next`: ruta a la que ir al entrar (p. ej. la de una notificación de la
+    extensión); sin ella, a /documents/."""
     try:
         identity = await hoss.introspect_session(token)
     except hoss.AccessDenied:
@@ -62,7 +98,7 @@ async def sso_handoff(
     vk.store_hoss_token(user.id, token)
 
     access = create_access_token(str(user.id), user.role, user.department_id)
-    resp = RedirectResponse("/documents/", status_code=302)
+    resp = RedirectResponse(_safe_next(next) or "/documents/", status_code=302)
     set_auth_cookie(resp, access)
     return resp
 

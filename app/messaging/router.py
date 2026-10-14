@@ -235,7 +235,7 @@ def _get_or_create_direct(user_a_id, user_b_id, db: Session) -> Conversation:
     return conv
 
 
-def _mark_read(conv_id, user_id, db: Session):
+def _mark_read(conv_id, user_id, db: Session, *, force_publish: bool = False):
     p = (
         db.query(ConversationParticipant)
         .filter(
@@ -246,7 +246,9 @@ def _mark_read(conv_id, user_id, db: Session):
     )
     if p:
         # Se llama en cada poll del chat abierto: solo se avisa a
-        # notificationservice cuando de verdad había algo sin leer.
+        # notificationservice cuando de verdad había algo sin leer. Al abrir el
+        # chat (force_publish) se avisa siempre, para corregir un contador que
+        # se haya quedado desfasado (p. ej. un `read` perdido).
         unread = db.query(Message.id).filter(
             Message.conversation_id == conv_id,
             Message.sender_id != user_id,
@@ -256,7 +258,7 @@ def _mark_read(conv_id, user_id, db: Session):
         had_unread = unread.first() is not None
         p.last_read_at = datetime.utcnow()
         db.commit()
-        if had_unread:
+        if had_unread or force_publish:
             notification_bus.publish_read(conv_id, user_id)
 
 
@@ -345,7 +347,7 @@ def conversation_view(
     if not is_participant:
         raise HTTPException(403)
 
-    _mark_read(conv_id, current_user.id, db)
+    _mark_read(conv_id, current_user.id, db, force_publish=True)
 
     messages = (
         db.query(Message)
@@ -641,13 +643,11 @@ def send_message(
     _mark_read(conv_id, current_user.id, db)
     db.commit()
 
-    # Real-time fan-out to every open client in this conversation.
-    vk.publish(realtime.channel(conv_id))
-    # Poke each recipient's Mensajes badge (SSE refresh trigger).
+    # El mensaje va a notificationservice ANTES del fan-out en tiempo real: si el
+    # destinatario tiene el chat abierto, su refresco publica `read` y debe
+    # llegar después del `message`, o el contador queda en 1 para siempre.
     preview = content[:120] if content else "Archivo adjunto"
     recipient_ids = _other_participant_ids(conv_id, current_user.id, db)
-    for uid in recipient_ids:
-        realtime.notify_user(uid)
     conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
     notification_bus.publish_message(
         conv_id,
@@ -658,6 +658,12 @@ def send_message(
         preview,
         f"/messaging/{conv_id}",
     )
+
+    # Real-time fan-out to every open client in this conversation.
+    vk.publish(realtime.channel(conv_id))
+    # Poke each recipient's Mensajes badge (SSE refresh trigger).
+    for uid in recipient_ids:
+        realtime.notify_user(uid)
 
     if valid_files:
         audit.log_action(
