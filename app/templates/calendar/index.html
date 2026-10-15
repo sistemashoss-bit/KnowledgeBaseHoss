@@ -22,7 +22,7 @@
   <div class="mx-auto grid w-full max-w-none gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
 
     <!-- Panel lateral -->
-    <aside class="space-y-4">
+    <aside class="space-y-4"> 
       <div class="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
         <h1 class="text-xl font-bold text-gray-900">Calendario</h1>
         <button type="button" @click="openNew()"
@@ -108,7 +108,7 @@
     </aside>
 
     <!-- Calendario -->
-    <section class="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
+    <section class="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0 h-[90vh] overflow-y-auto">
       <div id="calendar" x-ref="calendar"></div>
     </section>
   </div>
@@ -313,7 +313,7 @@
             ? { left: 'prev,next today', center: '', right: 'listWeek,timeGridDay,dayGridMonth' }
             : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
           footerToolbar: mobile ? { center: 'title' } : false,
-          height: 'auto',
+          height: '100%',
           nowIndicator: true,
           dayMaxEvents: 4,
           eventDisplay: 'block',
