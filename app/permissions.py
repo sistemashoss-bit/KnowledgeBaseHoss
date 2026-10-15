@@ -217,3 +217,131 @@ def can_manage_doc_dict(user: "User | None", doc_dict: dict) -> bool:
     if doc_dict.get("uploaded_by") and doc_dict.get("uploaded_by") == str(user.id):
         return True
     return False
+
+
+def manager_scope(user: "User", db) -> dict | None:
+    """Alcance de gestión de un encargado.
+
+    - superadmin → None (sin restricción, todo).
+    - admin CON zona(s) (coordinador regional) y/o sucursales sueltas
+      asignadas directamente (supervisor) → sólo esas sucursales
+      (`branch_ids`); no todo el departamento.
+    - admin SIN zona ni sucursales (jefe de departamento) → todo su
+      departamento (`dept_ids`).
+
+    Devuelve un dict con `dept_ids` y `branch_ids` (uno de los dos vacío según el
+    caso), o None para superadmin.
+    """
+    from app.models import Branch, ROLE_SUPERADMIN
+
+    if user.role == ROLE_SUPERADMIN:
+        return None
+
+    zone_ids = [uz.zone_id for uz in user.user_zones]
+    branch_ids = set()
+    if zone_ids:
+        branch_ids |= {
+            row[0] for row in db.query(Branch.id).filter(Branch.zone_id.in_(zone_ids)).all()
+        }
+    branch_ids |= {ub.branch_id for ub in user.user_branches}
+    if branch_ids:
+        return {"dept_ids": set(), "branch_ids": branch_ids}
+
+    return {"dept_ids": {user.department_id} if user.department_id else set(), "branch_ids": set()}
+
+
+def branch_user_ids(branch_ids: set, db) -> set:
+    """IDs de usuarios que pertenecen a las sucursales dadas."""
+    from app.models import User
+
+    if not branch_ids:
+        return set()
+    return {row[0] for row in db.query(User.id).filter(User.branch_id.in_(branch_ids)).all()}
+
+
+def visible_projects_filter(user: "User", db):
+    """Condición SQL de proyectos visibles, o None si no hay restricción
+    (superadmin): los que creó y los de su departamento, sucursal, zonas o
+    sucursales asignadas."""
+    from sqlalchemy import or_
+    from app.models import Project, UserBranch, UserZone, ROLE_SUPERADMIN
+
+    if user.role == ROLE_SUPERADMIN:
+        return None
+
+    conditions = [Project.created_by == user.id]
+
+    if user.department_id:
+        conditions.append(Project.department_id == user.department_id)
+    if user.branch_id:
+        conditions.append(Project.branch_id == user.branch_id)
+
+    zone_ids = [uz.zone_id for uz in db.query(UserZone).filter(UserZone.user_id == user.id).all()]
+    if zone_ids:
+        conditions.append(Project.zone_id.in_(zone_ids))
+
+    direct_branch_ids = [ub.branch_id for ub in db.query(UserBranch).filter(UserBranch.user_id == user.id).all()]
+    if direct_branch_ids:
+        conditions.append(Project.branch_id.in_(direct_branch_ids))
+
+    return or_(*conditions)
+
+
+def visible_projects_query(user: "User", db):
+    """Proyectos visibles para el usuario, con sus relaciones precargadas."""
+    from sqlalchemy.orm import joinedload
+    from app.models import Project
+
+    q = db.query(Project).options(
+        joinedload(Project.department),
+        joinedload(Project.branch),
+        joinedload(Project.zone),
+        joinedload(Project.created_by_user),
+        joinedload(Project.tasks),
+    )
+    cond = visible_projects_filter(user, db)
+    return q if cond is None else q.filter(cond)
+
+
+def calendar_members_query(viewer: "User", db):
+    """Usuarios cuyo calendario puede agregar `viewer` a su vista.
+
+    - superadmin → cualquier persona activa.
+    - admin sin zona → employees y auditores de su departamento.
+    - admin con zona/sucursales → employees y auditores de esas sucursales.
+    - employee / auditor → nadie (solo su propio calendario).
+
+    Se evalúa en cada consulta, no solo al suscribirse: si alguien cambia de
+    departamento o sucursal, la suscripción deja de mostrarlo sola.
+    """
+    from sqlalchemy import false
+    from app.models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_EMPLOYEE, ROLE_AUDITOR
+
+    q = db.query(User).filter(User.is_active.is_(True), User.id != viewer.id)
+    if viewer.role == ROLE_SUPERADMIN:
+        return q
+    if viewer.role != ROLE_ADMIN:
+        return q.filter(false())
+
+    q = q.filter(User.role.in_((ROLE_EMPLOYEE, ROLE_AUDITOR)))
+    scope = manager_scope(viewer, db)
+    if scope["branch_ids"]:
+        return q.filter(User.branch_id.in_(scope["branch_ids"]))
+    if scope["dept_ids"]:
+        return q.filter(User.department_id.in_(scope["dept_ids"]))
+    return q.filter(false())
+
+
+def calendar_department_ids(viewer: "User", db) -> set | None:
+    """Departamentos que `viewer` puede agregar completos. None = todos
+    (superadmin). Para un admin con zona son los departamentos de las personas
+    de sus sucursales; al agregar uno solo se ven las de su alcance."""
+    from app.models import User, ROLE_SUPERADMIN
+
+    if viewer.role == ROLE_SUPERADMIN:
+        return None
+    return {
+        row[0] for row in calendar_members_query(viewer, db)
+        .filter(User.department_id.isnot(None))
+        .with_entities(User.department_id).distinct().all()
+    }

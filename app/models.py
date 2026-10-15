@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -45,6 +45,15 @@ TASK_PRIORITIES = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_URGENT
 
 # ── Task tag colors (paleta fija, mapeada a clases Tailwind en la plantilla) ───
 TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "pink"]
+
+# ── Calendar constants ────────────────────────────────────────────────────────
+# Minutos antes del inicio en que llega el recordatorio. En eventos de todo el
+# día cuenta en días completos (0 = ese día, 1440 = el día anterior) y llega a
+# CALENDAR_ALL_DAY_REMINDER_HOUR hora local, no a medianoche.
+CALENDAR_REMINDER_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 1440]
+CALENDAR_ALL_DAY_REMINDER_HOUR = 8
+# Tope de calendarios ajenos (personas + departamentos) que alguien agrega a su vista.
+CALENDAR_MAX_SUBSCRIPTIONS = 50
 
 # ── Recurring task constants ──────────────────────────────────────────────────
 FREQ_DAILY = "daily"
@@ -396,6 +405,9 @@ class Task(Base):
     # Set cuando la tarea se saca del tablero (manual o por el job diario de
     # archivado); NULL = visible en el Kanban.
     archived_at = Column(DateTime, nullable=True)
+    # Último día (hora local) en que se avisó al asignado que la tarea vence
+    # hoy/mañana; evita repetir el aviso si el scheduler corre varias veces.
+    due_reminded_on = Column(Date, nullable=True)
 
     project = relationship("Project", back_populates="tasks")
     department = relationship("Department", back_populates="tasks")
@@ -541,6 +553,67 @@ class TaskEvidence(Base):
 
     task = relationship("Task", back_populates="evidences")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+# ── Calendar ──────────────────────────────────────────────────────────────────
+
+class CalendarEvent(Base):
+    """Cita o actividad del calendario personal de `owner_id`. Solo su dueño la
+    edita; quien tenga su calendario agregado (admin de su área, superadmin) la
+    ve completa en solo lectura. Fechas en UTC como el resto de la app."""
+    __tablename__ = "calendar_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    location = Column(String(255), nullable=True)
+    color = Column(String(20), nullable=False, default="blue")  # TASK_TAG_COLORS
+    all_day = Column(Boolean, nullable=False, default=False)
+    start_at = Column(DateTime, nullable=False)
+    # Exclusivo (en todo el día, la medianoche del día siguiente al último).
+    end_at = Column(DateTime, nullable=False)
+
+    # Null = sin recordatorio. `remind_at` se calcula al guardar (ver
+    # CALENDAR_REMINDER_OPTIONS) y `reminded_at` se llena al enviarlo; ambos se
+    # recalculan/limpian si cambia la fecha o el recordatorio.
+    reminder_minutes = Column(Integer, nullable=True)
+    remind_at = Column(DateTime, nullable=True)
+    reminded_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    owner = relationship("User", foreign_keys=[owner_id])
+
+
+class CalendarSubscription(Base):
+    """Calendario ajeno que `viewer_id` agregó a su vista: una persona o un
+    departamento completo (exactamente uno). El permiso se revalida en cada
+    consulta (permissions.calendar_members_query), así que una suscripción que
+    quedó fuera de alcance simplemente deja de mostrar datos."""
+    __tablename__ = "calendar_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("viewer_id", "target_user_id", name="uq_calendar_subscriptions_viewer_user"),
+        UniqueConstraint("viewer_id", "target_department_id", name="uq_calendar_subscriptions_viewer_department"),
+        CheckConstraint(
+            "(target_user_id IS NULL) <> (target_department_id IS NULL)",
+            name="ck_calendar_subscriptions_one_target",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    viewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    target_department_id = Column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True,
+    )
+    is_visible = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    viewer = relationship("User", foreign_keys=[viewer_id])
+    target_user = relationship("User", foreign_keys=[target_user_id])
+    target_department = relationship("Department", foreign_keys=[target_department_id])
 
 
 # ── Internal communication ────────────────────────────────────────────────────

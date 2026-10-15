@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     # Tareas: días en "Listo" antes de archivarse automáticamente del Kanban
     task_archive_after_days: int = 7
+    # Hora local a partir de la cual se avisa de tareas que vencen hoy/mañana
+    task_due_reminder_hour_local: int = 8
 
     # Wasabi S3-compatible — solo las credenciales son secretas (van en .env).
     # Los nombres de bucket, región y endpoint son estables y viven aquí.

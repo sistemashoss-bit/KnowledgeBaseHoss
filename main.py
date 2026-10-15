@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     from app.models import Base
     from app import search as search_module
     from app.messaging.cleanup import recurring_scheduler_loop, scheduler_loop
+    from app.calendar.reminders import reminder_scheduler_loop
 
     Base.metadata.create_all(bind=engine)
     search_module.ensure_indices()
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     background = [
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(recurring_scheduler_loop()),
+        asyncio.create_task(reminder_scheduler_loop()),
     ]
     try:
         yield
@@ -165,6 +167,7 @@ from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
 from app.notifications.router import router as notifications_router
 from app.issue_reports.router import router as issue_reports_router
+from app.calendar.router import router as calendar_router
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import build_access_filter
@@ -187,6 +190,7 @@ app.include_router(messaging_router)
 app.include_router(reports_router)
 app.include_router(notifications_router)
 app.include_router(issue_reports_router)
+app.include_router(calendar_router)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)

@@ -51,6 +51,12 @@ ACTION_LABELS: dict[str, str] = {
     "recurring_toggle": "Activar/desactivar tarea recurrente",
     "recurring_delete": "Eliminación de tarea recurrente",
     "recurring_generate": "Generación automática de tarea recurrente",
+    # Calendario
+    "calendar_event_create": "Creación de evento de calendario",
+    "calendar_event_update": "Edición de evento de calendario",
+    "calendar_event_delete": "Eliminación de evento de calendario",
+    "calendar_subscription_add": "Calendario agregado a la vista",
+    "calendar_subscription_remove": "Calendario quitado de la vista",
     # Organización
     "org_sync": "Sincronización de organización",
     "zone_create": "Creación de zona",

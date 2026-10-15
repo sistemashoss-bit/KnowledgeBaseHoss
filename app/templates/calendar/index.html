@@ -1,0 +1,560 @@
+{% extends "base.html" %}
+{% block title %}Calendario{% endblock %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.15/locales/es.global.min.js"></script>
+<style>
+  #calendar .fc-event { cursor: pointer; }
+  #calendar .fc-ev-done .fc-ev-title { text-decoration: line-through; opacity: .7; }
+  #calendar .fc-ev-inner { display: flex; align-items: center; gap: .25rem; overflow: hidden; padding: 0 2px; }
+  #calendar .fc-ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #calendar .fc-ev-badge { flex-shrink: 0; font-size: 9px; font-weight: 700; line-height: 1; padding: 2px 3px; border-radius: 3px; background: rgba(255,255,255,.35); }
+  #calendar .fc-toolbar-title { font-size: 1.1rem; font-weight: 700; }
+  #calendar .fc-button { font-size: .8rem; padding: .3rem .6rem; }
+  @media (max-width: 639px) {
+    #calendar .fc-header-toolbar { flex-wrap: wrap; gap: .5rem; }
+    #calendar .fc-toolbar-title { font-size: 1rem; }
+  }
+</style>
+
+<div class="flex-1 overflow-y-auto p-4 sm:p-6" x-data="calendarPage()">
+  <div class="max-w-7xl mx-auto grid gap-4 lg:grid-cols-[16rem_1fr]">
+
+    <!-- Panel lateral -->
+    <aside class="space-y-4">
+      <div class="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <h1 class="text-xl font-bold text-gray-900">Calendario</h1>
+        <button type="button" @click="openNew()"
+                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
+          + Nuevo evento
+        </button>
+        <label class="flex items-center justify-between gap-3 text-sm text-gray-700 cursor-pointer">
+          <span>Tareas y proyectos</span>
+          <input type="checkbox" x-model="work" @change="saveWork(); refetch()" class="sr-only peer" />
+          <span class="relative w-9 h-5 rounded-full bg-gray-300 peer-checked:bg-blue-600 transition-colors
+                       after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform
+                       peer-checked:after:translate-x-4" aria-hidden="true"></span>
+        </label>
+        <p class="text-xs text-gray-400">Muestra las fechas límite de tus tareas y proyectos.</p>
+      </div>
+
+      {% if can_subscribe %}
+      <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <h2 class="text-sm font-semibold text-gray-700 mb-3">Calendarios agregados</h2>
+        {% if subscriptions %}
+        <ul class="space-y-2 mb-4">
+          {% for row in subscriptions %}
+          <li class="flex items-start gap-2">
+            <input type="checkbox" {% if row.sub.is_visible %}checked{% endif %} {% if not row.in_scope %}disabled{% endif %}
+                   @change="toggleSub('{{ row.sub.id }}')"
+                   class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                   aria-label="Mostrar {{ row.label }}" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-gray-800 truncate">{{ row.label }}</p>
+              <p class="text-xs {% if row.in_scope %}text-gray-400{% else %}text-amber-600{% endif %} truncate">
+                {% if row.in_scope %}{{ row.detail }}{% else %}Fuera de tu alcance{% endif %}
+              </p>
+            </div>
+            <form method="post" action="/calendar/subscriptions/{{ row.sub.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit" class="text-gray-400 hover:text-red-600 text-sm leading-none px-1" title="Quitar" aria-label="Quitar {{ row.label }}">✕</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-xs text-gray-400 mb-4">Agrega el calendario de una persona o de un departamento completo para ver sus citas.</p>
+        {% endif %}
+
+        {% if subscriptions|length < max_subscriptions %}
+        {% if member_options %}
+        <form method="post" action="/calendar/subscriptions" class="mb-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label class="block text-xs font-medium text-gray-600 mb-1">Persona</label>
+          <div class="flex gap-2">
+            <select name="target_user_id" required
+                    class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">Elegir…</option>
+              {% for u in member_options %}
+              <option value="{{ u.id }}">{{ u.name or u.email }}{% if u.department %} — {{ u.department.name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="px-3 py-1.5 border border-blue-300 text-blue-600 rounded-lg text-sm hover:bg-blue-50">Agregar</button>
+          </div>
+        </form>
+        {% endif %}
+        {% if department_options %}
+        <form method="post" action="/calendar/subscriptions">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento completo</label>
+          <div class="flex gap-2">
+            <select name="target_department_id" required
+                    class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">Elegir…</option>
+              {% for d in department_options %}
+              <option value="{{ d.id }}">{{ d.name }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="px-3 py-1.5 border border-blue-300 text-blue-600 rounded-lg text-sm hover:bg-blue-50">Agregar</button>
+          </div>
+        </form>
+        {% endif %}
+        {% else %}
+        <p class="text-xs text-gray-400">Llegaste al máximo de {{ max_subscriptions }} calendarios agregados.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </aside>
+
+    <!-- Calendario -->
+    <section class="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
+      <div id="calendar" x-ref="calendar"></div>
+    </section>
+  </div>
+
+  <!-- Tooltip (hover, solo con mouse) -->
+  <div x-show="tip" x-cloak role="tooltip"
+       class="fixed z-[70] w-72 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-lg shadow-lg p-3 pointer-events-none"
+       :style="`left:${tipX}px; top:${tipY}px`">
+    <template x-if="tip">
+      <div x-effect="$el.replaceChildren(detailNodes(tip))"></div>
+    </template>
+  </div>
+
+  <!-- Detalle (clic / toque) -->
+  <div x-show="detail" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+       @click.self="detail = null" @keydown.escape.window="detail = null">
+    <div class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-md p-5" role="dialog" aria-modal="true">
+      <template x-if="detail">
+        <div>
+          <div x-effect="$el.replaceChildren(detailNodes(detail))"></div>
+          <div class="flex flex-wrap justify-end gap-2 mt-5">
+            <template x-if="detail.url">
+              <a :href="detail.url" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">Abrir</a>
+            </template>
+            <template x-if="detail.mine">
+              <button type="button" @click="deleteEvent(detail.id)"
+                      class="px-3 py-1.5 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50">Eliminar</button>
+            </template>
+            <template x-if="detail.mine">
+              <button type="button" @click="openEdit(detail)"
+                      class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">Editar</button>
+            </template>
+            <button type="button" @click="detail = null"
+                    class="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cerrar</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Formulario crear / editar -->
+  <div x-show="form" x-cloak class="fixed inset-0 z-[75] flex items-center justify-center bg-black/40 p-4"
+       @keydown.escape.window="form = null">
+    <form x-show="form" @submit.prevent="saveForm()" class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3"
+          role="dialog" aria-modal="true" aria-labelledby="cal-form-title">
+      <template x-if="form">
+        <div class="space-y-3">
+          <h2 id="cal-form-title" class="text-lg font-semibold text-gray-900" x-text="form.id ? 'Editar evento' : 'Nuevo evento'"></h2>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
+            <input type="text" x-model="form.title" required maxlength="255"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" x-model="form.allDay" @change="fixReminder()" class="rounded border-gray-300 text-blue-600" />
+            Todo el día
+          </label>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Inicio</label>
+              <input type="date" x-model="form.startDate" required @change="if (form.endDate < form.startDate) form.endDate = form.startDate"
+                     class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              <input type="time" x-model="form.startTime" x-show="!form.allDay" :required="!form.allDay"
+                     class="w-full mt-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Fin</label>
+              <input type="date" x-model="form.endDate" required :min="form.startDate"
+                     class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              <input type="time" x-model="form.endTime" x-show="!form.allDay" :required="!form.allDay"
+                     class="w-full mt-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Color</label>
+            <div class="flex flex-wrap gap-2">
+              {% for c in colors %}
+              <button type="button" @click="form.color = '{{ c }}'"
+                      class="w-7 h-7 rounded-full border-2 transition"
+                      :class="form.color === '{{ c }}' ? 'border-gray-900 scale-110' : 'border-transparent'"
+                      :style="`background:${hex('{{ c }}')}`" title="{{ c }}" aria-label="Color {{ c }}"></button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Recordatorio</label>
+            <select x-model="form.reminder"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">Sin recordatorio</option>
+              <template x-for="opt in reminderOptions()" :key="opt.value">
+                <option :value="opt.value" x-text="opt.label" :selected="String(opt.value) === String(form.reminder)"></option>
+              </template>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Ubicación</label>
+            <input type="text" x-model="form.location" maxlength="255"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Descripción</label>
+            <textarea x-model="form.description" rows="3"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+          </div>
+
+          <p x-show="error" x-text="error" class="text-sm text-red-600"></p>
+
+          <div class="flex justify-end gap-2 pt-1">
+            <button type="button" @click="form = null"
+                    class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar</button>
+            <button type="submit" :disabled="saving"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-sm font-medium">Guardar</button>
+          </div>
+        </div>
+      </template>
+    </form>
+  </div>
+</div>
+
+<script>
+  const CAL_COLORS = {
+    gray: '#6b7280', red: '#ef4444', orange: '#f97316', yellow: '#eab308', green: '#22c55e',
+    blue: '#3b82f6', indigo: '#6366f1', purple: '#a855f7', pink: '#ec4899',
+  };
+  const CAL_REMINDERS = {{ reminder_options | tojson }};
+  const CAL_INITIAL_DATE = {{ initial_date | tojson }};
+  const CAL_WORK_KEY = 'calendar.work';
+
+  function calPad(n) { return String(n).padStart(2, '0'); }
+
+  // 'YYYY-MM-DD' ± n días, sin depender de la zona del dispositivo.
+  function calAddDays(ymd, n) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + n));
+    return `${dt.getUTCFullYear()}-${calPad(dt.getUTCMonth() + 1)}-${calPad(dt.getUTCDate())}`;
+  }
+
+  // FullCalendar corre con timeZone 'UTC': las fechas que entrega son la hora
+  // de pared local del negocio. Se separan en fecha y hora sin convertir.
+  function calSplit(str) {
+    const s = (str || '').replace('Z', '');
+    return { date: s.slice(0, 10), time: s.length > 10 ? s.slice(11, 16) : '' };
+  }
+
+  // Hora actual en Monterrey (misma regla que el resto de la app, ver base.html).
+  function calMonterreyNow() {
+    const p = {};
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Monterrey', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+    if (p.hour === '24') p.hour = '00';
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+  }
+
+  function calFmtRange(ev) {
+    const s = calSplit(ev.startStr), e = calSplit(ev.endStr);
+    const fmtDate = ymd => {
+      const [y, m, d] = ymd.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-MX', {
+        timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short',
+      });
+    };
+    if (ev.allDay) {
+      const last = e.date ? calAddDays(e.date, -1) : s.date;
+      return last && last !== s.date ? `${fmtDate(s.date)} – ${fmtDate(last)} · todo el día` : `${fmtDate(s.date)} · todo el día`;
+    }
+    if (!e.date || e.date === s.date) return `${fmtDate(s.date)} · ${s.time}${e.time ? '–' + e.time : ''}`;
+    return `${fmtDate(s.date)} ${s.time} – ${fmtDate(e.date)} ${e.time}`;
+  }
+
+  function calendarPage() {
+    // Fuera del estado de Alpine: la instancia de FullCalendar no debe
+    // envolverse en sus proxies reactivos.
+    let calendar = null;
+    return {
+      work: false,
+      tip: null, tipX: 0, tipY: 0,
+      detail: null,
+      form: null,
+      error: '',
+      saving: false,
+
+      init() {
+        try { this.work = localStorage.getItem(CAL_WORK_KEY) === '1'; } catch (e) {}
+        const mobile = window.matchMedia('(max-width: 639px)').matches;
+        const canHover = window.matchMedia('(hover: hover)').matches;
+
+        calendar = new FullCalendar.Calendar(this.$refs.calendar, {
+          locale: 'es',
+          timeZone: 'UTC',
+          now: calMonterreyNow,
+          initialDate: CAL_INITIAL_DATE || undefined,
+          initialView: mobile ? 'listWeek' : 'dayGridMonth',
+          headerToolbar: mobile
+            ? { left: 'prev,next today', center: '', right: 'listWeek,timeGridDay,dayGridMonth' }
+            : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
+          footerToolbar: mobile ? { center: 'title' } : false,
+          height: 'auto',
+          nowIndicator: true,
+          dayMaxEvents: 4,
+          eventDisplay: 'block',
+          selectable: true,
+          selectMirror: true,
+          eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+          events: (info, ok, fail) => {
+            const qs = new URLSearchParams({ start: info.startStr, end: info.endStr, work: this.work ? '1' : '0' });
+            fetch(`/calendar/events?${qs}`, { headers: { Accept: 'application/json' } })
+              .then(r => r.ok ? r.json() : Promise.reject(r))
+              .then(ok, fail);
+          },
+          eventDataTransform: (ev) => {
+            const color = CAL_COLORS[ev.extendedProps.color] || CAL_COLORS.blue;
+            ev.backgroundColor = color;
+            ev.borderColor = color;
+            ev.textColor = ev.extendedProps.color === 'yellow' ? '#1f2937' : '#ffffff';
+            if (ev.extendedProps.done) ev.classNames = ['fc-ev-done'];
+            return ev;
+          },
+          eventContent: (arg) => {
+            const p = arg.event.extendedProps;
+            const wrap = document.createElement('div');
+            wrap.className = 'fc-ev-inner';
+            if (p.owner_initials) {
+              const b = document.createElement('span');
+              b.className = 'fc-ev-badge';
+              b.textContent = p.owner_initials;
+              wrap.appendChild(b);
+            }
+            const title = document.createElement('span');
+            title.className = 'fc-ev-title';
+            const prefix = p.kind === 'task' ? '☑ ' : p.kind === 'project' ? '◆ ' : '';
+            title.textContent = prefix + (arg.timeText && !arg.view.type.startsWith('list') ? arg.timeText + ' ' : '') + arg.event.title;
+            wrap.appendChild(title);
+            return { domNodes: [wrap] };
+          },
+          eventMouseEnter: (info) => {
+            if (!canHover) return;
+            this.tip = this.detailFrom(info.event);
+            this.placeTip(info.jsEvent);
+          },
+          eventMouseLeave: () => { this.tip = null; },
+          eventClick: (info) => {
+            info.jsEvent.preventDefault();  // tareas/proyectos traen url: se abre desde el detalle
+            this.tip = null;
+            this.detail = this.detailFrom(info.event);
+          },
+          select: (info) => {
+            const s = calSplit(info.startStr), e = calSplit(info.endStr);
+            if (info.allDay) {
+              this.openNew({ allDay: true, startDate: s.date, endDate: calAddDays(e.date, -1) });
+            } else {
+              this.openNew({ allDay: false, startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time });
+            }
+            calendar.unselect();
+          },
+          eventDrop: (info) => this.move(info),
+          eventResize: (info) => this.move(info),
+        });
+        calendar.render();
+      },
+
+      refetch() { calendar.refetchEvents(); },
+
+      hex(c) { return CAL_COLORS[c] || CAL_COLORS.gray; },
+
+      saveWork() {
+        try { localStorage.setItem(CAL_WORK_KEY, this.work ? '1' : '0'); } catch (e) {}
+      },
+
+      placeTip(e) {
+        const w = 288, margin = 12;
+        this.tipX = Math.min(e.clientX + margin, window.innerWidth - w - margin);
+        this.tipY = Math.min(e.clientY + margin, window.innerHeight - 220);
+      },
+
+      detailFrom(ev) {
+        const p = ev.extendedProps;
+        return {
+          id: ev.id, mine: !!p.mine, url: ev.url || '',
+          startStr: ev.startStr, endStr: ev.endStr, allDay: ev.allDay, reminder: p.reminder_minutes,
+          kind: p.kind, title: ev.title, when: calFmtRange(ev), color: p.color,
+          owner: p.owner_name, location: p.location || '', description: p.description || '',
+          status: p.status || '', priority: p.priority || '', department: p.department || '',
+        };
+      },
+
+      // Nodos del detalle (tooltip y modal). Todo por textContent: el
+      // contenido es del usuario y no debe interpretarse como HTML.
+      detailNodes(d) {
+        const frag = document.createDocumentFragment();
+        const el = (tag, cls, text) => {
+          const n = document.createElement(tag);
+          if (cls) n.className = cls;
+          if (text) n.textContent = text;
+          return n;
+        };
+        const head = el('div', 'flex items-start gap-2');
+        const dot = el('span', 'mt-1.5 w-2.5 h-2.5 rounded-full shrink-0');
+        dot.style.background = this.hex(d.color);
+        head.appendChild(dot);
+        const kind = { task: 'Tarea', project: 'Proyecto' }[d.kind];
+        const titleBox = el('div', 'min-w-0');
+        if (kind) titleBox.appendChild(el('p', 'text-[10px] uppercase tracking-wide font-semibold text-gray-400', kind));
+        titleBox.appendChild(el('p', 'text-sm font-semibold text-gray-900 break-words', d.title));
+        titleBox.appendChild(el('p', 'text-xs text-gray-500 mt-0.5', d.when));
+        head.appendChild(titleBox);
+        frag.appendChild(head);
+
+        const rows = [];
+        if (d.kind === 'event' && !d.mine) rows.push(['De', d.owner]);
+        if (d.kind === 'task') rows.push(['Asignada a', d.owner], ['Estado', d.status], ['Prioridad', d.priority]);
+        if (d.kind === 'project') rows.push(['Estado', d.status], ['Creado por', d.owner]);
+        if (d.department) rows.push(['Departamento', d.department]);
+        if (d.location) rows.push(['Ubicación', d.location]);
+        if (rows.length) {
+          const dl = el('dl', 'mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs');
+          rows.forEach(([k, v]) => {
+            if (!v) return;
+            dl.appendChild(el('dt', 'text-gray-400', k));
+            dl.appendChild(el('dd', 'text-gray-700 break-words', v));
+          });
+          frag.appendChild(dl);
+        }
+        if (d.description) frag.appendChild(el('p', 'mt-3 text-sm text-gray-700 whitespace-pre-line break-words', d.description));
+        return frag;
+      },
+
+      reminderOptions() {
+        const label = (m) => {
+          if (this.form && this.form.allDay) return m === 0 ? 'Ese día (8:00)' : 'Un día antes (8:00)';
+          if (m === 0) return 'A la hora del evento';
+          if (m === 1440) return '1 día antes';
+          if (m >= 60) return `${m / 60} ${m === 60 ? 'hora' : 'horas'} antes`;
+          return `${m} min antes`;
+        };
+        const opts = this.form && this.form.allDay ? CAL_REMINDERS.filter(m => m === 0 || m === 1440) : CAL_REMINDERS;
+        return opts.map(m => ({ value: m, label: label(m) }));
+      },
+
+      fixReminder() {
+        if (this.form.reminder !== '' && !this.reminderOptions().some(o => String(o.value) === String(this.form.reminder))) {
+          this.form.reminder = '';
+        }
+      },
+
+      openNew(preset = {}) {
+        const now = calSplit(calMonterreyNow());
+        const hour = Math.min(Number(now.time.slice(0, 2)) + 1, 22);
+        this.error = '';
+        this.detail = null;
+        this.form = Object.assign({
+          id: null, title: '', allDay: false,
+          startDate: now.date, startTime: `${calPad(hour)}:00`,
+          endDate: now.date, endTime: `${calPad(hour + 1)}:00`,
+          color: 'blue', reminder: '15', location: '', description: '',
+        }, preset);
+        if (this.form.allDay) this.form.reminder = '0';
+      },
+
+      openEdit(d) {
+        const s = calSplit(d.startStr), e = calSplit(d.endStr || d.startStr);
+        this.error = '';
+        this.detail = null;
+        this.form = {
+          id: d.id, title: d.title, allDay: d.allDay,
+          startDate: s.date, startTime: s.time || '09:00',
+          endDate: d.allDay ? calAddDays(e.date, d.endStr ? -1 : 0) : e.date, endTime: e.time || s.time || '10:00',
+          color: d.color, reminder: d.reminder === null || d.reminder === undefined ? '' : String(d.reminder),
+          location: d.location, description: d.description,
+        };
+      },
+
+      async post(url, data) {
+        const r = await fetch(url, { method: 'POST', body: new URLSearchParams(data) });
+        if (!r.ok) {
+          let msg = 'No se pudo guardar';
+          try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (e) {}
+          throw new Error(msg);
+        }
+        return r.json();
+      },
+
+      async saveForm() {
+        const f = this.form;
+        if (!f.allDay && f.endDate === f.startDate && f.endTime <= f.startTime) {
+          this.error = 'La hora de fin debe ser posterior a la de inicio';
+          return;
+        }
+        const data = {
+          title: f.title, color: f.color, location: f.location, description: f.description,
+          reminder_minutes: f.reminder, all_day: f.allDay ? 'true' : 'false',
+          start: f.allDay ? f.startDate : `${f.startDate}T${f.startTime}`,
+          // En todo el día el servidor recibe el fin exclusivo (día siguiente al último).
+          end: f.allDay ? calAddDays(f.endDate, 1) : `${f.endDate}T${f.endTime}`,
+        };
+        this.saving = true;
+        try {
+          await this.post(f.id ? `/calendar/events/${f.id}/edit` : '/calendar/events', data);
+          this.form = null;
+          calendar.refetchEvents();
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async move(info) {
+        const ev = info.event;
+        try {
+          await this.post(`/calendar/events/${ev.id}/move`, {
+            start: ev.startStr, end: ev.endStr || '', all_day: ev.allDay ? 'true' : 'false',
+          });
+          calendar.refetchEvents();
+        } catch (e) {
+          info.revert();
+          alert(e.message);
+        }
+      },
+
+      async deleteEvent(id) {
+        if (!confirm('¿Eliminar este evento?')) return;
+        try {
+          await this.post(`/calendar/events/${id}/delete`, {});
+          this.detail = null;
+          calendar.refetchEvents();
+        } catch (e) {
+          alert(e.message);
+        }
+      },
+
+      async toggleSub(id) {
+        try {
+          await this.post(`/calendar/subscriptions/${id}/toggle`, {});
+        } finally {
+          calendar.refetchEvents();
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

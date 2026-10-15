@@ -15,7 +15,10 @@ from app.database import get_db, SessionLocal
 from app import audit, rag, storage
 from app.documents.router import _preview_meta
 from app.messaging import realtime
-from app.permissions import build_access_filter, can_access_document
+from app.permissions import (
+    build_access_filter, can_access_document,
+    branch_user_ids as _branch_user_ids, manager_scope as _manager_scope,
+)
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
     TaskStatusHistory, TaskTag, TaskTagAssignment, User,
@@ -1199,42 +1202,6 @@ recurring_router = APIRouter(prefix="/tasks/recurring", tags=["recurring-tasks"]
 
 def _is_manager(user: User) -> bool:
     return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
-
-
-def _manager_scope(user: User, db: Session) -> dict | None:
-    """Alcance de gestión de un encargado.
-
-    - superadmin → None (sin restricción, todo).
-    - admin CON zona(s) (coordinador regional) y/o sucursales sueltas
-      asignadas directamente (supervisor) → sólo esas sucursales
-      (`branch_ids`); no todo el departamento.
-    - admin SIN zona ni sucursales (jefe de departamento) → todo su
-      departamento (`dept_ids`).
-
-    Devuelve un dict con `dept_ids` y `branch_ids` (uno de los dos vacío según el
-    caso), o None para superadmin.
-    """
-    if user.role == ROLE_SUPERADMIN:
-        return None
-
-    zone_ids = [uz.zone_id for uz in user.user_zones]
-    branch_ids = set()
-    if zone_ids:
-        branch_ids |= {
-            row[0] for row in db.query(Branch.id).filter(Branch.zone_id.in_(zone_ids)).all()
-        }
-    branch_ids |= {ub.branch_id for ub in user.user_branches}
-    if branch_ids:
-        return {"dept_ids": set(), "branch_ids": branch_ids}
-
-    return {"dept_ids": {user.department_id} if user.department_id else set(), "branch_ids": set()}
-
-
-def _branch_user_ids(branch_ids: set, db: Session) -> set:
-    """IDs de usuarios que pertenecen a las sucursales dadas."""
-    if not branch_ids:
-        return set()
-    return {row[0] for row in db.query(User.id).filter(User.branch_id.in_(branch_ids)).all()}
 
 
 def _assignable_department_ids(user: User, db: Session) -> set | None:
