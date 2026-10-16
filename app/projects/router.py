@@ -166,6 +166,9 @@ def project_detail(
 
     departments = db.query(Department).order_by(Department.name).all()
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
+    can_edit = _can_edit_project(current_user, project)
+    branches = db.query(Branch).order_by(Branch.name).all() if can_edit else []
+    zones = db.query(Zone).order_by(Zone.name).all() if can_edit else []
 
     return templates.TemplateResponse(
         request,
@@ -178,16 +181,64 @@ def project_detail(
             "total": total,
             "done_pct": done_pct,
             "departments": departments,
+            "branches": branches,
+            "zones": zones,
             "users": users,
             "task_statuses": TASK_STATUSES,
             "task_priorities": TASK_PRIORITIES,
             "project_statuses": PROJECT_STATUSES,
             "filter_task_status": task_status,
-            "can_edit": _can_edit_project(current_user, project),
+            "can_edit": can_edit,
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
+
+
+# ── Edit ──────────────────────────────────────────────────────────────────────
+
+@router.post("/{project_id}/edit")
+def edit_project(
+    project_id: str,
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    department_id: str = Form(""),
+    branch_id: str = Form(""),
+    zone_id: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not _can_edit_project(current_user, project):
+        raise HTTPException(403)
+    if not name.strip():
+        raise HTTPException(400, "El nombre es obligatorio")
+    try:
+        start = date.fromisoformat(start_date) if start_date else None
+        end = date.fromisoformat(end_date) if end_date else None
+    except ValueError:
+        raise HTTPException(400, "Fecha inválida")
+    if start and end and end < start:
+        raise HTTPException(400, "La fecha límite no puede ser anterior al inicio")
+
+    project.name = name.strip()
+    project.description = description.strip() or None
+    project.department_id = department_id or None
+    project.branch_id = branch_id or None
+    project.zone_id = zone_id or None
+    project.start_date = start
+    project.end_date = end
+    db.commit()
+    audit.log_action(
+        "project_edit", user=current_user, request=request,
+        resource_type="project", resource_id=project_id, resource_name=project.name,
+    )
+    return RedirectResponse(f"/projects/{project_id}", status_code=302)
 
 
 # ── Update status ─────────────────────────────────────────────────────────────
