@@ -22,10 +22,11 @@ from app.database import get_db
 from app.models import (
     CalendarEvent, CalendarSubscription, Department, Project, Task, TaskTagAssignment, User,
     CALENDAR_MAX_SUBSCRIPTIONS, CALENDAR_REMINDER_OPTIONS, PROJECT_COMPLETED,
-    ROLE_ADMIN, ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
+    ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
 )
 from app.permissions import (
-    calendar_department_ids, calendar_members_query, manager_scope, visible_projects_filter,
+    calendar_department_ids, calendar_members_query, granted_department_ids, has_oversight, manager_scope,
+    visible_projects_filter,
 )
 from app.templating import templates
 
@@ -42,7 +43,7 @@ _PROJECT_STATUS_LABELS = {"draft": "Borrador", "active": "Activo", "on_hold": "E
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _can_subscribe(user: User) -> bool:
-    return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+    return has_oversight(user)
 
 
 def _display_name(user: User | None) -> str:
@@ -161,7 +162,7 @@ def _resolve_subscriptions(user: User, subs: list[CalendarSubscription], db: Ses
         full_dept_ids = set(dept_ids)
     else:
         scope = manager_scope(user, db)
-        full_dept_ids = dept_ids & scope["dept_ids"] if scope and not scope["branch_ids"] else set()
+        full_dept_ids = dept_ids & (scope["dept_ids"] | granted_department_ids(user))
     return {"members": members, "dept_ids": dept_ids, "full_dept_ids": full_dept_ids}
 
 

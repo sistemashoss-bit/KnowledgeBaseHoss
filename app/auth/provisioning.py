@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, Department, User
+from app.models import ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, Branch, Department, User, UserBranch
 
 _SITE_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE}
 
@@ -50,6 +50,31 @@ def _department_from_identity(identity: dict, db: Session):
     return upsert_department(db, gid, name)
 
 
+def _sync_branches(user: User, identity: dict, db: Session) -> bool:
+    """Sucursales que cubre (UserBranch de hoss) y si su puesto las cubre todas.
+    Solo acotan al admin de un departamento `branch_scoped` (Comercial). Campos
+    ausentes (hoss sin esa versión): no se tocan. Sucursales que knowledge aún
+    no tiene sincronizadas se omiten."""
+    changed = False
+    if "all_branches" in identity:
+        all_branches = bool(identity["all_branches"])
+        if user.all_branches != all_branches:
+            user.all_branches = all_branches
+            changed = True
+
+    if "branches" in identity:
+        gids = [g for g in (identity["branches"] or []) if g]
+        wanted = {
+            row[0] for row in db.query(Branch.id).filter(Branch.global_branch_id.in_(gids)).all()
+        } if gids else set()
+        keep = [ub for ub in user.user_branches if ub.branch_id in wanted]
+        if len(keep) != len(user.user_branches) or len(keep) != len(wanted):
+            have = {ub.branch_id for ub in keep}
+            user.user_branches = keep + [UserBranch(branch_id=bid) for bid in wanted - have]
+            changed = True
+    return changed
+
+
 def _sync_org(user: User, identity: dict, db: Session) -> bool:
     """hoss-api es dueño del puesto, del rol (derivado del puesto: site_role) y
     del departamento (el del puesto). Devuelve True si cambió algo.
@@ -74,6 +99,9 @@ def _sync_org(user: User, identity: dict, db: Session) -> bool:
     dept = _department_from_identity(identity, db)
     if dept and user.department_id != dept.id:
         user.department_id = dept.id
+        changed = True
+
+    if _sync_branches(user, identity, db):
         changed = True
     return changed
 

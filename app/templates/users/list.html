@@ -63,29 +63,14 @@
           </select>
         </div>
 
+        {% if not org_managed %}
         <div class="md:col-span-2">
-          <label class="block text-xs font-medium text-gray-600 mb-1">Zonas asignadas</label>
-          {% if zones %}
-          <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded-lg bg-gray-50"
-               role="group" aria-label="Zonas asignadas">
-            {% for z in zones %}
-            <label class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors">
-              <input type="checkbox" name="zone_ids" value="{{ z.id }}"
-                     class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
-              <span class="text-xs text-gray-700">{{ z.name }}</span>
-            </label>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
-            No hay zonas creadas. Crea zonas en
-            <a href="/org/zones/" class="text-blue-600 underline">Zonas y Sucursales</a>.
-          </p>
-          {% endif %}
-        </div>
-
-        <div class="md:col-span-2">
-          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales asignadas (supervisor)</label>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales que cubre (solo acota en departamentos por sucursal, p. ej. Comercial)</label>
+          <label class="flex items-center gap-2 mb-1.5 cursor-pointer">
+            <input type="checkbox" name="all_branches" value="1"
+                   class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
+            <span class="text-xs text-gray-700">Todas las sucursales</span>
+          </label>
           {% if branches %}
           <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded-lg bg-gray-50"
                role="group" aria-label="Sucursales asignadas">
@@ -103,10 +88,21 @@
           </p>
           {% endif %}
         </div>
+        {% endif %}
 
         {% else %}
         <input type="hidden" name="role" value="employee" />
         <input type="hidden" name="department_id" value="" />
+        {% if admin_branches is not none %}
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursal <span class="text-red-500">*</span></label>
+          <select name="branch_id" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+            <option value="">Elige una sucursal</option>
+            {% for b in admin_branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+          </select>
+        </div>
+        {% endif %}
         {% endif %}
 
         <div class="md:col-span-2">
@@ -179,13 +175,19 @@
                 {% if u.branch %}
                 <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-xs">{{ u.branch.name }}</span>
                 {% endif %}
-                {% for uz in u.user_zones %}
-                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-xs">{{ uz.zone.name }}</span>
-                {% endfor %}
+                {% if u.department and u.department.branch_scoped %}
+                {% if u.all_branches %}
+                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-xs">Todas las sucursales</span>
+                {% else %}
                 {% for ub in u.user_branches %}
                 <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-xs">{{ ub.branch.name }}</span>
                 {% endfor %}
-                {% if not u.position_name and not u.department and not u.branch and not u.user_zones and not u.user_branches %}
+                {% endif %}
+                {% endif %}
+                {% for a in u.department_access %}
+                <span class="inline-flex w-fit items-center px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 text-xs">{{ 'Gestiona' if a.level == 'manage' else 'Ve' }}: {{ a.department.name }}</span>
+                {% endfor %}
+                {% if not u.position_name and not u.department and not u.branch and not u.department_access %}
                 <span class="text-xs text-gray-300">—</span>
                 {% endif %}
               </div>
@@ -283,26 +285,14 @@
                     </select>
                   </div>
 
-                  {% if zones %}
+                  {% if branches and not org_managed %}
                   <div class="col-span-2">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Zonas asignadas</label>
-                    <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white"
-                         role="group" aria-label="Zonas asignadas a {{ u.name or u.email }}">
-                      {% for z in zones %}
-                      <label class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors">
-                        <input type="checkbox" name="zone_ids" value="{{ z.id }}"
-                               {% if z.id|string in (u.user_zones | map(attribute='zone_id') | map('string') | list) %}checked{% endif %}
-                               class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
-                        <span class="text-xs text-gray-700">{{ z.name }}</span>
-                      </label>
-                      {% endfor %}
-                    </div>
-                  </div>
-                  {% endif %}
-
-                  {% if branches %}
-                  <div class="col-span-2">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales asignadas (supervisor)</label>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales que cubre (solo acota en departamentos por sucursal, p. ej. Comercial)</label>
+                    <label class="flex items-center gap-2 mb-1.5 cursor-pointer">
+                      <input type="checkbox" name="all_branches" value="1" {% if u.all_branches %}checked{% endif %}
+                             class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
+                      <span class="text-xs text-gray-700">Todas las sucursales</span>
+                    </label>
                     <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white"
                          role="group" aria-label="Sucursales asignadas a {{ u.name or u.email }}">
                       {% for b in branches %}
@@ -316,6 +306,28 @@
                     </div>
                   </div>
                   {% endif %}
+
+                  {% set access = u.department_access | map(attribute='department_id') | map('string') | list %}
+                  {% set levels = u.department_access | map(attribute='level') | list %}
+                  <div class="col-span-2">
+                    <label class="block text-xs font-medium text-gray-600 mb-0.5">Acceso a otros departamentos</label>
+                    <p class="text-xs text-gray-500 mb-1">Ver: tareas, proyectos, documentos, calendario y reportes. Gestionar: además administra su trabajo (no a su gente).</p>
+                    <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white"
+                         role="group" aria-label="Acceso a otros departamentos de {{ u.name or u.email }}">
+                      {% for dept in departments if dept.id != u.department_id %}
+                      {% set lvl = levels[access.index(dept.id|string)] if dept.id|string in access else '' %}
+                      <div class="flex items-center justify-between gap-2 px-3 py-1.5">
+                        <span class="text-xs text-gray-700">{{ dept.name }}</span>
+                        <select name="access" aria-label="Acceso a {{ dept.name }}"
+                                class="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
+                          <option value="">Sin acceso</option>
+                          <option value="{{ dept.id }}:view" {% if lvl == 'view' %}selected{% endif %}>Ver</option>
+                          <option value="{{ dept.id }}:manage" {% if lvl == 'manage' %}selected{% endif %}>Gestionar</option>
+                        </select>
+                      </div>
+                      {% endfor %}
+                    </div>
+                  </div>
                   {% endif %}
 
                   <div class="col-span-2 flex gap-2 pt-1">

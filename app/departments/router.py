@@ -80,6 +80,7 @@ def edit_department(
     name: str = Form(...),
     branch_id: str = Form(default=""),
     triage_description: str = Form(default=""),
+    branch_scoped: bool = Form(default=False),
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN)),
 ):
@@ -89,6 +90,7 @@ def edit_department(
     dept.name = name.strip()
     dept.branch_id = branch_id or None
     dept.triage_description = triage_description.strip() or None
+    dept.branch_scoped = branch_scoped
     db.commit()
     return RedirectResponse("/departments/", status_code=302)
 

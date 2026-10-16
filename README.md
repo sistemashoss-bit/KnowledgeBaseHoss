@@ -17,7 +17,7 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 - **Notificaciones** — avisos in-app
 
 ### Plataforma
-- **RBAC granular** — superadmin / admin / empleado; permisos por **departamento** y **zona** (admin sin zona = todo su departamento; admin con zona = solo sus sucursales; superadmin = todo)
+- **RBAC granular** — superadmin / admin / auditor / empleado (rol y departamento vienen del puesto en hoss). El admin gestiona su departamento; en los departamentos **acotados por sucursal** (Comercial) solo la gente de sus sucursales de hoss, salvo que su puesto cubra todas. El superadmin puede dar a cualquier persona acceso **ver** o **gestionar** a otros departamentos (solo en knowledge; gestionar no incluye administrar usuarios)
 - **Autenticación** — JWT en cookies httpOnly, Argon2id, TOTP opcional por usuario (2FA de dos pasos). **SSO opcional con hoss-api** como proveedor de identidad del staff (con aprovisionamiento automático de usuarios)
 - **Avatares** — bucket separado en Wasabi, redimensionado a 256×256 JPEG con Pillow
 - **Audit log** — registro de todas las acciones y búsquedas, con retención configurable (visible solo para superadmin)

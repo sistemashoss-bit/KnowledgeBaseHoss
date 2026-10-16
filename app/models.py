@@ -14,6 +14,11 @@ ROLE_EMPLOYEE = "employee"
 ROLE_AUDITOR = "auditor"
 ROLES = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE]
 
+# ── Department access levels (accesos extra a otros departamentos) ─────────────
+ACCESS_VIEW = "view"
+ACCESS_MANAGE = "manage"
+ACCESS_LEVELS = [ACCESS_VIEW, ACCESS_MANAGE]
+
 # ── Document status constants ─────────────────────────────────────────────────
 # 'department' y 'admin' se retiraron: el propio department_id ya acota la
 # creación (admin solo el suyo, superadmin el que elija) y "compartir" cubre
@@ -91,7 +96,6 @@ class Zone(Base):
     # las filas hijas él mismo antes de borrar, lo que revienta con
     # IntegrityError en columnas NOT NULL (mismo bug que en Task, ver arriba).
     branches = relationship("Branch", back_populates="zone", passive_deletes=True)
-    user_zones = relationship("UserZone", back_populates="zone", passive_deletes=True)
     projects = relationship("Project", back_populates="zone", passive_deletes=True)
     conversations = relationship("Conversation", back_populates="zone", passive_deletes=True)
 
@@ -116,22 +120,11 @@ class Branch(Base):
     user_branches = relationship("UserBranch", back_populates="branch", passive_deletes=True)
 
 
-class UserZone(Base):
-    """Many-to-many: users that manage one or more zones."""
-    __tablename__ = "user_zones"
-
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), primary_key=True)
-    assigned_at = Column(DateTime, default=datetime.utcnow)
-
-    user = relationship("User", back_populates="user_zones")
-    zone = relationship("Zone", back_populates="user_zones")
-
-
 class UserBranch(Base):
-    """Many-to-many: users (típicamente supervisores) que manejan sucursales
-    específicas directamente, sin cubrir la zona completa (a diferencia de
-    UserZone). Alcance más angosto: un subconjunto suelto de sucursales."""
+    """Sucursales que cubre una persona: su UserBranch en hoss-api, sincronizado
+    en cada login (SSO). Solo acota al admin de un departamento con
+    `branch_scoped` (Comercial: coordinadores y supervisores); en los demás
+    departamentos no se usa. Ver `User.all_branches` y permissions.manager_scope."""
     __tablename__ = "user_branches"
 
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
@@ -140,6 +133,23 @@ class UserBranch(Base):
 
     user = relationship("User", back_populates="user_branches")
     branch = relationship("Branch", back_populates="user_branches")
+
+
+class UserDepartmentAccess(Base):
+    """Acceso extra de una persona a otro departamento, además del suyo. Solo de
+    knowledge (hoss no lo conoce); lo asigna el superadmin. `view`: ve tareas,
+    proyectos, documentos restringidos, calendario y reportes del departamento.
+    `manage`: además gestiona su trabajo como su admin (no a su gente). Nunca
+    acotado por sucursales."""
+    __tablename__ = "user_department_access"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    level = Column(String(10), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="department_access", foreign_keys=[user_id])
+    department = relationship("Department")
 
 
 # ── Existing models (documents layer — unchanged) ─────────────────────────────
@@ -158,6 +168,9 @@ class Department(Base):
     # widget. Local a knowledge (hoss no lo conoce). Sin descripción, el
     # departamento no participa en la clasificación.
     triage_description = Column(Text, nullable=True)
+    # Su admin queda acotado a sus sucursales (UserBranch) salvo que cubra todas
+    # (User.all_branches). Solo Comercial por ahora; local a knowledge.
+    branch_scoped = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     branch = relationship("Branch", back_populates="departments")
@@ -191,6 +204,9 @@ class User(Base):
     # payload de identidad (SSO). knowledge comparte el mismo Wasabi, así que firma
     # la URL localmente al renderizar (ver templating._avatar_url).
     avatar_key = Column(String(500), nullable=True)
+    # El puesto en hoss cubre todas las sucursales (access_all_facilities): en un
+    # departamento `branch_scoped` gestiona el departamento completo.
+    all_branches = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -199,8 +215,13 @@ class User(Base):
     branch = relationship("Branch", back_populates="users")
     documents = relationship("Document", back_populates="uploaded_by_user", passive_deletes=True)
     document_access = relationship("DocumentAllowedUser", back_populates="user", passive_deletes=True)
-    user_zones = relationship("UserZone", back_populates="user", passive_deletes=True)
-    user_branches = relationship("UserBranch", back_populates="user", passive_deletes=True)
+    user_branches = relationship(
+        "UserBranch", back_populates="user", cascade="all, delete-orphan", passive_deletes=True,
+    )
+    department_access = relationship(
+        "UserDepartmentAccess", back_populates="user", foreign_keys="UserDepartmentAccess.user_id",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
 
     # Work
     created_projects = relationship(

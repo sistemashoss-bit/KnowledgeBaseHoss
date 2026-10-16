@@ -16,13 +16,13 @@ from app import audit, rag, storage
 from app.documents.router import _preview_meta
 from app.messaging import realtime
 from app.permissions import (
-    build_access_filter, can_access_document,
-    branch_user_ids as _branch_user_ids, manager_scope as _manager_scope,
+    build_access_filter, can_access_document, granted_department_ids, has_oversight, is_manager,
+    branch_user_ids as _branch_user_ids, manager_scope as _manager_scope, scope_user_condition,
 )
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
     TaskStatusHistory, TaskTag, TaskTagAssignment, User,
-    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR,
+    ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
 )
@@ -56,6 +56,9 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True, *, audi
         ]
         if user.department_id:
             conditions.append(Task.department_id == user.department_id)
+        granted = granted_department_ids(user)
+        if granted:
+            conditions.append(Task.department_id.in_(granted))
         q = q.filter(or_(*conditions))
     if not include_archived:
         q = q.filter(Task.archived_at.is_(None))
@@ -78,14 +81,11 @@ def _can_edit_task(user: User, task: Task, db: Session) -> bool:
         return True
     if str(task.created_by) == str(user.id):
         return True
-    if user.role == ROLE_ADMIN:
-        allowed_depts = _assignable_department_ids(user, db) or set()
-        if task.department_id and task.department_id in allowed_depts:
-            return True
-        scope = _manager_scope(user, db)
-        if scope and scope["branch_ids"] and task.assigned_to:
-            if task.assigned_to in _branch_user_ids(scope["branch_ids"], db):
-                return True
+    scope = _manager_scope(user, db)
+    if task.department_id and task.department_id in scope["dept_ids"]:
+        return True
+    if task.assigned_to and task.assigned_to in _branch_user_ids(scope, db):
+        return True
     return False
 
 
@@ -190,12 +190,13 @@ def list_tasks(
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
 
-    is_admin = current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
+    is_admin = is_manager(current_user)
+    show_dept_tab = has_oversight(current_user)
     is_auditor = current_user.role == ROLE_AUDITOR
 
-    # Available tabs — "dept" only for admins/superadmins; "all" (solo lectura,
-    # todos los departamentos) para auditores.
-    valid_tabs = ["assigned", "created"] + (["dept"] if is_admin else []) + (["all"] if is_auditor else [])
+    # Available tabs — "dept" para admins/superadmins y quien tenga acceso extra
+    # a otros departamentos; "all" (solo lectura, todos los departamentos) para auditores.
+    valid_tabs = ["assigned", "created"] + (["dept"] if show_dept_tab else []) + (["all"] if is_auditor else [])
     if tab not in valid_tabs:
         tab = "assigned"
 
@@ -233,32 +234,29 @@ def list_tasks(
         q = base
         can_drag = False
     else:  # dept
-        # Mismo organigrama que las plantillas recurrentes:
-        # superadmin → todo; admin sin zona → su departamento; admin con zona →
-        # las tareas asignadas a personas de las sucursales de sus zonas.
+        # Mismo organigrama que las plantillas recurrentes: superadmin → todo;
+        # admin → su departamento (en Comercial, las tareas de la gente de sus
+        # sucursales); más los departamentos con acceso extra (view o manage).
         scope = _manager_scope(current_user, db)
         if scope is None:
             q = base  # superadmin ve todos los departamentos
             # Filtro por departamento (solo superadmin).
             filter_departments = departments
         else:
+            dept_ids = scope["dept_ids"] | granted_department_ids(current_user)
             conds = []
-            if scope["dept_ids"]:
-                conds.append(Task.department_id.in_(scope["dept_ids"]))
-            branch_user_ids = _branch_user_ids(scope["branch_ids"], db)
+            if dept_ids:
+                conds.append(Task.department_id.in_(dept_ids))
+            branch_user_ids = _branch_user_ids(scope, db)
             if branch_user_ids:
                 conds.append(Task.assigned_to.in_(branch_user_ids))
             q = base.filter(or_(*conds)) if conds else base.filter(false())
 
-            # Filtro por persona (admin de departamento / gerente de zona):
-            # las personas dentro de su alcance de gestión.
+            # Filtro por persona: las de su alcance y las de sus departamentos
+            # con acceso extra.
             user_q = db.query(User).filter(User.is_active == True)
-            if scope["dept_ids"]:
-                user_q = user_q.filter(User.department_id.in_(scope["dept_ids"]))
-            elif scope["branch_ids"]:
-                user_q = user_q.filter(User.branch_id.in_(scope["branch_ids"]))
-            else:
-                user_q = user_q.filter(false())
+            in_scope = scope_user_condition({**scope, "dept_ids": dept_ids})
+            user_q = user_q.filter(in_scope if in_scope is not None else false())
             filter_users = user_q.order_by(User.email).all()
             if user_id and any(str(u.id) == user_id for u in filter_users):
                 q = q.filter(Task.assigned_to == user_id)
@@ -297,6 +295,7 @@ def list_tasks(
             "search": search,
             "tab": tab,
             "is_admin": is_admin,
+            "show_dept_tab": show_dept_tab,
             "is_auditor": is_auditor,
             "can_drag": can_drag,
             "departments": departments,
@@ -538,7 +537,7 @@ def task_detail(
             "priorities": TASK_PRIORITIES,
             "can_edit": _can_edit_task(current_user, task, db),
             "can_update_status": _can_update_status(current_user, task, db),
-            "is_admin": current_user.role in (ROLE_ADMIN, ROLE_SUPERADMIN),
+            "is_admin": is_manager(current_user),
             "can_approve": _can_approve_task(current_user, task),
             "can_participate": can_participate,
             "today": date.today().isoformat(),
@@ -1200,30 +1199,17 @@ def delete_tag(
 recurring_router = APIRouter(prefix="/tasks/recurring", tags=["recurring-tasks"])
 
 
-def _is_manager(user: User) -> bool:
-    return user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
-
-
 def _assignable_department_ids(user: User, db: Session) -> set | None:
     """Departamentos que el encargado puede fijar en una plantilla.
 
-    None = sin restricción (superadmin). Para gerentes de zona son los
-    departamentos representados en sus sucursales (incluye departamentos-paraguas
-    con branch_id nulo, derivados de los usuarios de esas sucursales)."""
+    None = sin restricción (superadmin). Un admin acotado a sucursales
+    (Comercial) fija su propio departamento."""
     scope = _manager_scope(user, db)
     if scope is None:
         return None
     dept_ids = set(scope["dept_ids"])
-    if scope["branch_ids"]:
-        dept_ids |= {
-            row[0] for row in db.query(Department.id)
-            .filter(Department.branch_id.in_(scope["branch_ids"])).all()
-        }
-        dept_ids |= {
-            row[0] for row in db.query(User.department_id)
-            .filter(User.branch_id.in_(scope["branch_ids"]), User.department_id.isnot(None))
-            .distinct().all()
-        }
+    if scope["branch_dept_id"]:
+        dept_ids.add(scope["branch_dept_id"])
     return dept_ids
 
 
@@ -1241,7 +1227,7 @@ def _recurring_query(user: User, db: Session):
     conditions = [RecurringTask.created_by == user.id]
     if scope["dept_ids"]:
         conditions.append(RecurringTask.department_id.in_(scope["dept_ids"]))
-    branch_user_ids = _branch_user_ids(scope["branch_ids"], db)
+    branch_user_ids = _branch_user_ids(scope, db)
     if branch_user_ids:
         conditions.append(RecurringTask.assigned_to.in_(branch_user_ids))
     return q.filter(or_(*conditions))
@@ -1257,7 +1243,7 @@ def _can_manage_recurring(user: User, rt: RecurringTask, db: Session) -> bool:
         return True
     if scope["dept_ids"] and rt.department_id and rt.department_id in scope["dept_ids"]:
         return True
-    if rt.assigned_to and rt.assigned_to in _branch_user_ids(scope["branch_ids"], db):
+    if rt.assigned_to and rt.assigned_to in _branch_user_ids(scope, db):
         return True
     return False
 
@@ -1265,22 +1251,18 @@ def _can_manage_recurring(user: User, rt: RecurringTask, db: Session) -> bool:
 def _assignable_users_query(user: User, db: Session):
     """Usuarios activos a los que se puede asignar una tarea puntual (persona a persona).
 
-    superadmin → cualquiera. admin con zona → personas de las sucursales de su
-    zona. admin sin zona → todo su departamento (todas sus sucursales/zonas).
-    employee → sólo él mismo (autoasignación)."""
+    superadmin → cualquiera. encargado → él mismo y las personas de su alcance
+    (manager_scope: su departamento —en Comercial, la gente de sus sucursales—
+    y los departamentos con acceso `manage`). employee → sólo él mismo
+    (autoasignación)."""
     q = db.query(User).filter(User.is_active == True)
     if user.role == ROLE_SUPERADMIN:
         return q.order_by(User.email)
-    if user.role == ROLE_ADMIN:
-        scope = _manager_scope(user, db)
-        conds = []
-        if scope["dept_ids"]:
-            conds.append(User.department_id.in_(scope["dept_ids"]))
-        if scope["branch_ids"]:
-            conds.append(User.branch_id.in_(scope["branch_ids"]))
-        if not conds:
-            return q.filter(false())
-        return q.filter(or_(*conds)).order_by(User.email)
+    if is_manager(user):
+        in_scope = scope_user_condition(_manager_scope(user, db))
+        if in_scope is None:
+            return q.filter(User.id == user.id)
+        return q.filter(or_(User.id == user.id, in_scope)).order_by(User.email)
     return q.filter(User.id == user.id)
 
 
@@ -1290,11 +1272,11 @@ def _validate_target_scope(
     """Valida a quién puede dirigir un encargado (o un empleado) una tarea/plantilla.
 
     - superadmin: sin restricción.
-    - admin (con o sin zona): puede difundir a cualquier departamento
-      (`department_id`) sin restricción — es una bandeja compartida global, sin
-      elegir persona. Si además señala a alguien puntual (`assigned_to`), debe
-      caer dentro de su alcance de gestión (su zona, o todo su departamento si
-      no tiene zona) — ver `_assignable_users_query`.
+    - encargado (admin, o con acceso `manage`): puede difundir a cualquier
+      departamento (`department_id`) sin restricción — es una bandeja compartida
+      global, sin elegir persona. Si además señala a alguien puntual
+      (`assigned_to`), debe caer dentro de su alcance de gestión — ver
+      `_assignable_users_query`.
     - employee: no puede difundir a un departamento ni asignar a otra persona;
       sólo puede autoasignarse (o dejarla sin persona puntual).
 
@@ -1307,7 +1289,7 @@ def _validate_target_scope(
     if required and not department_id and not assigned_to:
         raise HTTPException(400, "Elige un departamento o una persona")
 
-    if user.role == ROLE_ADMIN:
+    if is_manager(user):
         if assigned_to:
             allowed_users = {str(u.id) for u in _assignable_users_query(user, db).all()}
             if assigned_to not in allowed_users:
@@ -1359,7 +1341,7 @@ def list_recurring(
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
-    if not _is_manager(current_user):
+    if not is_manager(current_user):
         raise HTTPException(403)
 
     items = _recurring_query(current_user, db).order_by(RecurringTask.created_at.desc()).all()
@@ -1418,7 +1400,7 @@ def create_recurring(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not _is_manager(current_user):
+    if not is_manager(current_user):
         raise HTTPException(403)
 
     _validate_target_scope(current_user, db, department_id, assigned_to)

@@ -9,10 +9,10 @@ from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app import audit
-from app.permissions import visible_projects_query as _projects_query
+from app.permissions import managed_department_ids, visible_projects_query as _projects_query
 from app.models import (
     Branch, Department, Project, Task, User, Zone,
-    ROLE_SUPERADMIN, ROLE_ADMIN,
+    ROLE_SUPERADMIN,
     PROJECT_STATUSES, TASK_STATUSES, TASK_PRIORITIES,
 )
 from app.templating import templates
@@ -27,7 +27,7 @@ def _can_edit_project(user: User, project: Project) -> bool:
         return True
     if str(project.created_by) == str(user.id):
         return True
-    if user.role == ROLE_ADMIN and project.department_id and str(project.department_id) == str(user.department_id):
+    if project.department_id and project.department_id in managed_department_ids(user):
         return True
     return False
 

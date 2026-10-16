@@ -14,8 +14,11 @@ from app.auth.deps import require_role
 from app.auth.utils import generate_csrf_token
 from app.config import settings
 from app.database import get_db
-from app.models import ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES, Branch, Department, User, UserBranch, UserZone, Zone
-from app.permissions import can_manage_user
+from app.models import (
+    ACCESS_LEVELS, ROLE_ADMIN, ROLE_AUDITOR, ROLE_EMPLOYEE, ROLE_SUPERADMIN, ROLES,
+    Branch, Department, User, UserBranch, UserDepartmentAccess,
+)
+from app.permissions import can_manage_user, managed_branch_ids
 from app.templating import templates
 
 
@@ -144,23 +147,29 @@ def user_management(
     opts = [
         joinedload(User.department),
         joinedload(User.branch),
-        joinedload(User.user_zones).joinedload(UserZone.zone),
         joinedload(User.user_branches).joinedload(UserBranch.branch),
+        joinedload(User.department_access).joinedload(UserDepartmentAccess.department),
     ]
+    # Admin acotado por sucursal (coordinador/supervisor de Comercial): solo la
+    # gente de sus sucursales, y solo puede dar de alta en ellas.
+    scoped_branch_ids = managed_branch_ids(actor)
     if actor.role == ROLE_SUPERADMIN:
         users = db.query(User).options(*opts).order_by(User.role, User.email).all()
     else:
-        users = (
+        q = (
             db.query(User)
             .options(*opts)
             .filter(User.department_id == actor.department_id, User.role.in_((ROLE_EMPLOYEE, ROLE_AUDITOR)))
-            .order_by(User.email)
-            .all()
         )
+        if scoped_branch_ids is not None:
+            q = q.filter(User.branch_id.in_(scoped_branch_ids or {None}))
+        users = q.order_by(User.email).all()
 
     departments = db.query(Department).order_by(Department.name).all()
     branches = db.query(Branch).order_by(Branch.name).all()
-    zones = db.query(Zone).order_by(Zone.name).all()
+    admin_branches = (
+        [b for b in branches if b.id in scoped_branch_ids] if scoped_branch_ids is not None else None
+    )
     csrf = generate_csrf_token(str(actor.id))
     return templates.TemplateResponse(
         request, "users/list.html",
@@ -168,7 +177,7 @@ def user_management(
             "users": users,
             "departments": departments,
             "branches": branches,
-            "zones": zones,
+            "admin_branches": admin_branches,
             "current_user": actor,
             "csrf_token": csrf,
             "roles": ROLES,
@@ -184,8 +193,8 @@ def create_user_html(
     name: str = Form(default=""),
     department_id: str = Form(default=""),
     branch_id: str = Form(default=""),
-    zone_ids: list[str] = Form(default=[]),
     branch_ids: list[str] = Form(default=[]),
+    all_branches: bool = Form(default=False),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
@@ -193,8 +202,11 @@ def create_user_html(
     if actor.role == ROLE_ADMIN:
         role = ROLE_EMPLOYEE
         department_id = str(actor.department_id)
-        zone_ids = []
         branch_ids = []
+        all_branches = False
+        scoped_branch_ids = managed_branch_ids(actor)
+        if scoped_branch_ids is not None and branch_id not in {str(b) for b in scoped_branch_ids}:
+            raise HTTPException(400, "Elige una de tus sucursales")
     elif role not in ROLES:
         raise HTTPException(400, "Invalid role")
 
@@ -204,6 +216,9 @@ def create_user_html(
         role = ROLE_EMPLOYEE
         if actor.role != ROLE_ADMIN:
             department_id = ""
+        # Sucursales que cubre: llegan de hoss en cada login.
+        branch_ids = []
+        all_branches = False
 
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(400, "Email already registered")
@@ -217,13 +232,11 @@ def create_user_html(
         role=role,
         department_id=department_id or None,
         branch_id=branch_id or None,
+        all_branches=all_branches,
     )
     db.add(new_user)
     db.flush()
 
-    for zid in zone_ids:
-        if zid:
-            db.add(UserZone(user_id=new_user.id, zone_id=zid))
     for bid in branch_ids:
         if bid:
             db.add(UserBranch(user_id=new_user.id, branch_id=bid))
@@ -254,8 +267,9 @@ def edit_user(
     role: str = Form(default=""),
     department_id: str = Form(default=""),
     branch_id: str = Form(default=""),
-    zone_ids: list[str] = Form(default=[]),
     branch_ids: list[str] = Form(default=[]),
+    all_branches: bool = Form(default=False),
+    access: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
@@ -265,7 +279,7 @@ def edit_user(
 
     target.name = name.strip() or None
 
-    # Only superadmin can change role, email, department, branch, zones
+    # Only superadmin can change role, email, department, branch, accesses
     if actor.role == ROLE_SUPERADMIN:
         if email.strip() and email.strip() != target.email:
             if db.query(User).filter(User.email == email.strip(), User.id != target.id).first():
@@ -277,17 +291,27 @@ def edit_user(
             target.department_id = department_id or None
         target.branch_id = branch_id or None
 
-        # Replace zone assignments
-        db.query(UserZone).filter(UserZone.user_id == target.id).delete()
-        for zid in zone_ids:
-            if zid:
-                db.add(UserZone(user_id=target.id, zone_id=zid))
+        # Sucursales que cubre: con SSO llegan de hoss en cada login.
+        if not org_managed_by_hoss():
+            target.all_branches = all_branches
+            db.query(UserBranch).filter(UserBranch.user_id == target.id).delete()
+            for bid in dict.fromkeys(branch_ids):
+                if bid:
+                    db.add(UserBranch(user_id=target.id, branch_id=bid))
 
-        # Replace direct branch assignments (supervisor: sucursales sueltas)
-        db.query(UserBranch).filter(UserBranch.user_id == target.id).delete()
-        for bid in branch_ids:
-            if bid:
-                db.add(UserBranch(user_id=target.id, branch_id=bid))
+        # Accesos extra a otros departamentos ("<dept_id>:<level>"; vacío = sin acceso).
+        grants = {}
+        for item in access:
+            dept_id, _, level = item.partition(":")
+            if not dept_id or level not in ACCESS_LEVELS:
+                continue
+            if target.department_id and dept_id == str(target.department_id):
+                continue
+            grants[dept_id] = level
+        valid = {str(row[0]) for row in db.query(Department.id).filter(Department.id.in_(list(grants))).all()} if grants else set()
+        db.query(UserDepartmentAccess).filter(UserDepartmentAccess.user_id == target.id).delete()
+        for dept_id in valid:
+            db.add(UserDepartmentAccess(user_id=target.id, department_id=dept_id, level=grants[dept_id]))
 
     db.commit()
     return RedirectResponse("/users/", status_code=302)

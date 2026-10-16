@@ -14,7 +14,9 @@
             {% for z in zones %}{% if z.id|string == active_zone %}Zona: {{ z.name }}{% endif %}{% endfor %}
           {% elif active_dept %}
             {% for d in departments %}{% if d.id|string == active_dept %}Departamento: {{ d.name }}{% endif %}{% endfor %}
-          {% elif current_user.role == 'admin' and current_user.department %}
+          {% elif departments %}
+            Tus departamentos
+          {% elif current_user.department %}
             Departamento: {{ current_user.department.name }}
           {% else %}
             Toda la organización
@@ -47,6 +49,8 @@
             {% endfor %}
           </select>
         </div>
+        {% endif %}
+        {% if departments %}
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-500 font-medium">Departamento</label>
           <select name="department_id"

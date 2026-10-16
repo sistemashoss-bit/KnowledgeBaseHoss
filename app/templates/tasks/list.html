@@ -129,7 +129,7 @@
     <!-- Tabs -->
     <div class="flex flex-wrap items-center gap-1 mb-5 border-b border-gray-200">
       {% set tabs = [('assigned', 'Asignadas a mí'), ('created', 'Yo asigné')] %}
-      {% if is_admin %}{% set tabs = tabs + [('dept', 'Departamento')] %}{% endif %}
+      {% if show_dept_tab %}{% set tabs = tabs + [('dept', 'Departamento')] %}{% endif %}
       {% if is_auditor %}{% set tabs = tabs + [('all', 'Todos los departamentos')] %}{% endif %}
       {% for key, label in tabs %}
       <a href="/tasks/?tab={{ key }}{% if search %}&amp;search={{ search|urlencode }}{% endif %}"
