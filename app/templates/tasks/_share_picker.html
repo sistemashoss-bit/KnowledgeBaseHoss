@@ -1,0 +1,71 @@
+{# Selector múltiple de personas para "Compartir con" (Alpine.js). Filtra en el
+   cliente por departamento y por nombre/correo; manda un input hidden
+   `name` por cada persona elegida. #}
+{% macro share_picker(candidates, departments, name='shared_with') %}
+{% set people = [] %}
+{% for u in candidates %}
+{% set _ = people.append({
+  'id': u.id|string,
+  'label': u.name or u.email,
+  'detail': u.email ~ (' · ' ~ u.department.name if u.department else ''),
+  'dept': u.department_id|string if u.department_id else '',
+  'search': ((u.name or '') ~ ' ' ~ u.email) | lower,
+}) %}
+{% endfor %}
+<div
+  x-data="{
+    dept: '',
+    query: '',
+    selected: [],
+    people: {{ people | tojson | forceescape }},
+    get filtered() {
+      const q = this.query.trim().toLowerCase();
+      return this.people.filter(p =>
+        !this.selected.includes(p.id)
+        && (!this.dept || p.dept === this.dept)
+        && (!q || p.search.includes(q))
+      ).slice(0, 100);
+    },
+    person(id) { return this.people.find(p => p.id === id) || {}; },
+    add(p) { this.selected.push(p.id); this.query = ''; },
+    remove(id) { this.selected = this.selected.filter(x => x !== id); },
+  }"
+  class="space-y-2"
+>
+  <template x-for="id in selected" :key="id">
+    <input type="hidden" name="{{ name }}" :value="id" />
+  </template>
+
+  <div class="flex flex-wrap gap-1.5" x-show="selected.length" x-cloak>
+    <template x-for="id in selected" :key="id">
+      <span class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs">
+        <span x-text="person(id).label"></span>
+        <button type="button" @click="remove(id)" class="w-4 h-4 rounded-full hover:bg-blue-100" aria-label="Quitar">×</button>
+      </span>
+    </template>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+    <select x-model="dept" aria-label="Filtrar por departamento"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      <option value="">Todos los departamentos</option>
+      {% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
+    </select>
+    <input type="text" x-model="query" placeholder="Buscar persona..." autocomplete="off" aria-label="Buscar persona"
+           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+  </div>
+
+  <div class="max-h-44 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 bg-white">
+    <template x-if="filtered.length === 0">
+      <p class="px-3 py-2 text-sm text-gray-400">Sin resultados</p>
+    </template>
+    <template x-for="p in filtered" :key="p.id">
+      <button type="button" @click="add(p)"
+              class="w-full text-left px-3 py-1.5 hover:bg-blue-50 transition-colors">
+        <span class="block text-sm text-gray-800" x-text="p.label"></span>
+        <span class="block text-xs text-gray-400" x-text="p.detail"></span>
+      </button>
+    </template>
+  </div>
+</div>
+{% endmacro %}

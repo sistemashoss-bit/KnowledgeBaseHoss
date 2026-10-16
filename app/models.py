@@ -445,6 +445,9 @@ class Task(Base):
     evidences = relationship(
         "TaskEvidence", back_populates="task", order_by="TaskEvidence.created_at", passive_deletes=True,
     )
+    shares = relationship(
+        "TaskShare", back_populates="task", order_by="TaskShare.created_at", passive_deletes=True,
+    )
     status_history = relationship(
         "TaskStatusHistory", back_populates="task", order_by="TaskStatusHistory.changed_at",
         passive_deletes=True,
@@ -558,6 +561,21 @@ class TaskComment(Base):
 
     task = relationship("Task", back_populates="comments")
     user = relationship("User", back_populates="task_comments")
+
+
+class TaskShare(Base):
+    """Persona con quien se compartió una tarea para darle seguimiento: la ve,
+    recibe sus avisos y comenta, pero no la edita, no cambia su estado ni sube
+    evidencias (salvo que ya tuviera esos permisos por otro lado)."""
+    __tablename__ = "task_shares"
+
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    shared_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", back_populates="shares")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class TaskEvidence(Base):

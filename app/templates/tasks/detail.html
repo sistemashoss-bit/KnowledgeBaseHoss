@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "tasks/_share_picker.html" as sharing %}
 {% block title %}{{ task.title }} — Tareas{% endblock %}
 
 {% macro duration_label(seconds) %}
@@ -296,21 +297,69 @@
             {% endif %}
           </div>
 
-          {% if can_edit %}
+          <div class="min-w-0">
+            <p class="text-xs text-gray-400 mb-1">Compartida con</p>
+            {% if task.shares %}
+            <div class="flex flex-wrap gap-1">
+              {% for sh in task.shares %}
+              <span class="inline-flex items-center gap-1 pl-2 {% if can_share or sh.user_id|string == current_user.id|string %}pr-1{% else %}pr-2{% endif %} py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700"
+                    title="{{ sh.user.email }}{% if sh.user.department %} · {{ sh.user.department.name }}{% endif %}">
+                {{ sh.user.name or sh.user.email }}
+                {% if can_share or sh.user_id|string == current_user.id|string %}
+                <form method="post" action="/tasks/{{ task.id }}/shares/{{ sh.user_id }}/remove" class="inline"
+                      onsubmit="return confirm('{% if sh.user_id|string == current_user.id|string %}¿Dejar de seguir esta tarea?{% else %}¿Dejar de compartir con {{ sh.user.name or sh.user.email }}?{% endif %}')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button type="submit" class="w-4 h-4 rounded-full hover:bg-gray-200 leading-none"
+                          aria-label="{% if sh.user_id|string == current_user.id|string %}Dejar de seguir{% else %}Quitar a {{ sh.user.name or sh.user.email }}{% endif %}">×</button>
+                </form>
+                {% endif %}
+              </span>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400">—</p>
+            {% endif %}
+          </div>
+
+          {% if can_edit or can_share %}
           <div class="ml-auto flex items-center gap-2">
-            {% if dept_tags %}
+            {% if can_share %}
+            <button onclick="document.getElementById('panel-share').classList.toggle('hidden')"
+                    class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              Compartir
+            </button>
+            {% endif %}
+            {% if can_edit and dept_tags %}
             <button onclick="document.getElementById('panel-tags').classList.toggle('hidden')"
                     class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
               Editar etiquetas
             </button>
             {% endif %}
+            {% if can_edit %}
             <button onclick="document.getElementById('panel-assign').classList.toggle('hidden')"
                     class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
               Reasignar
             </button>
+            {% endif %}
           </div>
           {% endif %}
         </div>
+
+        {% if can_share %}
+        <div id="panel-share" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <form method="post" action="/tasks/{{ task.id }}/shares" class="space-y-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <p class="text-xs text-gray-500">Podrán ver la tarea, darle seguimiento y comentar, sin editarla ni subir evidencias.</p>
+            {{ sharing.share_picker(share_candidates | rejectattr('id', 'in', task.shares | map(attribute='user_id') | list) | list, departments) }}
+            <div class="flex justify-end">
+              <button type="submit"
+                      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
+                Compartir
+              </button>
+            </div>
+          </form>
+        </div>
+        {% endif %}
 
         {% if can_edit and dept_tags %}
         <div id="panel-tags" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -542,7 +591,7 @@
         {% endif %}
       </div>
 
-      {% if can_participate %}
+      {% if can_comment %}
       <!-- Add comment -->
       <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100">
         <form hx-post="/tasks/{{ task.id }}/comments"

@@ -21,7 +21,7 @@ from app.permissions import (
 )
 from app.models import (
     Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
-    TaskStatusHistory, TaskTag, TaskTagAssignment, User,
+    TaskShare, TaskStatusHistory, TaskTag, TaskTagAssignment, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
@@ -101,6 +101,77 @@ def _can_approve_task(user: User, task: Task) -> bool:
     if user.role == ROLE_SUPERADMIN:
         return True
     return str(task.created_by) == str(user.id)
+
+
+def _is_shared_with(user: User, task_id, db: Session) -> bool:
+    return db.query(TaskShare).filter(TaskShare.task_id == task_id, TaskShare.user_id == user.id).first() is not None
+
+
+def _can_view_task(user: User, task_id, db: Session) -> bool:
+    """La ve por su alcance (incluye la lectura de auditor) o porque se la compartieron."""
+    return (
+        _tasks_query(user, db, audit=True).filter(Task.id == task_id).first() is not None
+        or _is_shared_with(user, task_id, db)
+    )
+
+
+def _can_comment(user: User, task_id, db: Session) -> bool:
+    """Comenta quien participa por su alcance o a quien se la compartieron (el
+    auditor fuera de su alcance solo lee)."""
+    return (
+        _tasks_query(user, db).filter(Task.id == task_id).first() is not None
+        or _is_shared_with(user, task_id, db)
+    )
+
+
+def _can_share(user: User, task: Task, db: Session) -> bool:
+    """Comparte quien puede editarla y el asignado; a quien se la compartieron, no."""
+    return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
+
+
+def _followers(task: Task) -> set:
+    """Quienes reciben los avisos de la tarea: asignado, creador y con quienes se compartió."""
+    return {task.assigned_to, task.created_by} | {s.user_id for s in task.shares}
+
+
+def _share_candidates(user: User, db: Session) -> list[User]:
+    """Cualquier persona activa de cualquier departamento (el selector filtra por
+    departamento y nombre en el cliente)."""
+    return (
+        db.query(User).options(joinedload(User.department))
+        .filter(User.is_active == True, User.id != user.id)  # noqa: E712
+        .order_by(User.name, User.email).all()
+    )
+
+
+def _add_shares(task: Task, user_ids: list[str], actor: User, db: Session) -> list:
+    """Agrega a quienes falten (activos; ni el creador ni el asignado, que ya la
+    siguen). Devuelve los ids agregados para avisarles tras el commit."""
+    wanted = {uid for uid in user_ids if uid}
+    if not wanted:
+        return []
+    existing = {str(s.user_id) for s in db.query(TaskShare.user_id).filter(TaskShare.task_id == task.id).all()}
+    skip = existing | {str(task.created_by), str(task.assigned_to), str(actor.id)}
+    try:
+        valid = {
+            row[0] for row in db.query(User.id).filter(
+                User.id.in_([uuid.UUID(uid) for uid in wanted - skip]), User.is_active == True,  # noqa: E712
+            ).all()
+        } if wanted - skip else set()
+    except ValueError:
+        raise HTTPException(400, "Persona inválida")
+    for uid in valid:
+        db.add(TaskShare(task_id=task.id, user_id=uid, shared_by=actor.id))
+    return list(valid)
+
+
+def _notify_shared(task: Task, user_ids: list, actor: User) -> None:
+    name = actor.name or actor.email
+    for uid in user_ids:
+        realtime.notify_user(
+            uid, title=f"{name} compartió una tarea contigo", body=task.title,
+            url=f"/tasks/{task.id}", kind="task_shared",
+        )
 
 
 def _status_durations(task: Task) -> dict:
@@ -196,7 +267,7 @@ def list_tasks(
 
     # Available tabs — "dept" para admins/superadmins y quien tenga acceso extra
     # a otros departamentos; "all" (solo lectura, todos los departamentos) para auditores.
-    valid_tabs = ["assigned", "created"] + (["dept"] if show_dept_tab else []) + (["all"] if is_auditor else [])
+    valid_tabs = ["assigned", "created", "shared"] + (["dept"] if show_dept_tab else []) + (["all"] if is_auditor else [])
     if tab not in valid_tabs:
         tab = "assigned"
 
@@ -229,6 +300,9 @@ def list_tasks(
         can_drag = True  # the assignee may move their own tasks between statuses
     elif tab == "created":
         q = base.filter(Task.created_by == current_user.id)
+        can_drag = False
+    elif tab == "shared":
+        q = base.filter(Task.shares.any(TaskShare.user_id == current_user.id))
         can_drag = False
     elif tab == "all":  # auditor: todas las tareas, solo lectura
         q = base
@@ -263,7 +337,7 @@ def list_tasks(
                 filter_user_id = user_id
         can_drag = False
 
-    if tab in ("assigned", "created", "all"):
+    if tab in ("assigned", "created", "shared", "all"):
         filter_departments = departments
     selected_department = next((d for d in filter_departments if str(d.id) == dept_id), None)
     if selected_department is not None:
@@ -303,6 +377,7 @@ def list_tasks(
             "projects": projects,
             "tags": tags,
             "documents": _accessible_documents(current_user),
+            "share_candidates": _share_candidates(current_user, db),
             "filter_departments": filter_departments,
             "filter_users": filter_users,
             "filter_dept_id": filter_dept_id,
@@ -386,6 +461,7 @@ def create_task(
     due_date: str = Form(""),
     next_url: str = Form(""),
     tag_ids: list[str] = Form(default=[]),
+    shared_with: list[str] = Form(default=[]),
     evidences: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -422,6 +498,7 @@ def create_task(
     ))
     for tid in _validated_tag_ids(tag_ids, task.department_id, db):
         db.add(TaskTagAssignment(task_id=task.id, tag_id=tid))
+    shared_ids = _add_shares(task, shared_with, current_user, db)
 
     for f in evidences:
         if not f.filename:
@@ -450,11 +527,12 @@ def create_task(
             url=f"/tasks/{task.id}",
             kind="task_assigned",
         )
+    _notify_shared(task, shared_ids, current_user)
     realtime.notify_tasks()
     audit.log_action(
         "task_create", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details=f"priority={task.priority} evidences={len([f for f in evidences if f.filename])}",
+        details=f"priority={task.priority} evidences={len([f for f in evidences if f.filename])} shared={len(shared_ids)}",
     )
     redirect = next_url if next_url and next_url.startswith("/") else "/tasks/"
     return RedirectResponse(redirect, status_code=302)
@@ -484,6 +562,7 @@ def task_detail(
             joinedload(Task.document),
             joinedload(Task.status_history),
             joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
+            joinedload(Task.shares).joinedload(TaskShare.user).joinedload(User.department),
         )
         .filter(Task.id == task_id)
         .first()
@@ -496,15 +575,17 @@ def task_detail(
         # del botón Eliminar — sin esto, aterriza en un JSON de error.
         return RedirectResponse("/tasks/", status_code=302)
 
-    # Verify visibility
-    visible = _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first()
-    if not visible:
+    # Verify visibility (por su alcance o porque se la compartieron)
+    in_scope = _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first() is not None
+    if not in_scope and not _is_shared_with(current_user, task_id, db):
         raise HTTPException(403)
-    # El auditor puede ver tareas ajenas a su alcance, pero no participar en ellas.
-    can_participate = (
+    # El auditor puede ver tareas ajenas a su alcance, pero no participar en ellas;
+    # a quien se la compartieron solo comenta (no sube evidencias).
+    can_participate = in_scope and (
         current_user.role != ROLE_AUDITOR
         or _tasks_query(current_user, db).filter(Task.id == task_id).first() is not None
     )
+    can_share = _can_share(current_user, task, db)
 
     users = _assignable_users_query(current_user, db).all()
     departments = db.query(Department).order_by(Department.name).all()
@@ -540,6 +621,9 @@ def task_detail(
             "is_admin": is_manager(current_user),
             "can_approve": _can_approve_task(current_user, task),
             "can_participate": can_participate,
+            "can_comment": _can_comment(current_user, task_id, db),
+            "can_share": can_share,
+            "share_candidates": _share_candidates(current_user, db) if can_share else [],
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
@@ -569,7 +653,7 @@ async def task_stream(task_id: str, request: Request):
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
-        visible = user and _tasks_query(user, db, audit=True).filter(Task.id == task_id).first()
+        visible = user and _can_view_task(user, task_id, db)
     finally:
         db.close()
     if not visible:
@@ -633,7 +717,7 @@ def upload_evidences(
     # Notifica al asignado y al creador (menos a quien sube), solo si hubo archivos.
     if uploaded:
         actor = current_user.name or current_user.email
-        for uid in {task.assigned_to, task.created_by}:
+        for uid in _followers(task):
             if uid and str(uid) != str(current_user.id):
                 realtime.notify_user(
                     uid,
@@ -693,7 +777,7 @@ def download_evidence(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first():
+    if not _can_view_task(current_user, task_id, db):
         raise HTTPException(403)
 
     ev = db.query(TaskEvidence).filter(
@@ -744,7 +828,7 @@ def update_status(
     # Notify the other party (assignee/creator) that the status changed.
     actor = current_user.name or current_user.email
     push_title = f"{actor} aprobó tu tarea" if is_approval else f"{actor} cambió el estado"
-    for uid in {task.assigned_to, task.created_by}:
+    for uid in _followers(task):
         if uid and str(uid) != str(current_user.id):
             realtime.notify_user(
                 uid, title=push_title, body=task.title, url=f"/tasks/{task_id}",
@@ -928,6 +1012,68 @@ def delete_task(
     return HTMLResponse(headers={"HX-Redirect": redirect})
 
 
+# ── Shares (seguimiento) ─────────────────────────────────────────────────────
+
+@router.post("/{task_id}/shares")
+def add_task_shares(
+    task_id: str,
+    request: Request,
+    shared_with: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_share(current_user, task, db):
+        raise HTTPException(403)
+    added = _add_shares(task, shared_with, current_user, db)
+    db.commit()
+    if added:
+        _notify_shared(task, added, current_user)
+        realtime.notify_task(task_id)
+        audit.log_action(
+            "task_share", user=current_user, request=request,
+            resource_type="task", resource_id=task_id, resource_name=task.title,
+            details=f"users={len(added)}",
+        )
+    return RedirectResponse(f"/tasks/{task_id}", status_code=302)
+
+
+@router.post("/{task_id}/shares/{user_id}/remove")
+def remove_task_share(
+    task_id: str,
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404)
+    try:
+        user_id = str(uuid.UUID(user_id))
+    except ValueError:
+        raise HTTPException(404)
+    # Quita quien puede compartir, o la propia persona deja de seguirla.
+    is_self = user_id == str(current_user.id)
+    if not (is_self or _can_share(current_user, task, db)):
+        raise HTTPException(403)
+    share = db.query(TaskShare).filter(TaskShare.task_id == task.id, TaskShare.user_id == user_id).first()
+    if share:
+        db.delete(share)
+        db.commit()
+        realtime.notify_task(task_id)
+        audit.log_action(
+            "task_unshare", user=current_user, request=request,
+            resource_type="task", resource_id=task_id, resource_name=task.title,
+            details=f"user={user_id}",
+        )
+    return RedirectResponse("/tasks/?tab=shared" if is_self else f"/tasks/{task_id}", status_code=302)
+
+
 # ── Comments (HTMX append) ───────────────────────────────────────────────────
 
 @router.post("/{task_id}/comments", response_class=HTMLResponse)
@@ -943,9 +1089,8 @@ def add_comment(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404)
-    # Anyone who can see the task can comment
-    visible = _tasks_query(current_user, db).filter(Task.id == task_id).first()
-    if not visible:
+    # Comenta quien participa por su alcance o a quien se la compartieron
+    if not _can_comment(current_user, task_id, db):
         raise HTTPException(403)
 
     comment = TaskComment(
@@ -959,9 +1104,9 @@ def add_comment(
     db.refresh(comment)
     comment.user = current_user  # for template rendering
 
-    # Notifica al asignado y al creador (menos a quien comenta).
+    # Notifica al asignado, al creador y a con quienes se compartió (menos a quien comenta).
     actor = current_user.name or current_user.email
-    for uid in {task.assigned_to, task.created_by}:
+    for uid in _followers(task):
         if uid and str(uid) != str(current_user.id):
             realtime.notify_user(
                 uid,
