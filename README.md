@@ -47,7 +47,7 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 
 **Opcionales:**
 - **Valkey / Redis** — caché de respuestas RAG y canal de mensajería en tiempo real (SSE). La app funciona sin él con degradación graceful, pero el timbre de llamadas requiere Valkey
-- **hoss-api** — proveedor de identidad del staff. No hay login propio: se entra desde la extensión (o el menú de hoss-front) por `POST /auth/sso`; sin sesión `/auth/login` solo muestra el aviso
+- **hoss-api** — proveedor de identidad del staff. Se entra con correo y contraseña en `/auth/login` (validados con `POST /sso/verify-auth`, que también aplica las políticas de identidad de hossidentity) o desde la extensión / el menú de hoss-front por `POST /auth/sso`. El rate-limit de intentos lo lleva hoss-api. Cerrar sesión: `GET /auth/logout`
 
 ## Variables de entorno
 

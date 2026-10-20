@@ -1,14 +1,16 @@
 """Cliente de SSO contra hoss-api.
 
 hoss-api es el proveedor de identidad del staff. knowledge NO comparte el
-JWT_SECRET de hoss: el token que llega por el handoff de hoss-front se valida
-preguntándole a hoss-api por la identidad.
+JWT_SECRET de hoss: valida credenciales (login propio) o el token del handoff
+(extensión / hoss-front) preguntándole a hoss-api por la identidad.
 
+    POST /sso/verify-auth {email, password, site}
     GET  /sso/identity?site=<site>   (Authorization: Bearer <sesion_hoss>)
         -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
 
-    Responde 403 si el usuario no tiene el permiso del sitio en hoss
-    (knowledge_access); se levanta AccessDenied.
+    Responden 403 si el usuario no tiene el permiso del sitio en hoss
+    (knowledge_access) o, en verify-auth, si lo niegan las políticas de identidad
+    (dispositivo, horario); se levanta AccessDenied.
 
     avatar_key: llave del avatar en Wasabi (bucket compartido hossavatars); knowledge
     firma la URL localmente. avatar_url: URL ya firmada por hoss (para consumidores que
@@ -23,7 +25,54 @@ SITE = "knowledge"
 
 
 class AccessDenied(Exception):
-    """Identidad válida en hoss, pero sin permiso de acceso a este sitio (403)."""
+    """Identidad válida en hoss, pero sin acceso a este sitio (403). `message`: el
+    motivo que manda hoss-api cuando lo niega una política (p. ej. "Este equipo no
+    está autorizado…"); None si es solo falta de permiso."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message)
+        self.message = message
+
+
+class RateLimited(Exception):
+    """hoss-api bloqueó el email por intentos fallidos (429). Trae su mensaje."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+async def verify_auth(email: str, password: str) -> dict | None:
+    """Login propio: devuelve la identidad si las credenciales son válidas en hoss;
+    None si no. El rate-limit por email lo lleva hoss-api (RateLimited)."""
+    base = settings.hoss_api_url.rstrip("/")
+    if not base:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{base}/sso/verify-auth",
+                json={"email": email, "password": password, "site": SITE},
+            )
+    except httpx.HTTPError:
+        return None
+
+    if resp.status_code in (403, 429):
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        if resp.status_code == 429:
+            raise RateLimited(body.get("error") or "Demasiados intentos. Intenta más tarde.")
+        # Con `reason` lo negó una política de identidad; sin él, falta el permiso.
+        raise AccessDenied(body.get("error") if body.get("reason") else None)
+    if resp.status_code != 200:
+        return None
+    identity = resp.json()
+    if not identity.get("corporate_id"):
+        return None
+    return identity
 
 
 async def introspect_session(session_token: str) -> dict | None:

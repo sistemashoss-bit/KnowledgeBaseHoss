@@ -10,19 +10,29 @@ from app.config import settings
 AUTH_COOKIE = "access_token"
 
 
-def set_auth_cookie(response: Response, token: str) -> None:
+def session_expiry(max_until: datetime | None = None) -> datetime:
+    """Fin de la sesión (UTC naive): la duración normal o, si las políticas de
+    identidad la topan (cierre del horario, `session_max_until`), lo que llegue antes."""
+    expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes)
+    return min(expire, max_until) if max_until else expire
+
+
+def set_auth_cookie(response: Response, token: str, expires_at: datetime | None = None) -> None:
     """Emite la cookie de sesión de knowledge de forma consistente."""
+    max_age = settings.jwt_expire_minutes * 60
+    if expires_at:
+        max_age = max(0, int((expires_at - datetime.utcnow()).total_seconds()))
     response.set_cookie(
         AUTH_COOKIE,
         token,
         httponly=True,
         samesite="lax",
-        max_age=settings.jwt_expire_minutes * 60,
+        max_age=max_age,
     )
 
 
-def create_access_token(user_id: str, role: str, department_id) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes)
+def create_access_token(user_id: str, role: str, department_id, expires_at: datetime | None = None) -> str:
+    expire = expires_at or session_expiry()
     return jwt.encode(
         {
             "sub": str(user_id),

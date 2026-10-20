@@ -227,8 +227,23 @@
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
       </div>
+      {# GET a propósito: es el mismo /auth/logout que encadena HossExtension. #}
+      <a href="/auth/logout" id="logout-link" aria-label="Cerrar sesión" title="Cerrar sesión"
+         class="mt-3 w-full min-h-11 px-4 py-2 inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium text-slate-300 bg-slate-800 hover:text-red-300 hover:bg-red-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 transition-colors">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v9" />
+          <path d="M6.34 5.34a8 8 0 1 0 11.32 0" />
+        </svg>
+        <span>Cerrar sesión</span>
+      </a>
+      <script>
+        // El historial del chat es por navegador: que no lo vea quien entre después.
+        document.getElementById('logout-link').addEventListener('click', function () {
+          try { localStorage.removeItem('kb_chat_{{ current_user.id }}'); } catch (err) {}
+        });
+      </script>
       {% else %}
-      <a href="/auth/login" class="text-slate-400 hover:text-white text-xs">Acceso empleados</a>
+      <a href="/auth/login" class="text-slate-400 hover:text-white text-xs">Iniciar sesión</a>
       {% endif %}
     </div>
   </aside>

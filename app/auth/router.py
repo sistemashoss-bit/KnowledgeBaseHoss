@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -10,6 +11,7 @@ from app.auth.utils import (
     AUTH_COOKIE,
     create_access_token,
     generate_csrf_token,
+    session_expiry,
     set_auth_cookie,
 )
 from app.database import get_db
@@ -22,8 +24,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
-# Sin formulario propio: se entra desde la extensión (o el menú de hoss-front) por
-# /auth/sso. Sin sesión solo se muestra el aviso.
+# Dos entradas: el formulario propio (credenciales contra /sso/verify-auth, que
+# también aplica las políticas de identidad) y el handoff desde la extensión o
+# hoss-front (/auth/sso).
 
 def _access_page(request: Request, error: str | None = None, status_code: int = 200):
     return templates.TemplateResponse(
@@ -31,11 +34,62 @@ def _access_page(request: Request, error: str | None = None, status_code: int = 
     )
 
 
+def _login_page(request: Request, error: str | None = None, status_code: int = 200):
+    return templates.TemplateResponse(
+        request, "login.html", {"error": error}, status_code=status_code
+    )
+
+
+def _policy_expiry(identity: dict) -> datetime | None:
+    """Cierre del horario permitido (`session_max_until` de hoss-api) en UTC naive."""
+    value = identity.get("session_max_until")
+    if not value:
+        return None
+    try:
+        until = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return until.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _open_session(user, identity: dict, next_url: str | None) -> RedirectResponse:
+    expires_at = session_expiry(_policy_expiry(identity))
+    access = create_access_token(str(user.id), user.role, user.department_id, expires_at)
+    resp = RedirectResponse(next_url or "/documents/", status_code=302)
+    set_auth_cookie(resp, access, expires_at)
+    return resp
+
+
 @router.get("/login")
 def login_page(request: Request, user=Depends(get_current_user)):
     if user:
         return RedirectResponse("/documents/", status_code=302)
-    return _access_page(request)
+    return _login_page(request)
+
+
+@router.post("/login")
+async def login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        identity = await hoss.verify_auth(email, password)
+    except hoss.RateLimited as e:
+        return _login_page(request, e.message, 429)
+    except hoss.AccessDenied as e:
+        return _login_page(request, e.message or "No tienes acceso a Knowledge Base.", 403)
+    if not identity:
+        return _login_page(request, "Correo o contraseña incorrectos.", 400)
+
+    user = provision_from_identity(identity, db)
+    if not user or not user.is_active:
+        return _login_page(request, "Tu usuario está desactivado.", 403)
+
+    # Sin token de hoss (no hubo handoff): las sincronizaciones con hoss-api
+    # (departamentos, sucursales) piden entrar desde la extensión.
+    return _open_session(user, identity, None)
 
 
 # ── Logout ────────────────────────────────────────────────────────────────────
@@ -97,10 +151,7 @@ async def sso_handoff(
     # (p. ej. sincronizar sucursales/regiones). hoss valida su expiración al usarlo.
     vk.store_hoss_token(user.id, token)
 
-    access = create_access_token(str(user.id), user.role, user.department_id)
-    resp = RedirectResponse(_safe_next(next) or "/documents/", status_code=302)
-    set_auth_cookie(resp, access)
-    return resp
+    return _open_session(user, identity, _safe_next(next))
 
 
 # ── Profile ───────────────────────────────────────────────────────────────────
