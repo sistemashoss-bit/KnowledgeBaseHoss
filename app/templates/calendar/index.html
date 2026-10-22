@@ -129,12 +129,75 @@
       <template x-if="detail">
         <div>
           <div x-effect="$el.replaceChildren(detailNodes(detail))"></div>
+
+          <!-- Comentarios (solo eventos; en una serie aplican a todas sus fechas) -->
+          <template x-if="detail.kind === 'event'">
+            <div class="mt-4 border-t border-gray-100 pt-3">
+              <h3 class="text-xs font-semibold text-gray-600 mb-2">
+                Comentarios <span class="font-normal text-gray-400" x-show="comments.length" x-text="`(${comments.length})`"></span>
+              </h3>
+              <p x-show="commentsLoading" class="text-xs text-gray-400">Cargando…</p>
+              <p x-show="!commentsLoading && !comments.length" class="text-xs text-gray-400">Sin comentarios todavía.</p>
+              <ul class="space-y-2 max-h-56 overflow-y-auto mb-2" x-show="comments.length">
+                <template x-for="c in comments" :key="c.id">
+                  <li class="flex items-start gap-2">
+                    <span class="w-6 h-6 shrink-0 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold flex items-center justify-center" x-text="c.initials"></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs text-gray-500">
+                        <span class="font-medium text-gray-700" x-text="c.author"></span>
+                        · <span x-text="calFmtStamp(c.created_at)"></span>
+                        <span x-show="c.edited" class="text-gray-400">(editado)</span>
+                      </p>
+                      <template x-if="editingId !== c.id">
+                        <p class="text-sm text-gray-800 whitespace-pre-line break-words" x-text="c.content"></p>
+                      </template>
+                      <template x-if="editingId === c.id">
+                        <div class="mt-1">
+                          <textarea x-model="editText" rows="2" maxlength="5000" x-init="$nextTick(() => $el.focus())"
+                                    @keydown.enter.ctrl.prevent="saveComment(c)" @keydown.escape.stop="editingId = null"
+                                    class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+                          <div class="flex justify-end gap-2 mt-1">
+                            <button type="button" @click="editingId = null"
+                                    class="px-2 py-1 border border-gray-300 text-gray-600 rounded-lg text-xs hover:bg-gray-50">Cancelar</button>
+                            <button type="button" @click="saveComment(c)" :disabled="commentSaving || !editText.trim()"
+                                    class="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-xs">Guardar</button>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                    <button type="button" x-show="c.can_edit && editingId !== c.id" @click="editingId = c.id; editText = c.content"
+                            class="text-gray-400 hover:text-blue-600 text-xs leading-none px-1" title="Editar comentario" aria-label="Editar comentario">✎</button>
+                    <button type="button" x-show="c.can_delete && editingId !== c.id" @click="deleteComment(c)"
+                            class="text-gray-400 hover:text-red-600 text-xs leading-none px-1" title="Eliminar comentario" aria-label="Eliminar comentario">✕</button>
+                  </li>
+                </template>
+              </ul>
+              <form @submit.prevent="addComment()" class="flex items-end gap-2">
+                <textarea x-model="commentText" rows="2" maxlength="5000" placeholder="Escribe un comentario…"
+                          @keydown.enter.ctrl.prevent="addComment()"
+                          class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+                <button type="submit" :disabled="commentSaving || !commentText.trim()"
+                        class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-sm">Enviar</button>
+              </form>
+              <p x-show="commentError" x-text="commentError" class="text-xs text-red-600 mt-1"></p>
+            </div>
+          </template>
+
           <div class="flex flex-wrap justify-end gap-2 mt-5">
             <template x-if="detail.url">
               <a :href="detail.url" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">Abrir</a>
             </template>
+            <!-- Derivar: abre el formulario de Tareas prellenado con el evento -->
+            <template x-if="detail.kind === 'event'">
+              <a :href="taskUrl(detail)" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Crear tarea</a>
+            </template>
+            {% if can_recurring %}
+            <template x-if="detail.kind === 'event'">
+              <a :href="recurringUrl(detail)" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Crear tarea recurrente</a>
+            </template>
+            {% endif %}
             <template x-if="detail.mine">
-              <button type="button" @click="deleteEvent(detail.id)"
+              <button type="button" @click="deleteEvent(detail)"
                       class="px-3 py-1.5 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50">Eliminar</button>
             </template>
             <template x-if="detail.mine">
@@ -209,6 +272,64 @@
             </select>
           </div>
 
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" x-model="form.repeat" @change="if (form.repeat) syncRepeatDefaults()" class="rounded border-gray-300 text-blue-600" />
+              Repetir
+            </label>
+            <div x-show="form.repeat" class="space-y-2 pl-6">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 mb-1">Frecuencia</label>
+                  <select x-model="form.frequency"
+                          class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                    <option value="daily">Diario</option>
+                    <option value="weekly">Semanal</option>
+                    <option value="monthly">Mensual</option>
+                    <option value="custom">Días específicos</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 mb-1">Hasta <span class="text-gray-400">(opcional)</span></label>
+                  <input type="date" x-model="form.repeatUntil" :min="form.startDate"
+                         class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                </div>
+              </div>
+              <div x-show="form.frequency === 'weekly'">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Día de la semana</label>
+                <select x-model="form.dayOfWeek"
+                        class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <template x-for="(d, i) in CAL_WEEKDAYS" :key="i">
+                    <option :value="String(i)" x-text="d" :selected="String(i) === String(form.dayOfWeek)"></option>
+                  </template>
+                </select>
+              </div>
+              <div x-show="form.frequency === 'custom'">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                  <label class="block text-xs font-medium text-gray-600">Días de la semana</label>
+                  <div class="flex gap-2 text-[11px]">
+                    <button type="button" @click="form.daysOfWeek = ['0','1','2','3','4']" class="text-blue-600 hover:underline">Lun–Vie</button>
+                    <button type="button" @click="form.daysOfWeek = ['0','2','4']" class="text-blue-600 hover:underline">Lun/Mié/Vie</button>
+                  </div>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="(d, i) in CAL_WEEKDAYS_SHORT" :key="i">
+                    <label class="inline-flex items-center gap-1 px-2 py-1 border border-gray-300 rounded-lg text-xs cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-400 has-[:checked]:text-blue-700">
+                      <input type="checkbox" :value="String(i)" x-model="form.daysOfWeek" class="accent-blue-600" />
+                      <span x-text="d"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+              <div x-show="form.frequency === 'monthly'">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Día del mes <span class="text-gray-400">(1–31; en meses cortos cae el último día)</span></label>
+                <input type="number" x-model="form.dayOfMonth" min="1" max="31" :required="form.repeat && form.frequency === 'monthly'"
+                       class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              <p class="text-[11px] text-gray-400">Se repite desde la fecha de inicio, a la misma hora y con la misma duración.</p>
+            </div>
+          </div>
+
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">Ubicación</label>
             <input type="text" x-model="form.location" maxlength="255"
@@ -242,6 +363,8 @@
   const CAL_REMINDERS = {{ reminder_options | tojson }};
   const CAL_INITIAL_DATE = {{ initial_date | tojson }};
   const CAL_WORK_KEY = 'calendar.work';
+  const CAL_WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const CAL_WEEKDAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
   function calPad(n) { return String(n).padStart(2, '0'); }
 
@@ -268,6 +391,20 @@
     }).formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
     if (p.hour === '24') p.hour = '00';
     return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+  }
+
+  // Día de la semana 0=Lun..6=Dom (como en el servidor) de 'YYYY-MM-DD'.
+  function calWeekday(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+  }
+
+  // 'YYYY-MM-DDTHH:MM' (hora local del negocio) → '22 oct, 14:05'.
+  function calFmtStamp(str) {
+    const s = calSplit(str);
+    const [y, m, d] = s.date.split('-').map(Number);
+    const day = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-MX', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+    return `${day}, ${s.time}`;
   }
 
   function calFmtRange(ev) {
@@ -297,6 +434,8 @@
       form: null,
       error: '',
       saving: false,
+      comments: [], commentsLoading: false, commentText: '', commentSaving: false, commentError: '',
+      editingId: null, editText: '',
 
       init() {
         try { this.work = localStorage.getItem(CAL_WORK_KEY) === '1'; } catch (e) {}
@@ -346,9 +485,16 @@
             }
             const title = document.createElement('span');
             title.className = 'fc-ev-title';
-            const prefix = p.kind === 'task' ? '☑ ' : p.kind === 'project' ? '◆ ' : '';
+            const prefix = p.kind === 'task' ? '☑ ' : p.kind === 'project' ? '◆ ' : p.frequency ? '↻ ' : '';
             title.textContent = prefix + (arg.timeText && !arg.view.type.startsWith('list') ? arg.timeText + ' ' : '') + arg.event.title;
             wrap.appendChild(title);
+            if (p.comment_count) {
+              const c = document.createElement('span');
+              c.className = 'fc-ev-badge';
+              c.textContent = `💬${p.comment_count}`;
+              c.title = `${p.comment_count} comentario(s)`;
+              wrap.appendChild(c);
+            }
             return { domNodes: [wrap] };
           },
           eventMouseEnter: (info) => {
@@ -361,6 +507,7 @@
             info.jsEvent.preventDefault();  // tareas/proyectos traen url: se abre desde el detalle
             this.tip = null;
             this.detail = this.detailFrom(info.event);
+            if (this.detail.kind === 'event') this.loadComments();
           },
           select: (info) => {
             const s = calSplit(info.startStr), e = calSplit(info.endStr);
@@ -394,8 +541,11 @@
       detailFrom(ev) {
         const p = ev.extendedProps;
         return {
-          id: ev.id, mine: !!p.mine, url: ev.url || '',
+          id: ev.id, eventId: p.event_id || ev.id, mine: !!p.mine, url: ev.url || '',
           startStr: ev.startStr, endStr: ev.endStr, allDay: ev.allDay, reminder: p.reminder_minutes,
+          seriesStart: p.series_start || ev.startStr, seriesEnd: p.series_end || ev.endStr,
+          frequency: p.frequency || '', dayOfWeek: p.day_of_week, dayOfMonth: p.day_of_month,
+          daysOfWeek: p.days_of_week || [], repeatUntil: p.repeat_until || '', repeatLabel: p.repeat_label || '',
           kind: p.kind, title: ev.title, when: calFmtRange(ev), color: p.color,
           owner: p.owner_name, location: p.location || '', description: p.description || '',
           status: p.status || '', priority: p.priority || '', department: p.department || '',
@@ -426,6 +576,7 @@
 
         const rows = [];
         if (d.kind === 'event' && !d.mine) rows.push(['De', d.owner]);
+        if (d.repeatLabel) rows.push(['Se repite', d.repeatLabel]);
         if (d.kind === 'task') rows.push(['Asignada a', d.owner], ['Estado', d.status], ['Prioridad', d.priority]);
         if (d.kind === 'project') rows.push(['Estado', d.status], ['Creado por', d.owner]);
         if (d.department) rows.push(['Departamento', d.department]);
@@ -471,21 +622,37 @@
           startDate: now.date, startTime: `${calPad(hour)}:00`,
           endDate: now.date, endTime: `${calPad(hour + 1)}:00`,
           color: 'blue', reminder: '15', location: '', description: '',
+          repeat: false, frequency: 'weekly', dayOfWeek: '', dayOfMonth: '', daysOfWeek: [], repeatUntil: '',
         }, preset);
         if (this.form.allDay) this.form.reminder = '0';
       },
 
+      // Al activar "Repetir", los días por defecto salen de la fecha de inicio.
+      syncRepeatDefaults() {
+        const f = this.form;
+        if (!f.startDate) return;
+        if (f.dayOfWeek === '') f.dayOfWeek = String(calWeekday(f.startDate));
+        if (f.dayOfMonth === '') f.dayOfMonth = String(Number(f.startDate.slice(8, 10)));
+        if (!f.daysOfWeek.length) f.daysOfWeek = [String(calWeekday(f.startDate))];
+      },
+
       openEdit(d) {
-        const s = calSplit(d.startStr), e = calSplit(d.endStr || d.startStr);
+        // En una serie se edita desde su primera fecha, no desde la ocurrencia.
+        const s = calSplit(d.seriesStart), e = calSplit(d.seriesEnd || d.seriesStart);
         this.error = '';
         this.detail = null;
         this.form = {
           id: d.id, title: d.title, allDay: d.allDay,
           startDate: s.date, startTime: s.time || '09:00',
-          endDate: d.allDay ? calAddDays(e.date, d.endStr ? -1 : 0) : e.date, endTime: e.time || s.time || '10:00',
+          endDate: d.allDay ? calAddDays(e.date, d.seriesEnd ? -1 : 0) : e.date, endTime: e.time || s.time || '10:00',
           color: d.color, reminder: d.reminder === null || d.reminder === undefined ? '' : String(d.reminder),
           location: d.location, description: d.description,
+          repeat: !!d.frequency, frequency: d.frequency || 'weekly',
+          dayOfWeek: d.dayOfWeek === null || d.dayOfWeek === undefined ? '' : String(d.dayOfWeek),
+          dayOfMonth: d.dayOfMonth ? String(d.dayOfMonth) : '',
+          daysOfWeek: d.daysOfWeek.map(String), repeatUntil: d.repeatUntil,
         };
+        if (this.form.repeat) this.syncRepeatDefaults();
       },
 
       async post(url, data) {
@@ -504,7 +671,13 @@
           this.error = 'La hora de fin debe ser posterior a la de inicio';
           return;
         }
+        if (f.repeat && f.frequency === 'custom' && !f.daysOfWeek.length) {
+          this.error = 'Elige al menos un día de la semana';
+          return;
+        }
         const data = {
+          repeat: f.repeat ? 'true' : 'false', frequency: f.frequency,
+          day_of_week: f.dayOfWeek, day_of_month: f.dayOfMonth, repeat_until: f.repeat ? f.repeatUntil : '',
           title: f.title, color: f.color, location: f.location, description: f.description,
           reminder_minutes: f.reminder, all_day: f.allDay ? 'true' : 'false',
           start: f.allDay ? f.startDate : `${f.startDate}T${f.startTime}`,
@@ -513,7 +686,7 @@
         };
         this.saving = true;
         try {
-          await this.post(f.id ? `/calendar/events/${f.id}/edit` : '/calendar/events', data);
+          await this.post(f.id ? `/calendar/events/${f.id}/edit` : '/calendar/events', this.formBody(data));
           this.form = null;
           calendar.refetchEvents();
         } catch (e) {
@@ -523,10 +696,19 @@
         }
       },
 
+      // URLSearchParams con days_of_week repetido (lista en el servidor).
+      formBody(data) {
+        const body = new URLSearchParams(data);
+        if (this.form.repeat && this.form.frequency === 'custom') {
+          this.form.daysOfWeek.forEach(d => body.append('days_of_week', d));
+        }
+        return body;
+      },
+
       async move(info) {
         const ev = info.event;
         try {
-          await this.post(`/calendar/events/${ev.id}/move`, {
+          await this.post(`/calendar/events/${ev.extendedProps.event_id || ev.id}/move`, {
             start: ev.startStr, end: ev.endStr || '', all_day: ev.allDay ? 'true' : 'false',
           });
           calendar.refetchEvents();
@@ -536,11 +718,105 @@
         }
       },
 
-      async deleteEvent(id) {
-        if (!confirm('¿Eliminar este evento?')) return;
+      async deleteEvent(d) {
+        const msg = d.frequency ? '¿Eliminar este evento y todas sus repeticiones?' : '¿Eliminar este evento?';
+        if (!confirm(msg)) return;
         try {
-          await this.post(`/calendar/events/${id}/delete`, {});
+          await this.post(`/calendar/events/${d.eventId}/delete`, {});
           this.detail = null;
+          calendar.refetchEvents();
+        } catch (e) {
+          alert(e.message);
+        }
+      },
+
+      // Descripción de la tarea derivada: la del evento más su ubicación.
+      taskDescription(d) {
+        return [d.description, d.location ? `Ubicación: ${d.location}` : ''].filter(Boolean).join('\n\n');
+      },
+
+      // Tarea puntual con fecha límite el día de la ocurrencia elegida.
+      taskUrl(d) {
+        const qs = new URLSearchParams({
+          new: '1', title: d.title, description: this.taskDescription(d), due_date: calSplit(d.startStr).date,
+        });
+        return `/tasks/?${qs}`;
+      },
+
+      // Plantilla recurrente con la misma repetición del evento (si no se
+      // repite, semanal el mismo día de la semana) desde su primera fecha.
+      recurringUrl(d) {
+        const start = calSplit(d.frequency ? d.seriesStart : d.startStr).date;
+        const qs = new URLSearchParams({
+          new: '1', title: d.title, description: this.taskDescription(d),
+          frequency: d.frequency || 'weekly', start_date: start, end_date: d.repeatUntil || '',
+          day_of_week: d.dayOfWeek === null || d.dayOfWeek === undefined ? String(calWeekday(start)) : String(d.dayOfWeek),
+          day_of_month: d.dayOfMonth ? String(d.dayOfMonth) : String(Number(start.slice(8, 10))),
+          days_of_week: (d.daysOfWeek.length ? d.daysOfWeek : [String(calWeekday(start))]).join(','),
+        });
+        return `/tasks/recurring/?${qs}`;
+      },
+
+      async loadComments() {
+        const id = this.detail.eventId;
+        this.comments = [];
+        this.commentText = '';
+        this.editingId = null;
+        this.commentError = '';
+        this.commentsLoading = true;
+        try {
+          const r = await fetch(`/calendar/events/${id}/comments`, { headers: { Accept: 'application/json' } });
+          if (!r.ok) throw new Error();
+          const list = await r.json();
+          if (this.detail && this.detail.eventId === id) this.comments = list;
+        } catch (e) {
+          this.commentError = 'No se pudieron cargar los comentarios';
+        } finally {
+          this.commentsLoading = false;
+        }
+      },
+
+      async addComment() {
+        const text = this.commentText.trim();
+        if (!text || this.commentSaving) return;
+        const d = this.detail;
+        this.commentSaving = true;
+        this.commentError = '';
+        try {
+          const c = await this.post(`/calendar/events/${d.eventId}/comments`, {
+            content: text, date: calSplit(d.startStr).date,
+          });
+          this.comments.push(c);
+          this.commentText = '';
+          calendar.refetchEvents();
+        } catch (e) {
+          this.commentError = e.message;
+        } finally {
+          this.commentSaving = false;
+        }
+      },
+
+      async saveComment(c) {
+        const text = this.editText.trim();
+        if (!text || this.commentSaving) return;
+        this.commentSaving = true;
+        this.commentError = '';
+        try {
+          const updated = await this.post(`/calendar/events/${this.detail.eventId}/comments/${c.id}/edit`, { content: text });
+          this.comments = this.comments.map(x => x.id === c.id ? updated : x);
+          this.editingId = null;
+        } catch (e) {
+          this.commentError = e.message;
+        } finally {
+          this.commentSaving = false;
+        }
+      },
+
+      async deleteComment(c) {
+        if (!confirm('¿Eliminar este comentario?')) return;
+        try {
+          await this.post(`/calendar/events/${this.detail.eventId}/comments/${c.id}/delete`, {});
+          this.comments = this.comments.filter(x => x.id !== c.id);
           calendar.refetchEvents();
         } catch (e) {
           alert(e.message);

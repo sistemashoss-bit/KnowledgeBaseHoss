@@ -55,6 +55,7 @@ ACTION_LABELS: dict[str, str] = {
     "calendar_event_create": "Creación de evento de calendario",
     "calendar_event_update": "Edición de evento de calendario",
     "calendar_event_delete": "Eliminación de evento de calendario",
+    "calendar_event_comment": "Comentario en evento de calendario",
     "calendar_subscription_add": "Calendario agregado a la vista",
     "calendar_subscription_remove": "Calendario quitado de la vista",
     # Organización

@@ -24,8 +24,9 @@ from app.models import (
     TaskShare, TaskStatusHistory, TaskTag, TaskTagAssignment, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
-    RECURRENCE_FREQUENCIES, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
+    RECURRENCE_FREQUENCIES,
 )
+from app.tasks.recurring import parse_recurrence
 from app.templating import templates
 
 
@@ -1448,36 +1449,6 @@ def _validate_target_scope(
         raise HTTPException(403, "Solo puedes asignarte tareas a ti mismo")
 
 
-def _parse_recurrence(frequency: str, day_of_week: str, day_of_month: str, days_of_week: list[str] | None = None):
-    """Normaliza y valida la frecuencia. Devuelve (frequency, dow, dom, custom_days_csv)."""
-    if frequency not in RECURRENCE_FREQUENCIES:
-        raise HTTPException(400, "Frecuencia inválida")
-    dow = dom = custom_days = None
-    if frequency == FREQ_WEEKLY:
-        try:
-            dow = int(day_of_week)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Día de la semana inválido")
-        if not 0 <= dow <= 6:
-            raise HTTPException(400, "Día de la semana fuera de rango")
-    elif frequency == FREQ_MONTHLY:
-        try:
-            dom = int(day_of_month)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Día del mes inválido")
-        if not 1 <= dom <= 31:
-            raise HTTPException(400, "Día del mes fuera de rango")
-    elif frequency == FREQ_CUSTOM:
-        try:
-            days = {int(d) for d in (days_of_week or [])}
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Días de la semana inválidos")
-        if not days or not days.issubset(set(range(7))):
-            raise HTTPException(400, "Elige al menos un día válido de la semana")
-        custom_days = ",".join(str(d) for d in sorted(days))
-    return frequency, dow, dom, custom_days
-
-
 @recurring_router.get("/", response_class=HTMLResponse)
 def list_recurring(
     request: Request,
@@ -1549,7 +1520,7 @@ def create_recurring(
         raise HTTPException(403)
 
     _validate_target_scope(current_user, db, department_id, assigned_to)
-    freq, dow, dom, custom_days = _parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
+    freq, dow, dom, custom_days = parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
 
     rt = RecurringTask(
         id=uuid.uuid4(),
@@ -1608,7 +1579,7 @@ def edit_recurring(
         raise HTTPException(403)
 
     _validate_target_scope(current_user, db, department_id, assigned_to)
-    freq, dow, dom, custom_days = _parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
+    freq, dow, dom, custom_days = parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
 
     rt.title = title.strip()
     rt.description = description.strip() or None

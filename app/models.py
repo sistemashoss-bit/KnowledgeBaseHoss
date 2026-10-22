@@ -620,10 +620,44 @@ class CalendarEvent(Base):
     remind_at = Column(DateTime, nullable=True)
     reminded_at = Column(DateTime, nullable=True)
 
+    # Repetición con los mismos criterios que RecurringTask. Null = no se repite.
+    # Las ocurrencias no se guardan: se calculan al consultar a partir de
+    # start_at/end_at (hora y duración) y caen en los días que coinciden, desde
+    # el día de inicio hasta `repeat_until` (incluido; null = sin fin). En un
+    # evento repetido `remind_at` apunta a la próxima ocurrencia.
+    frequency = Column(String(10), nullable=True)
+    day_of_week = Column(Integer, nullable=True)   # 0=Lun..6=Dom, sólo weekly
+    day_of_month = Column(Integer, nullable=True)  # 1..31, sólo monthly
+    days_of_week = Column(String(20), nullable=True)  # CSV 0=Lun..6=Dom, sólo custom
+    repeat_until = Column(Date, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User", foreign_keys=[owner_id])
+    comments = relationship(
+        "CalendarEventComment", back_populates="event", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="CalendarEventComment.created_at",
+    )
+
+
+class CalendarEventComment(Base):
+    """Comentario en un evento: lo dejan el dueño y quien tiene su calendario a
+    la vista. En un evento repetido aplica a toda la serie."""
+    __tablename__ = "calendar_event_comments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id = Column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    content = Column(Text, nullable=False)
+    # True si el autor lo editó tras crearlo (para mostrar "editado").
+    edited = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("CalendarEvent", back_populates="comments")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class CalendarSubscription(Base):

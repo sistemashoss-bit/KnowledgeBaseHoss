@@ -333,7 +333,7 @@
 
   window.openRecurring = function (data) {
     data = data || null;
-    if (data) {
+    if (data && data.id) {
       form.setAttribute('action', '/tasks/recurring/' + data.id + '/edit');
       document.getElementById('rt-modal-title').textContent = 'Editar plantilla';
     } else {
@@ -355,7 +355,10 @@
     });
     var selectedDays = (data && data.days_of_week) ? data.days_of_week.map(String) : [];
     dayCheckboxes.forEach(function (cb) { cb.checked = selectedDays.indexOf(cb.value) !== -1; });
-    if (!data) { document.getElementById('rt-priority').value = 'medium'; freq.value = 'daily'; }
+    if (!data || !data.id) {
+      if (!(data && data.priority)) document.getElementById('rt-priority').value = 'medium';
+      if (!(data && data.frequency)) freq.value = 'daily';
+    }
     syncFreqFields();
     // Al abrir (nueva o edición) se muestran todas las opciones; el filtrado+limpieza
     // solo ocurre cuando el usuario cambia el departamento (evita borrar un asignado
@@ -363,6 +366,20 @@
     showAllOptions();
     modal.classList.remove('hidden');
   };
+
+  // ?new=1&title=…&frequency=…&days_of_week=0,2,4… (p.ej. "Crear tarea
+  // recurrente" desde un evento del calendario) abre una plantilla nueva
+  // prellenada. Se limpia la URL para que recargar no la abra de nuevo.
+  var params = new URLSearchParams(location.search);
+  if (params.get('new') === '1') {
+    var data = {};
+    ['title', 'description', 'frequency', 'day_of_week', 'day_of_month', 'start_date', 'end_date'].forEach(function (k) {
+      data[k] = params.get(k) || '';
+    });
+    data.days_of_week = (params.get('days_of_week') || '').split(',').filter(Boolean);
+    history.replaceState(null, '', location.pathname);
+    window.openRecurring(data);
+  }
 })();
 </script>
 {% endblock %}

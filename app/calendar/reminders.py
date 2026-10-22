@@ -3,7 +3,9 @@
 Un solo ciclo de fondo que corre cada minuto (ver `reminder_scheduler_loop`,
 lanzado desde el lifespan de main.py):
 
-- Citas: avisa al dueño cuando llega `CalendarEvent.remind_at`.
+- Citas: avisa al dueño cuando llega `CalendarEvent.remind_at`. En las que se
+  repiten, al avisar (o si el aviso se pasó) `remind_at` avanza a la siguiente
+  ocurrencia en la misma transacción.
 - Tareas: a partir de settings.task_due_reminder_hour_local avisa al asignado
   de las tareas que vencen hoy o mañana (una vez por día).
 
@@ -21,6 +23,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
 from app.models import CALENDAR_ALL_DAY_REMINDER_HOUR, CalendarEvent, Task, TASK_DONE
+from app.tasks.recurring import matches_recurrence
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,9 @@ logger = logging.getLogger(__name__)
 # tarde) ya no se envía: avisar de una cita que ya pasó solo estorba.
 STALE_AFTER = timedelta(hours=1)
 POLL_SECONDS = 60
+# Tope de días que se recorren buscando la siguiente ocurrencia (cubre un
+# mensual con día 31 y cualquier otra frecuencia con holgura).
+MAX_SCAN_DAYS = 800
 
 _WEEKDAYS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
 
@@ -59,6 +65,44 @@ def compute_remind_at(start_at: datetime, all_day: bool, minutes: int | None) ->
     return to_utc(datetime.combine(day, datetime.min.time()) + timedelta(hours=CALENDAR_ALL_DAY_REMINDER_HOUR))
 
 
+def iter_occurrences(ev: CalendarEvent, from_day: date, to_day: date | None = None):
+    """Inicios (UTC) de las ocurrencias de `ev` cuyo día local está entre
+    `from_day` y `to_day` (incluidos). Un evento sin repetición tiene una sola."""
+    start_local = to_local(ev.start_at)
+    if not ev.frequency:
+        if from_day <= start_local.date() and (to_day is None or start_local.date() <= to_day):
+            yield ev.start_at
+        return
+    day = max(start_local.date(), from_day)
+    last = min(d for d in (ev.repeat_until, to_day, day + timedelta(days=MAX_SCAN_DAYS)) if d)
+    while day <= last:
+        if matches_recurrence(ev.frequency, ev.day_of_week, ev.day_of_month, ev.days_of_week, day):
+            yield to_utc(datetime.combine(day, start_local.time()))
+        day += timedelta(days=1)
+
+
+def next_remind_at(ev: CalendarEvent, after: datetime) -> datetime | None:
+    """Recordatorio de un evento: el de su inicio o, si se repite, el de la
+    primera ocurrencia cuyo aviso cae después de `after` (UTC)."""
+    if ev.reminder_minutes is None:
+        return None
+    if not ev.frequency:
+        return compute_remind_at(ev.start_at, ev.all_day, ev.reminder_minutes)
+    for start in iter_occurrences(ev, to_local(after).date()):
+        remind = compute_remind_at(start, ev.all_day, ev.reminder_minutes)
+        if remind > after:
+            return remind
+    return None
+
+
+def _occurrence_for(ev: CalendarEvent, remind_at: datetime) -> datetime:
+    """Inicio de la ocurrencia a la que corresponde el aviso `remind_at`."""
+    for start in iter_occurrences(ev, to_local(remind_at).date()):
+        if compute_remind_at(start, ev.all_day, ev.reminder_minutes) >= remind_at:
+            return start
+    return ev.start_at
+
+
 def _when_label(ev_start_local: datetime, all_day: bool, today: date) -> str:
     d = ev_start_local.date()
     if d == today:
@@ -74,7 +118,7 @@ def send_event_reminders(now: datetime | None = None) -> int:
     now = now or datetime.utcnow()
     db = SessionLocal()
     try:
-        rows = db.execute(
+        claimed = db.execute(
             update(CalendarEvent)
             .where(
                 CalendarEvent.reminded_at.is_(None),
@@ -83,11 +127,35 @@ def send_event_reminders(now: datetime | None = None) -> int:
                 CalendarEvent.remind_at > now - STALE_AFTER,
             )
             .values(reminded_at=now)
-            .returning(
-                CalendarEvent.owner_id, CalendarEvent.title, CalendarEvent.start_at,
-                CalendarEvent.all_day, CalendarEvent.location,
-            )
+            .returning(CalendarEvent.id, CalendarEvent.remind_at)
+            .execution_options(synchronize_session=False)
         ).all()
+        sent_remind = dict(claimed)
+
+        rows = []
+        if sent_remind:
+            for ev in db.query(CalendarEvent).filter(CalendarEvent.id.in_(list(sent_remind))).all():
+                remind_at = sent_remind[ev.id]
+                start_at = _occurrence_for(ev, remind_at) if ev.frequency else ev.start_at
+                rows.append((ev.owner_id, ev.title, start_at, ev.all_day, ev.location))
+                if ev.frequency:
+                    ev.remind_at = next_remind_at(ev, remind_at)
+                    ev.reminded_at = None
+
+        # Repetidos cuyo aviso se pasó sin enviarse (server caído): saltan a la
+        # siguiente ocurrencia en vez de quedarse atorados.
+        stale = (
+            db.query(CalendarEvent)
+            .filter(
+                CalendarEvent.frequency.isnot(None),
+                CalendarEvent.reminded_at.is_(None),
+                CalendarEvent.remind_at <= now - STALE_AFTER,
+            )
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+        for ev in stale:
+            ev.remind_at = next_remind_at(ev, now - STALE_AFTER)
         db.commit()
     finally:
         db.close()

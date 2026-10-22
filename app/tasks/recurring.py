@@ -12,13 +12,15 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+from fastapi import HTTPException
+
 from app import audit
 from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
 from app.models import (
     RecurringTask, Task, TaskStatusHistory,
-    FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM,
+    FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM, RECURRENCE_FREQUENCIES,
     TASK_PENDING,
 )
 
@@ -28,6 +30,58 @@ logger = logging.getLogger(__name__)
 def local_now() -> datetime:
     """Hora actual en la zona del negocio (settings.local_utc_offset_hours)."""
     return datetime.now(timezone(timedelta(hours=settings.local_utc_offset_hours)))
+
+
+def parse_recurrence(frequency: str, day_of_week: str, day_of_month: str, days_of_week: list[str] | None = None):
+    """Normaliza y valida la frecuencia. Devuelve (frequency, dow, dom, custom_days_csv).
+
+    La comparten las tareas recurrentes y los eventos repetidos del calendario."""
+    if frequency not in RECURRENCE_FREQUENCIES:
+        raise HTTPException(400, "Frecuencia inválida")
+    dow = dom = custom_days = None
+    if frequency == FREQ_WEEKLY:
+        try:
+            dow = int(day_of_week)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Día de la semana inválido")
+        if not 0 <= dow <= 6:
+            raise HTTPException(400, "Día de la semana fuera de rango")
+    elif frequency == FREQ_MONTHLY:
+        try:
+            dom = int(day_of_month)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Día del mes inválido")
+        if not 1 <= dom <= 31:
+            raise HTTPException(400, "Día del mes fuera de rango")
+    elif frequency == FREQ_CUSTOM:
+        try:
+            days = {int(d) for d in (days_of_week or [])}
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Días de la semana inválidos")
+        if not days or not days.issubset(set(range(7))):
+            raise HTTPException(400, "Elige al menos un día válido de la semana")
+        custom_days = ",".join(str(d) for d in sorted(days))
+    return frequency, dow, dom, custom_days
+
+
+def matches_recurrence(
+    frequency: str, day_of_week: int | None, day_of_month: int | None, days_of_week: str | None, day: date,
+) -> bool:
+    """¿`day` cae en la frecuencia? (sin contar inicio/fin ni estado)."""
+    if frequency == FREQ_DAILY:
+        return True
+    if frequency == FREQ_WEEKLY:
+        return day.weekday() == day_of_week
+    if frequency == FREQ_CUSTOM:
+        days = {int(d) for d in (days_of_week or "").split(",") if d != ""}
+        return day.weekday() in days
+    if frequency == FREQ_MONTHLY:
+        last_day = calendar.monthrange(day.year, day.month)[1]
+        # day_of_month puede exceder los días del mes (p.ej. 31 en febrero):
+        # en ese caso cae en el último día del mes.
+        target = min(day_of_month or 1, last_day)
+        return day.day == target
+    return False
 
 
 def _due_today(rt: RecurringTask, today: date) -> bool:
@@ -40,21 +94,7 @@ def _due_today(rt: RecurringTask, today: date) -> bool:
         return False
     if rt.last_generated_on == today:
         return False  # ya se generó hoy
-
-    if rt.frequency == FREQ_DAILY:
-        return True
-    if rt.frequency == FREQ_WEEKLY:
-        return today.weekday() == rt.day_of_week
-    if rt.frequency == FREQ_CUSTOM:
-        days = {int(d) for d in (rt.days_of_week or "").split(",") if d != ""}
-        return today.weekday() in days
-    if rt.frequency == FREQ_MONTHLY:
-        last_day = calendar.monthrange(today.year, today.month)[1]
-        # day_of_month puede exceder los días del mes (p.ej. 31 en febrero):
-        # en ese caso la tarea cae en el último día del mes.
-        target = min(rt.day_of_month or 1, last_day)
-        return today.day == target
-    return False
+    return matches_recurrence(rt.frequency, rt.day_of_week, rt.day_of_month, rt.days_of_week, today)
 
 
 def generate_due_tasks(today: date | None = None) -> int:

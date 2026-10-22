@@ -306,6 +306,23 @@
       document.querySelector('#modal-create input[name="title"]').focus();
     }
 
+    // ?new=1&title=…&description=…&due_date=… (p.ej. "Crear tarea" desde un
+    // evento del calendario) abre el formulario prellenado. Se limpia la URL
+    // para que recargar o volver no lo abra de nuevo.
+    document.addEventListener('DOMContentLoaded', function () {
+      var params = new URLSearchParams(location.search);
+      if (params.get('new') !== '1') return;
+      var form = document.querySelector('#modal-create form');
+      ['title', 'description', 'due_date'].forEach(function (name) {
+        if (params.has(name) && form.elements[name]) form.elements[name].value = params.get(name);
+      });
+      ['new', 'title', 'description', 'due_date'].forEach(function (name) { params.delete(name); });
+      var qs = params.toString();
+      history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+      try { sessionStorage.setItem('tasks_back', location.pathname + location.search); } catch (e) {}
+      openCreateTask('pending');
+    });
+
     function setTasksView(v) {
       try { localStorage.setItem('tasks_view', v); } catch (e) {}
       document.getElementById('view-kanban').classList.toggle('hidden', v !== 'kanban');

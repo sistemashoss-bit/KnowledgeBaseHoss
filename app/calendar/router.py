@@ -2,6 +2,11 @@
 ajenos que tiene agregados (admin → su gente; superadmin → cualquiera) y,
 opcionalmente, las fechas límite de tareas y proyectos.
 
+Los eventos pueden repetirse con los mismos criterios que las tareas
+recurrentes (diario, semanal, mensual, días específicos); las ocurrencias se
+calculan al consultar y la serie se edita completa. Los eventos aceptan
+comentarios del dueño y de quien puede ver su calendario.
+
 Fechas: se guardan en UTC; hacia y desde el navegador viajan en hora local del
 negocio sin offset (FullCalendar corre con timeZone 'UTC' para mostrarlas tal
 cual, igual que el resto de la app muestra todo fijo en hora de Monterrey).
@@ -11,23 +16,25 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app import audit
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
-from app.calendar.reminders import compute_remind_at, to_local, to_utc
+from app.calendar.reminders import STALE_AFTER, iter_occurrences, next_remind_at, to_local, to_utc
 from app.database import get_db
 from app.models import (
-    CalendarEvent, CalendarSubscription, Department, Project, Task, TaskTagAssignment, User,
+    CalendarEvent, CalendarEventComment, CalendarSubscription, Department, Project, Task, TaskTagAssignment, User,
     CALENDAR_MAX_SUBSCRIPTIONS, CALENDAR_REMINDER_OPTIONS, PROJECT_COMPLETED,
     ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
 )
+from app.messaging import realtime
 from app.permissions import (
-    calendar_department_ids, calendar_members_query, granted_department_ids, has_oversight, manager_scope,
-    visible_projects_filter,
+    calendar_department_ids, calendar_members_query, granted_department_ids, has_oversight, is_manager,
+    manager_scope, visible_projects_filter,
 )
+from app.tasks.recurring import parse_recurrence
 from app.templating import templates
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
@@ -38,6 +45,8 @@ _TASK_STATUS_LABELS = {
 }
 _PRIORITY_LABELS = {"low": "Baja", "medium": "Media", "high": "Alta", "urgent": "Urgente"}
 _PROJECT_STATUS_LABELS = {"draft": "Borrador", "active": "Activo", "on_hold": "En pausa", "completed": "Completado"}
+_WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_WEEKDAYS_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,8 +118,47 @@ def _apply_schedule(ev: CalendarEvent, start: str, end: str, all_day: bool) -> N
 
 
 def _refresh_reminder(ev: CalendarEvent) -> None:
-    ev.remind_at = compute_remind_at(ev.start_at, ev.all_day, ev.reminder_minutes)
+    # Desde STALE_AFTER atrás, igual que un evento sin repetición recién creado
+    # cuyo aviso ya pasó hace poco: todavía se envía.
+    ev.remind_at = next_remind_at(ev, datetime.utcnow() - STALE_AFTER)
     ev.reminded_at = None
+
+
+def _apply_recurrence(
+    ev: CalendarEvent, repeat: bool, frequency: str, day_of_week: str, day_of_month: str,
+    days_of_week: list[str], repeat_until: str,
+) -> bool:
+    """Fija la repetición (mismas reglas que las tareas recurrentes). Llamar
+    después de `_apply_schedule`. Devuelve True si cambió."""
+    before = (ev.frequency, ev.day_of_week, ev.day_of_month, ev.days_of_week, ev.repeat_until)
+    if repeat:
+        freq, dow, dom, custom = parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
+        try:
+            until = date.fromisoformat(repeat_until) if repeat_until else None
+        except ValueError:
+            raise HTTPException(422, "Fecha de fin de repetición inválida")
+        if until and until < to_local(ev.start_at).date():
+            raise HTTPException(422, "La repetición debe terminar después del inicio")
+        ev.frequency, ev.day_of_week, ev.day_of_month, ev.days_of_week, ev.repeat_until = freq, dow, dom, custom, until
+    else:
+        ev.frequency = ev.day_of_week = ev.day_of_month = ev.days_of_week = ev.repeat_until = None
+    return before != (ev.frequency, ev.day_of_week, ev.day_of_month, ev.days_of_week, ev.repeat_until)
+
+
+def _repeat_label(ev: CalendarEvent) -> str:
+    if not ev.frequency:
+        return ""
+    if ev.frequency == "daily":
+        label = "Diario"
+    elif ev.frequency == "weekly":
+        label = f"Cada semana · {_WEEKDAYS[ev.day_of_week]}"
+    elif ev.frequency == "monthly":
+        label = f"Cada mes · día {ev.day_of_month}"
+    else:
+        label = "Días específicos · " + ", ".join(_WEEKDAYS_SHORT[int(d)] for d in ev.days_of_week.split(","))
+    if ev.repeat_until:
+        label += f" · hasta {ev.repeat_until:%d/%m/%Y}"
+    return label
 
 
 def _own_event(event_id: str, user: User, db: Session) -> CalendarEvent:
@@ -121,6 +169,23 @@ def _own_event(event_id: str, user: User, db: Session) -> CalendarEvent:
     ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
     # Solo el dueño edita; ver un calendario ajeno es de solo lectura.
     if not ev or ev.owner_id != user.id:
+        raise HTTPException(404)
+    return ev
+
+
+def _visible_event(event_id: str, user: User, db: Session) -> CalendarEvent:
+    """Evento que `user` puede ver (y comentar): el suyo o el de alguien cuyo
+    calendario puede agregar a su vista."""
+    try:
+        uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(404)
+    ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
+    if not ev:
+        raise HTTPException(404)
+    if ev.owner_id != user.id and not (
+        _can_subscribe(user) and calendar_members_query(user, db).filter(User.id == ev.owner_id).first()
+    ):
         raise HTTPException(404)
     return ev
 
@@ -166,17 +231,31 @@ def _resolve_subscriptions(user: User, subs: list[CalendarSubscription], db: Ses
     return {"members": members, "dept_ids": dept_ids, "full_dept_ids": full_dept_ids}
 
 
-def _event_json(ev: CalendarEvent, owner: User, mine: bool) -> dict:
+def _event_json(ev: CalendarEvent, owner: User, mine: bool, start_at: datetime, comment_count: int) -> dict:
+    """Una ocurrencia (`start_at`, UTC) del evento; sin repetición, la única."""
+    end_at = start_at + (ev.end_at - ev.start_at)
     return {
-        "id": str(ev.id),
+        # Las ocurrencias de una serie comparten `event_id` (el de la BD).
+        "id": f"{ev.id}_{to_local(start_at).date().isoformat()}" if ev.frequency else str(ev.id),
         "title": ev.title,
-        "start": _iso_local(ev.start_at, ev.all_day),
-        "end": _iso_local(ev.end_at, ev.all_day),
+        "start": _iso_local(start_at, ev.all_day),
+        "end": _iso_local(end_at, ev.all_day),
         "allDay": ev.all_day,
-        "editable": mine,
+        # Una serie no se arrastra: se edita desde el formulario.
+        "editable": mine and not ev.frequency,
         "extendedProps": {
             "kind": "event",
+            "event_id": str(ev.id),
             "mine": mine,
+            "series_start": _iso_local(ev.start_at, ev.all_day),
+            "series_end": _iso_local(ev.end_at, ev.all_day),
+            "frequency": ev.frequency or "",
+            "day_of_week": ev.day_of_week,
+            "day_of_month": ev.day_of_month,
+            "days_of_week": ev.days_of_week.split(",") if ev.days_of_week else [],
+            "repeat_until": ev.repeat_until.isoformat() if ev.repeat_until else "",
+            "repeat_label": _repeat_label(ev),
+            "comment_count": comment_count,
             "color": ev.color,
             "description": ev.description or "",
             "location": ev.location or "",
@@ -286,6 +365,8 @@ def calendar_page(
         {
             "current_user": current_user,
             "can_subscribe": _can_subscribe(current_user),
+            # Derivar un evento en tarea recurrente: solo encargados (como /tasks/recurring/).
+            "can_recurring": is_manager(current_user),
             "subscriptions": sub_rows,
             "member_options": [u for u in member_options if u.id not in subscribed_users],
             "department_options": [d for d in department_options if d.id not in subscribed_depts],
@@ -322,17 +403,42 @@ def calendar_events(
     }
     owners = {current_user.id: current_user, **resolved["members"]}
 
+    # Los repetidos se traen por inicio y fin de repetición (con holgura para
+    # ocurrencias de varios días que empiezan antes del rango) y se expanden aquí.
     events = (
         db.query(CalendarEvent)
         .filter(
             CalendarEvent.owner_id.in_(list(owners)),
             CalendarEvent.start_at < range_end,
-            CalendarEvent.end_at > range_start,
+            or_(
+                and_(CalendarEvent.frequency.is_(None), CalendarEvent.end_at > range_start),
+                and_(
+                    CalendarEvent.frequency.isnot(None),
+                    or_(
+                        CalendarEvent.repeat_until.is_(None),
+                        CalendarEvent.repeat_until >= range_start_local.date() - timedelta(days=62),
+                    ),
+                ),
+            ),
         )
         .order_by(CalendarEvent.start_at)
         .all()
     )
-    out = [_event_json(ev, owners[ev.owner_id], ev.owner_id == current_user.id) for ev in events]
+    comment_counts = dict(
+        db.query(CalendarEventComment.event_id, func.count())
+        .filter(CalendarEventComment.event_id.in_([ev.id for ev in events]))
+        .group_by(CalendarEventComment.event_id)
+        .all()
+    ) if events else {}
+    out = []
+    for ev in events:
+        duration = ev.end_at - ev.start_at
+        from_day = to_local(range_start - duration).date()
+        for start_at in iter_occurrences(ev, from_day, range_end_local.date()):
+            if start_at < range_end and start_at + duration > range_start:
+                out.append(_event_json(
+                    ev, owners[ev.owner_id], ev.owner_id == current_user.id, start_at, comment_counts.get(ev.id, 0),
+                ))
 
     if work:
         first_day, last_day = range_start_local.date(), range_end_local.date()
@@ -403,6 +509,12 @@ def create_event(
     location: str = Form(""),
     description: str = Form(""),
     reminder_minutes: str = Form(""),
+    repeat: bool = Form(False),
+    frequency: str = Form("daily"),
+    day_of_week: str = Form(""),
+    day_of_month: str = Form(""),
+    days_of_week: list[str] = Form([]),
+    repeat_until: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -421,6 +533,8 @@ def create_event(
         reminder_minutes=_parse_reminder(reminder_minutes),
     )
     _apply_schedule(ev, start, end, all_day)
+    if _apply_recurrence(ev, repeat, frequency, day_of_week, day_of_month, days_of_week, repeat_until):
+        _refresh_reminder(ev)
     db.add(ev)
     db.commit()
     audit.log_action(
@@ -442,6 +556,12 @@ def edit_event(
     location: str = Form(""),
     description: str = Form(""),
     reminder_minutes: str = Form(""),
+    repeat: bool = Form(False),
+    frequency: str = Form("daily"),
+    day_of_week: str = Form(""),
+    day_of_month: str = Form(""),
+    days_of_week: list[str] = Form([]),
+    repeat_until: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -460,7 +580,10 @@ def edit_event(
     reminder_changed = new_reminder != ev.reminder_minutes
     ev.reminder_minutes = new_reminder
     _apply_schedule(ev, start, end, all_day)
-    if reminder_changed:
+    recurrence_changed = _apply_recurrence(
+        ev, repeat, frequency, day_of_week, day_of_month, days_of_week, repeat_until,
+    )
+    if reminder_changed or recurrence_changed:
         _refresh_reminder(ev)
     db.commit()
     audit.log_action(
@@ -483,6 +606,8 @@ def move_event(
     if not current_user:
         raise HTTPException(401)
     ev = _own_event(event_id, current_user, db)
+    if ev.frequency:
+        raise HTTPException(422, "Un evento que se repite se cambia desde Editar")
     _apply_schedule(ev, start, end, all_day)
     db.commit()
     return {"ok": True}
@@ -505,6 +630,143 @@ def delete_event(
         "calendar_event_delete", user=current_user, request=request,
         resource_type="calendar_event", resource_id=event_id, resource_name=title,
     )
+    return {"ok": True}
+
+
+# ── Comentarios (dueño y quien ve su calendario) ──────────────────────────────
+
+def _comment_json(c: CalendarEventComment, user: User, ev: CalendarEvent) -> dict:
+    return {
+        "id": str(c.id),
+        "content": c.content,
+        "author": _display_name(c.user),
+        "initials": _initials(c.user),
+        "created_at": to_local(c.created_at).isoformat(timespec="minutes"),
+        "edited": c.edited,
+        # Edita solo el autor; borra el autor o el dueño del evento.
+        "can_edit": c.user_id == user.id,
+        "can_delete": c.user_id == user.id or ev.owner_id == user.id,
+    }
+
+
+@router.get("/events/{event_id}/comments")
+def list_comments(
+    event_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    ev = _visible_event(event_id, current_user, db)
+    comments = (
+        db.query(CalendarEventComment)
+        .options(joinedload(CalendarEventComment.user))
+        .filter(CalendarEventComment.event_id == ev.id)
+        .order_by(CalendarEventComment.created_at)
+        .all()
+    )
+    return JSONResponse([_comment_json(c, current_user, ev) for c in comments])
+
+
+@router.post("/events/{event_id}/comments")
+def add_comment(
+    event_id: str,
+    request: Request,
+    content: str = Form(...),
+    date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    ev = _visible_event(event_id, current_user, db)
+    content = content.strip()[:5000]
+    if not content:
+        raise HTTPException(422, "Escribe un comentario")
+
+    comment = CalendarEventComment(event_id=ev.id, user_id=current_user.id, content=content)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+
+    # Avisa al dueño y a quienes ya comentaron (menos a quien comenta). `date`
+    # es la ocurrencia desde la que se comentó, para abrir el calendario ahí.
+    try:
+        day = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        day = to_local(ev.start_at).date()
+    followers = {ev.owner_id} | {
+        uid for (uid,) in db.query(CalendarEventComment.user_id).filter(CalendarEventComment.event_id == ev.id)
+    }
+    actor = _display_name(current_user)
+    for uid in followers - {current_user.id}:
+        realtime.notify_user(
+            uid,
+            title=f"{actor} comentó en «{ev.title}»",
+            body=content[:120],
+            url=f"/calendar/?date={day.isoformat()}",
+            kind="calendar_comment",
+        )
+    audit.log_action(
+        "calendar_event_comment", user=current_user, request=request,
+        resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
+        details=content[:80],
+    )
+    return _comment_json(comment, current_user, ev)
+
+
+def _event_comment(ev: CalendarEvent, comment_id: str, db: Session) -> CalendarEventComment:
+    try:
+        uuid.UUID(comment_id)
+    except ValueError:
+        raise HTTPException(404)
+    comment = db.query(CalendarEventComment).filter(
+        CalendarEventComment.id == comment_id, CalendarEventComment.event_id == ev.id,
+    ).first()
+    if not comment:
+        raise HTTPException(404)
+    return comment
+
+
+@router.post("/events/{event_id}/comments/{comment_id}/edit")
+def edit_comment(
+    event_id: str,
+    comment_id: str,
+    content: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    ev = _visible_event(event_id, current_user, db)
+    comment = _event_comment(ev, comment_id, db)
+    if comment.user_id != current_user.id:
+        raise HTTPException(403)
+    content = content.strip()[:5000]
+    if not content:
+        raise HTTPException(422, "Escribe un comentario")
+    if content != comment.content:
+        comment.content = content
+        comment.edited = True
+        db.commit()
+    return _comment_json(comment, current_user, ev)
+
+
+@router.post("/events/{event_id}/comments/{comment_id}/delete")
+def delete_comment(
+    event_id: str,
+    comment_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    ev = _visible_event(event_id, current_user, db)
+    comment = _event_comment(ev, comment_id, db)
+    if comment.user_id != current_user.id and ev.owner_id != current_user.id:
+        raise HTTPException(403)
+    db.delete(comment)
+    db.commit()
     return {"ok": True}
 
 
