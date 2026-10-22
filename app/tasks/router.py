@@ -20,13 +20,15 @@ from app.permissions import (
     branch_user_ids as _branch_user_ids, manager_scope as _manager_scope, scope_user_condition,
 )
 from app.models import (
-    Branch, Department, Document, Project, RecurringTask, Task, TaskComment, TaskEvidence,
+    Branch, Department, Document, Project, RecurringTask, RecurringTaskShare, Task, TaskComment, TaskEvidence, TaskFollowUp,
     TaskShare, TaskStatusHistory, TaskTag, TaskTagAssignment, User,
+    CALENDAR_REMINDER_OPTIONS,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES,
 )
-from app.tasks.recurring import parse_recurrence
+from app.calendar.reminders import compute_remind_at, to_local, to_utc
+from app.tasks.recurring import local_now, parse_recurrence
 from app.templating import templates
 
 
@@ -127,6 +129,11 @@ def _can_comment(user: User, task_id, db: Session) -> bool:
 
 def _can_share(user: User, task: Task, db: Session) -> bool:
     """Comparte quien puede editarla y el asignado; a quien se la compartieron, no."""
+    return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
+
+
+def _can_manage_follow_ups(user: User, task: Task, db: Session) -> bool:
+    """Programa y cierra seguimientos quien edita la tarea y su asignado."""
     return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
 
 
@@ -564,6 +571,7 @@ def task_detail(
             joinedload(Task.status_history),
             joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
             joinedload(Task.shares).joinedload(TaskShare.user).joinedload(User.department),
+            joinedload(Task.follow_ups).joinedload(TaskFollowUp.done_by_user),
         )
         .filter(Task.id == task_id)
         .first()
@@ -625,6 +633,10 @@ def task_detail(
             "can_comment": _can_comment(current_user, task_id, db),
             "can_share": can_share,
             "share_candidates": _share_candidates(current_user, db) if can_share else [],
+            "can_follow_up": _can_manage_follow_ups(current_user, task, db),
+            "follow_ups": [_follow_up_view(f) for f in task.follow_ups],
+            "reminder_options": CALENDAR_REMINDER_OPTIONS,
+            "local_today": local_now().date().isoformat(),
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
@@ -1205,6 +1217,232 @@ def delete_comment(
     return HTMLResponse("")
 
 
+# ── Seguimientos (bloques con hora en el calendario del responsable) ─────────
+
+def _follow_up_view(f: TaskFollowUp) -> dict:
+    """Datos para pintar un seguimiento en el detalle (horas en hora local)."""
+    start, end = to_local(f.start_at), to_local(f.end_at)
+    return {
+        "f": f,
+        "date": start.date().isoformat(),
+        "start": f"{start:%H:%M}",
+        "end": f"{end:%H:%M}",
+        "label": f"{start:%d/%m/%Y} · {start:%H:%M}–{end:%H:%M}",
+        "past": f.end_at < datetime.utcnow(),
+    }
+
+
+def _parse_follow_up(task: Task, day: str, start: str, end: str, reminder_minutes: str, existing=None):
+    """Valida un seguimiento (hora local) y devuelve (start_utc, end_utc, reminder).
+
+    El día debe caer entre hoy y la fecha límite de la tarea; al editar se
+    permite conservar un día que ya pasó."""
+    try:
+        d = date.fromisoformat(day)
+        start_local = datetime.combine(d, datetime.strptime(start, "%H:%M").time())
+        end_local = datetime.combine(d, datetime.strptime(end, "%H:%M").time())
+    except ValueError:
+        raise HTTPException(422, "Fecha u hora inválida")
+    if end_local <= start_local:
+        raise HTTPException(422, "La hora de fin debe ser posterior a la de inicio")
+    if task.due_date and d > task.due_date:
+        raise HTTPException(422, "El seguimiento debe ser antes o el día de la fecha límite")
+    keeps_day = existing is not None and to_local(existing.start_at).date() == d
+    if d < local_now().date() and not keeps_day:
+        raise HTTPException(422, "El seguimiento no puede ser en un día que ya pasó")
+    if reminder_minutes in ("", None):
+        reminder = None
+    else:
+        try:
+            reminder = int(reminder_minutes)
+        except ValueError:
+            raise HTTPException(422, "Recordatorio inválido")
+        if reminder not in CALENDAR_REMINDER_OPTIONS:
+            raise HTTPException(422, "Recordatorio inválido")
+    return to_utc(start_local), to_utc(end_local), reminder
+
+
+def _follow_up_task(task_id: str, user: User, db: Session) -> Task:
+    try:
+        uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(404)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404)
+    if not _can_manage_follow_ups(user, task, db):
+        raise HTTPException(403)
+    return task
+
+
+def _task_follow_up(task: Task, follow_up_id: str, db: Session) -> TaskFollowUp:
+    try:
+        uuid.UUID(follow_up_id)
+    except ValueError:
+        raise HTTPException(404)
+    f = db.query(TaskFollowUp).filter(TaskFollowUp.id == follow_up_id, TaskFollowUp.task_id == task.id).first()
+    if not f:
+        raise HTTPException(404)
+    return f
+
+
+def _schedule_follow_up(f: TaskFollowUp, start_at: datetime, end_at: datetime, reminder: int | None) -> None:
+    if (f.start_at, f.reminder_minutes) != (start_at, reminder):
+        f.remind_at = compute_remind_at(start_at, False, reminder)
+        f.reminded_at = None
+    f.start_at, f.end_at, f.reminder_minutes = start_at, end_at, reminder
+
+
+@router.post("/{task_id}/follow-ups")
+def add_follow_up(
+    task_id: str,
+    request: Request,
+    day: str = Form(...),
+    start: str = Form(...),
+    end: str = Form(...),
+    reminder_minutes: str = Form(""),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = _follow_up_task(task_id, current_user, db)
+    if task.status == TASK_DONE or task.archived_at:
+        raise HTTPException(422, "La tarea ya está terminada")
+    start_at, end_at, reminder = _parse_follow_up(task, day, start, end, reminder_minutes)
+
+    f = TaskFollowUp(task_id=task.id, note=note.strip()[:500] or None, created_by=current_user.id)
+    _schedule_follow_up(f, start_at, end_at, reminder)
+    db.add(f)
+    db.commit()
+
+    # Avisa al asignado si el seguimiento lo programó alguien más.
+    if task.assigned_to and task.assigned_to != current_user.id:
+        realtime.notify_user(
+            task.assigned_to,
+            title=f"{current_user.name or current_user.email} programó un seguimiento",
+            body=f"{task.title} · {to_local(start_at):%d/%m %H:%M}",
+            url=f"/tasks/{task.id}",
+            kind="task_follow_up",
+        )
+    realtime.notify_task(task.id)
+    audit.log_action(
+        "task_follow_up_add", user=current_user, request=request,
+        resource_type="task", resource_id=task.id, resource_name=task.title,
+        details=f"{to_local(start_at):%Y-%m-%d %H:%M}-{to_local(end_at):%H:%M}",
+    )
+    return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+
+
+@router.post("/{task_id}/follow-ups/{follow_up_id}/edit")
+def edit_follow_up(
+    task_id: str,
+    follow_up_id: str,
+    day: str = Form(...),
+    start: str = Form(...),
+    end: str = Form(...),
+    reminder_minutes: str = Form(""),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = _follow_up_task(task_id, current_user, db)
+    f = _task_follow_up(task, follow_up_id, db)
+    start_at, end_at, reminder = _parse_follow_up(task, day, start, end, reminder_minutes, existing=f)
+    _schedule_follow_up(f, start_at, end_at, reminder)
+    f.note = note.strip()[:500] or None
+    db.commit()
+    realtime.notify_task(task.id)
+    return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+
+
+@router.post("/{task_id}/follow-ups/{follow_up_id}/done")
+def done_follow_up(
+    task_id: str,
+    follow_up_id: str,
+    request: Request,
+    comment: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Marca el seguimiento como hecho y lo deja asentado en los comentarios."""
+    if not current_user:
+        raise HTTPException(401)
+    task = _follow_up_task(task_id, current_user, db)
+    f = _task_follow_up(task, follow_up_id, db)
+    if f.done_at:
+        return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+    f.done_at = datetime.utcnow()
+    f.done_by = current_user.id
+    view = _follow_up_view(f)
+    content = f"✔ Seguimiento del {view['label']} hecho."
+    if comment.strip():
+        content += f"\n{comment.strip()}"
+    db.add(TaskComment(id=uuid.uuid4(), task_id=task.id, user_id=current_user.id, content=content))
+    db.commit()
+
+    actor = current_user.name or current_user.email
+    for uid in _followers(task):
+        if uid and str(uid) != str(current_user.id):
+            realtime.notify_user(
+                uid,
+                title=f"{actor} dio seguimiento",
+                body=f"{task.title} · {view['label']}",
+                url=f"/tasks/{task.id}",
+                kind="task_follow_up",
+            )
+    realtime.notify_task(task.id)
+    audit.log_action(
+        "task_follow_up_done", user=current_user, request=request,
+        resource_type="task", resource_id=task.id, resource_name=task.title,
+        details=view["label"],
+    )
+    return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+
+
+@router.post("/{task_id}/follow-ups/{follow_up_id}/undo")
+def undo_follow_up(
+    task_id: str,
+    follow_up_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = _follow_up_task(task_id, current_user, db)
+    f = _task_follow_up(task, follow_up_id, db)
+    f.done_at = f.done_by = None
+    db.commit()
+    realtime.notify_task(task.id)
+    return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+
+
+@router.post("/{task_id}/follow-ups/{follow_up_id}/delete")
+def delete_follow_up(
+    task_id: str,
+    follow_up_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = _follow_up_task(task_id, current_user, db)
+    f = _task_follow_up(task, follow_up_id, db)
+    label = _follow_up_view(f)["label"]
+    db.delete(f)
+    db.commit()
+    realtime.notify_task(task.id)
+    audit.log_action(
+        "task_follow_up_delete", user=current_user, request=request,
+        resource_type="task", resource_id=task.id, resource_name=task.title, details=label,
+    )
+    return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Task tags (solo superadmin las crea; siempre por departamento)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1366,6 +1604,7 @@ def _recurring_query(user: User, db: Session):
         joinedload(RecurringTask.project),
         joinedload(RecurringTask.document),
         joinedload(RecurringTask.created_by_user),
+        joinedload(RecurringTask.shares).joinedload(RecurringTaskShare.user),
     )
     scope = _manager_scope(user, db)
     if scope is None:
@@ -1392,6 +1631,25 @@ def _can_manage_recurring(user: User, rt: RecurringTask, db: Session) -> bool:
     if rt.assigned_to and rt.assigned_to in _branch_user_ids(scope, db):
         return True
     return False
+
+
+def _set_recurring_shares(rt: RecurringTask, user_ids: list[str], db: Session) -> None:
+    """Deja como compartidos de la plantilla exactamente a `user_ids` (activos;
+    sin el creador ni el asignado, que ya siguen cada tarea generada)."""
+    try:
+        wanted = {uuid.UUID(uid) for uid in user_ids if uid}
+    except ValueError:
+        raise HTTPException(400, "Persona inválida")
+    wanted -= {rt.created_by, uuid.UUID(str(rt.assigned_to)) if rt.assigned_to else None}
+    valid = {
+        row[0] for row in db.query(User.id).filter(User.id.in_(wanted), User.is_active == True).all()  # noqa: E712
+    } if wanted else set()
+    current = {s.user_id: s for s in rt.shares}
+    for uid, share in current.items():
+        if uid not in valid:
+            rt.shares.remove(share)
+    for uid in valid - set(current):
+        rt.shares.append(RecurringTaskShare(user_id=uid))
 
 
 def _assignable_users_query(user: User, db: Session):
@@ -1486,6 +1744,11 @@ def list_recurring(
             "users": users,
             "projects": projects,
             "documents": _accessible_documents(current_user),
+            # Incluye al propio encargado: puede editar una plantilla que otro
+            # compartió con él, y el selector solo conserva a quien conoce.
+            "share_candidates": sorted(
+                _share_candidates(current_user, db) + [current_user], key=lambda u: (u.name or "", u.email),
+            ),
             "priorities": TASK_PRIORITIES,
             "frequencies": RECURRENCE_FREQUENCIES,
             "is_superadmin": current_user.role == ROLE_SUPERADMIN,
@@ -1511,6 +1774,7 @@ def create_recurring(
     days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
+    shared_with: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1539,6 +1803,7 @@ def create_recurring(
         start_date=date.fromisoformat(start_date) if start_date else None,
         end_date=date.fromisoformat(end_date) if end_date else None,
     )
+    _set_recurring_shares(rt, shared_with, db)
     db.add(rt)
     db.commit()
     audit.log_action(
@@ -1566,6 +1831,7 @@ def edit_recurring(
     days_of_week: list[str] = Form([]),
     start_date: str = Form(""),
     end_date: str = Form(""),
+    shared_with: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1594,6 +1860,7 @@ def edit_recurring(
     rt.days_of_week = custom_days
     rt.start_date = date.fromisoformat(start_date) if start_date else None
     rt.end_date = date.fromisoformat(end_date) if end_date else None
+    _set_recurring_shares(rt, shared_with, db)
     db.commit()
     audit.log_action(
         "recurring_update", user=current_user, request=request,

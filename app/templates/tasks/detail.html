@@ -23,6 +23,49 @@
   {% endif %}
 {% endmacro %}
 
+{% macro reminder_label(m) %}
+  {%- if m is none -%}Sin recordatorio
+  {%- elif m == 0 -%}Aviso a la hora
+  {%- elif m == 1440 -%}Aviso 1 día antes
+  {%- elif m >= 60 -%}Aviso {{ m // 60 }} h antes
+  {%- else -%}Aviso {{ m }} min antes
+  {%- endif -%}
+{% endmacro %}
+
+{% macro follow_up_fields(fu=none) %}
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div class="col-span-2 sm:col-span-1">
+      <label class="block text-[11px] font-medium text-gray-500 mb-0.5">Día</label>
+      <input type="date" name="day" required value="{{ fu.date if fu else '' }}"
+             {% if not fu %}min="{{ local_today }}"{% endif %} {% if task.due_date %}max="{{ task.due_date.isoformat() }}"{% endif %}
+             class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white" />
+    </div>
+    <div>
+      <label class="block text-[11px] font-medium text-gray-500 mb-0.5">Inicio</label>
+      <input type="time" name="start" required value="{{ fu.start if fu else '10:00' }}"
+             class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white" />
+    </div>
+    <div>
+      <label class="block text-[11px] font-medium text-gray-500 mb-0.5">Fin</label>
+      <input type="time" name="end" required value="{{ fu.end if fu else '11:00' }}"
+             class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white" />
+    </div>
+    <div class="col-span-2 sm:col-span-1">
+      <label class="block text-[11px] font-medium text-gray-500 mb-0.5">Recordatorio</label>
+      {% set current = fu.f.reminder_minutes if fu else 15 %}
+      <select name="reminder_minutes" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+        <option value="" {% if current is none %}selected{% endif %}>Sin recordatorio</option>
+        {% for m in reminder_options %}
+        <option value="{{ m }}" {% if current == m %}selected{% endif %}>{{ reminder_label(m) | replace('Aviso ', '') | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <input type="text" name="note" maxlength="500" value="{{ fu.f.note or '' if fu else '' }}" {% if not fu %}data-draft{% endif %}
+         placeholder="Nota (opcional): qué revisar en este seguimiento"
+         class="w-full mt-2 px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white" />
+{% endmacro %}
+
 {% block content %}
 <div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
   <div class="max-w-3xl mx-auto">
@@ -420,6 +463,116 @@
       </div>
     </div>
 
+    <!-- Seguimientos: bloques con hora en el calendario del responsable -->
+    {% if follow_ups or can_follow_up %}
+    {% set responsible = task.assignee or task.created_by_user %}
+    <div id="seguimientos" class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6"
+         x-data="{ editing: null, closing: null, error: '', busy: false,
+                   async send(form) {
+                     this.busy = true; this.error = '';
+                     try {
+                       const r = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+                       if (r.ok) { location.reload(); return; }
+                       let msg = 'No se pudo guardar';
+                       try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (e) {}
+                       this.error = msg;
+                     } finally { this.busy = false; }
+                   } }">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-700">Seguimientos</h2>
+          <p class="text-xs text-gray-400 mt-0.5">
+            Aparecen en el calendario de {{ responsible.name or responsible.email if responsible else "el responsable" }} y le avisan.
+          </p>
+        </div>
+        <span class="text-xs text-gray-400">{{ follow_ups | selectattr('f.done_at') | list | length }}/{{ follow_ups | length }} hechos</span>
+      </div>
+
+      {% if follow_ups %}
+      <ul class="divide-y divide-gray-100">
+        {% for fu in follow_ups %}
+        <li class="px-4 sm:px-6 py-3">
+          <div class="flex flex-wrap sm:flex-nowrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium {% if fu.f.done_at %}text-gray-400 line-through{% else %}text-gray-800{% endif %}">
+                ⏱ {{ fu.label }}
+              </p>
+              {% if fu.f.note %}<p class="text-sm text-gray-600 break-words">{{ fu.f.note }}</p>{% endif %}
+              <p class="text-xs mt-0.5 {% if fu.f.done_at %}text-green-600{% elif fu.past %}text-amber-600{% else %}text-gray-400{% endif %}">
+                {% if fu.f.done_at %}
+                  Hecho por {{ fu.f.done_by_user.name or fu.f.done_by_user.email if fu.f.done_by_user else "—" }}
+                  · <time datetime="{{ fu.f.done_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ fu.f.done_at.strftime('%d/%m/%Y %H:%M') }}</time>
+                {% elif fu.past %}
+                  Pendiente de marcar como hecho
+                {% else %}
+                  {{ reminder_label(fu.f.reminder_minutes) }}
+                {% endif %}
+              </p>
+            </div>
+            {% if can_follow_up %}
+            <div class="flex items-center gap-1 shrink-0" x-show="editing !== '{{ fu.f.id }}' && closing !== '{{ fu.f.id }}'">
+              {% if fu.f.done_at %}
+              <form method="post" action="/tasks/{{ task.id }}/follow-ups/{{ fu.f.id }}/undo" @submit.prevent="send($el)">
+                <button type="submit" class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">Deshacer</button>
+              </form>
+              {% else %}
+              <button type="button" @click="closing = '{{ fu.f.id }}'"
+                      class="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Hecho</button>
+              <button type="button" @click="editing = '{{ fu.f.id }}'"
+                      class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">Editar</button>
+              {% endif %}
+              <form method="post" action="/tasks/{{ task.id }}/follow-ups/{{ fu.f.id }}/delete"
+                    @submit.prevent="confirm('¿Quitar este seguimiento?') && send($el)">
+                <button type="submit" class="text-xs px-2 py-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50">Quitar</button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+
+          {% if can_follow_up and not fu.f.done_at %}
+          <form x-show="editing === '{{ fu.f.id }}'" x-cloak method="post" @submit.prevent="send($el)"
+                action="/tasks/{{ task.id }}/follow-ups/{{ fu.f.id }}/edit" class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            {{ follow_up_fields(fu) }}
+            <div class="flex justify-end gap-2 mt-2">
+              <button type="button" @click="editing = null" class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-white">Cancelar</button>
+              <button type="submit" :disabled="busy" class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg">Guardar</button>
+            </div>
+          </form>
+          <form x-show="closing === '{{ fu.f.id }}'" x-cloak method="post" @submit.prevent="send($el)"
+                action="/tasks/{{ task.id }}/follow-ups/{{ fu.f.id }}/done" class="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+            <label class="block text-[11px] font-medium text-gray-600 mb-1">¿Qué se revisó? (opcional, queda en los comentarios)</label>
+            <textarea name="comment" rows="2" data-draft
+                      class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white resize-none"></textarea>
+            <div class="flex justify-end gap-2 mt-2">
+              <button type="button" @click="closing = null" class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-white">Cancelar</button>
+              <button type="submit" :disabled="busy" class="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-60 text-white rounded-lg">Marcar como hecho</button>
+            </div>
+          </form>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="px-4 sm:px-6 py-5 text-center text-sm text-gray-400 italic">Sin seguimientos programados.</div>
+      {% endif %}
+
+      {% if can_follow_up and task.status != 'done' and not task.archived_at %}
+      <form method="post" action="/tasks/{{ task.id }}/follow-ups" @submit.prevent="send($el)"
+            class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <p class="text-xs font-medium text-gray-600 mb-2">
+          Agregar seguimiento{% if task.due_date %} <span class="font-normal text-gray-400">(hasta el {{ task.due_date.strftime('%d/%m/%Y') }})</span>{% endif %}
+        </p>
+        {{ follow_up_fields() }}
+        <div class="flex justify-end mt-2">
+          <button type="submit" :disabled="busy"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium">+ Agregar</button>
+        </div>
+      </form>
+      {% endif %}
+      <p x-show="error" x-text="error" x-cloak class="px-4 sm:px-6 pb-3 text-sm text-red-600"></p>
+    </div>
+    {% endif %}
+
     <!-- Evidences -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
       <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
@@ -637,8 +790,8 @@
     es.addEventListener('task', function () {
       clearTimeout(timer);
       timer = setTimeout(function () {
-        // No perder un comentario a medio escribir (nuevo o edición inline).
-        var drafts = document.querySelectorAll('textarea[name="content"]');
+        // No perder un comentario (nuevo o edición inline) ni un seguimiento a medio escribir.
+        var drafts = document.querySelectorAll('textarea[name="content"], [data-draft]');
         for (var i = 0; i < drafts.length; i++) {
           if (drafts[i].value.trim()) return;
         }

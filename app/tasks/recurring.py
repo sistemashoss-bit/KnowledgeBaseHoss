@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
 from app.models import (
-    RecurringTask, Task, TaskStatusHistory,
+    RecurringTask, Task, TaskShare, TaskStatusHistory,
     FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM, RECURRENCE_FREQUENCIES,
     TASK_PENDING,
 )
@@ -105,6 +105,7 @@ def generate_due_tasks(today: date | None = None) -> int:
     today = today or local_now().date()
     db = SessionLocal()
     created = 0
+    shared_notices = []  # (user_id, task_id, title): avisos tras el commit
     try:
         templates = db.query(RecurringTask).filter(RecurringTask.is_active == True).all()
         for rt in templates:
@@ -135,6 +136,11 @@ def generate_due_tasks(today: date | None = None) -> int:
                 changed_by=rt.created_by,
                 changed_at=task.created_at,
             ))
+            # Los compartidos (activos) de la plantilla siguen cada tarea generada.
+            for share in rt.shares:
+                if share.user_id not in (task.assigned_to, task.created_by) and share.user and share.user.is_active:
+                    db.add(TaskShare(task_id=task.id, user_id=share.user_id, shared_by=rt.created_by))
+                    shared_notices.append((share.user_id, task.id, task.title))
             rt.last_generated_on = today
             created += 1
         db.commit()
@@ -145,6 +151,11 @@ def generate_due_tasks(today: date | None = None) -> int:
     finally:
         db.close()
 
+    for user_id, task_id, title in shared_notices:
+        realtime.notify_user(
+            user_id, title="Tarea recurrente compartida contigo", body=title,
+            url=f"/tasks/{task_id}", kind="task_shared",
+        )
     if created:
         realtime.notify_tasks()
         audit.log_action(

@@ -455,6 +455,9 @@ class Task(Base):
     tags = relationship(
         "TaskTagAssignment", back_populates="task", cascade="all, delete-orphan", passive_deletes=True,
     )
+    follow_ups = relationship(
+        "TaskFollowUp", back_populates="task", order_by="TaskFollowUp.start_at", passive_deletes=True,
+    )
 
 
 class TaskStatusHistory(Base):
@@ -546,6 +549,25 @@ class RecurringTask(Base):
     project = relationship("Project", foreign_keys=[project_id])
     document = relationship("Document", foreign_keys=[document_id])
     created_by_user = relationship("User", back_populates="created_recurring_tasks", foreign_keys=[created_by])
+    shares = relationship(
+        "RecurringTaskShare", back_populates="recurring_task", cascade="all, delete-orphan",
+        passive_deletes=True, order_by="RecurringTaskShare.created_at",
+    )
+
+
+class RecurringTaskShare(Base):
+    """Persona con quien se comparte cada tarea que genera la plantilla (como
+    TaskShare en una tarea suelta)."""
+    __tablename__ = "recurring_task_shares"
+
+    recurring_task_id = Column(
+        UUID(as_uuid=True), ForeignKey("recurring_tasks.id", ondelete="CASCADE"), primary_key=True,
+    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    recurring_task = relationship("RecurringTask", back_populates="shares")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class TaskComment(Base):
@@ -576,6 +598,36 @@ class TaskShare(Base):
 
     task = relationship("Task", back_populates="shares")
     user = relationship("User", foreign_keys=[user_id])
+
+
+class TaskFollowUp(Base):
+    """Bloque de seguimiento de una tarea: un día con hora de inicio y fin (antes
+    de su fecha límite) en que el responsable debe darle seguimiento. Aparece en
+    su calendario y avisa como una cita. El responsable es el asignado o, si la
+    tarea es del área sin persona, su creador. Fechas en UTC."""
+    __tablename__ = "task_follow_ups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_at = Column(DateTime, nullable=False)
+    end_at = Column(DateTime, nullable=False)
+    note = Column(String(500), nullable=True)
+
+    # Igual que CalendarEvent: null = sin recordatorio (CALENDAR_REMINDER_OPTIONS);
+    # `reminded_at` se llena al enviarlo y se limpia si cambia la hora.
+    reminder_minutes = Column(Integer, nullable=True)
+    remind_at = Column(DateTime, nullable=True)
+    reminded_at = Column(DateTime, nullable=True)
+
+    # Marcado como hecho (deja un comentario en la tarea); deja de avisar.
+    done_at = Column(DateTime, nullable=True)
+    done_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", back_populates="follow_ups")
+    done_by_user = relationship("User", foreign_keys=[done_by])
 
 
 class TaskEvidence(Base):

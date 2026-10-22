@@ -1,6 +1,8 @@
 {# Selector múltiple de personas para "Compartir con" (Alpine.js). Filtra en el
    cliente por departamento y por nombre/correo; manda un input hidden
-   `name` por cada persona elegida. #}
+   `name` por cada persona elegida. Un formulario reutilizado (crear/editar)
+   fija la selección con el evento de ventana
+   `share-picker-set` → detail: {name, ids}. #}
 {% macro share_picker(candidates, departments, name='shared_with') %}
 {% set people = [] %}
 {% for u in candidates %}
@@ -30,6 +32,7 @@
     add(p) { this.selected.push(p.id); this.query = ''; },
     remove(id) { this.selected = this.selected.filter(x => x !== id); },
   }"
+  @share-picker-set.window="if ($event.detail.name === '{{ name }}') { selected = ($event.detail.ids || []).filter(id => person(id).id); query = ''; dept = ''; }"
   class="space-y-2"
 >
   <template x-for="id in selected" :key="id">

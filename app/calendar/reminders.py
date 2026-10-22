@@ -6,6 +6,9 @@ lanzado desde el lifespan de main.py):
 - Citas: avisa al dueño cuando llega `CalendarEvent.remind_at`. En las que se
   repiten, al avisar (o si el aviso se pasó) `remind_at` avanza a la siguiente
   ocurrencia en la misma transacción.
+- Seguimientos de tareas: avisa al responsable (asignado, o el creador si la
+  tarea no tiene persona) cuando llega `TaskFollowUp.remind_at`, salvo que el
+  seguimiento ya esté hecho o la tarea terminada/archivada.
 - Tareas: a partir de settings.task_due_reminder_hour_local avisa al asignado
   de las tareas que vencen hoy o mañana (una vez por día).
 
@@ -17,12 +20,12 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import or_, update
+from sqlalchemy import or_, select, update
 
 from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
-from app.models import CALENDAR_ALL_DAY_REMINDER_HOUR, CalendarEvent, Task, TASK_DONE
+from app.models import CALENDAR_ALL_DAY_REMINDER_HOUR, CalendarEvent, Task, TaskFollowUp, TASK_DONE
 from app.tasks.recurring import matches_recurrence
 
 logger = logging.getLogger(__name__)
@@ -176,6 +179,53 @@ def send_event_reminders(now: datetime | None = None) -> int:
     return len(rows)
 
 
+def send_follow_up_reminders(now: datetime | None = None) -> int:
+    now = now or datetime.utcnow()
+    open_tasks = select(Task.id).where(Task.status != TASK_DONE, Task.archived_at.is_(None))
+    db = SessionLocal()
+    try:
+        claimed = db.execute(
+            update(TaskFollowUp)
+            .where(
+                TaskFollowUp.reminded_at.is_(None),
+                TaskFollowUp.remind_at.isnot(None),
+                TaskFollowUp.remind_at <= now,
+                TaskFollowUp.remind_at > now - STALE_AFTER,
+                TaskFollowUp.done_at.is_(None),
+                TaskFollowUp.task_id.in_(open_tasks),
+            )
+            .values(reminded_at=now)
+            .returning(TaskFollowUp.task_id, TaskFollowUp.start_at, TaskFollowUp.end_at, TaskFollowUp.note)
+            .execution_options(synchronize_session=False)
+        ).all()
+        tasks = {
+            t.id: t for t in db.query(Task).filter(Task.id.in_({r.task_id for r in claimed})).all()
+        } if claimed else {}
+        rows = []
+        for r in claimed:
+            task = tasks.get(r.task_id)
+            if task:
+                rows.append((task.assigned_to or task.created_by, task.id, task.title, r.start_at, r.end_at, r.note))
+        db.commit()
+    finally:
+        db.close()
+
+    today = to_local(now).date()
+    for owner_id, task_id, title, start_at, end_at, note in rows:
+        start_local = to_local(start_at)
+        body = f"{_when_label(start_local, False, today)}–{to_local(end_at):%H:%M}"
+        if note:
+            body += f" · {note}"
+        realtime.notify_user(
+            owner_id,
+            title=f"Seguimiento: {title}",
+            body=body,
+            url=f"/tasks/{task_id}",
+            kind="task_follow_up",
+        )
+    return len(rows)
+
+
 def send_task_due_reminders(now: datetime | None = None) -> int:
     local = to_local(now or datetime.utcnow())
     if local.hour < settings.task_due_reminder_hour_local:
@@ -213,17 +263,17 @@ def send_task_due_reminders(now: datetime | None = None) -> int:
     return len(rows)
 
 
-def run_reminders() -> tuple[int, int]:
-    return send_event_reminders(), send_task_due_reminders()
+def run_reminders() -> tuple[int, int, int]:
+    return send_event_reminders(), send_follow_up_reminders(), send_task_due_reminders()
 
 
 async def reminder_scheduler_loop() -> None:
     """Revisa recordatorios cada minuto. Never raises out."""
     while True:
         try:
-            events, tasks = await asyncio.to_thread(run_reminders)
-            if events or tasks:
-                logger.info("reminders sent: events=%s tasks=%s", events, tasks)
+            events, follow_ups, tasks = await asyncio.to_thread(run_reminders)
+            if events or follow_ups or tasks:
+                logger.info("reminders sent: events=%s follow_ups=%s tasks=%s", events, follow_ups, tasks)
             await asyncio.sleep(POLL_SECONDS)
         except asyncio.CancelledError:
             raise

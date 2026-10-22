@@ -2,6 +2,9 @@
 ajenos que tiene agregados (admin → su gente; superadmin → cualquiera) y,
 opcionalmente, las fechas límite de tareas y proyectos.
 
+Los seguimientos de tareas (TaskFollowUp) salen siempre, como bloques con hora,
+en el calendario de su responsable (el asignado, o el creador si no hay).
+
 Los eventos pueden repetirse con los mismos criterios que las tareas
 recurrentes (diario, semanal, mensual, días específicos); las ocurrencias se
 calculan al consultar y la serie se edita completa. Los eventos aceptan
@@ -17,7 +20,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from app import audit
 from app.auth.deps import get_current_user
@@ -25,7 +28,8 @@ from app.auth.utils import generate_csrf_token
 from app.calendar.reminders import STALE_AFTER, iter_occurrences, next_remind_at, to_local, to_utc
 from app.database import get_db
 from app.models import (
-    CalendarEvent, CalendarEventComment, CalendarSubscription, Department, Project, Task, TaskTagAssignment, User,
+    CalendarEvent, CalendarEventComment, CalendarSubscription, Department, Project, Task, TaskFollowUp,
+    TaskTagAssignment, User,
     CALENDAR_MAX_SUBSCRIPTIONS, CALENDAR_REMINDER_OPTIONS, PROJECT_COMPLETED,
     ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
 )
@@ -266,8 +270,37 @@ def _event_json(ev: CalendarEvent, owner: User, mine: bool, start_at: datetime, 
     }
 
 
-def _task_json(task: Task, user: User) -> dict:
+def _task_color(task: Task) -> str:
     tag = next((tt.tag for tt in task.tags if tt.tag), None)
+    return tag.color if tag else _PRIORITY_COLORS.get(task.priority, "gray")
+
+
+def _follow_up_json(f: TaskFollowUp, owner: User, mine: bool) -> dict:
+    task = f.task
+    return {
+        "id": f"followup-{f.id}",
+        "title": task.title,
+        "start": _iso_local(f.start_at, False),
+        "end": _iso_local(f.end_at, False),
+        "allDay": False,
+        "editable": False,
+        "url": f"/tasks/{task.id}",
+        "extendedProps": {
+            "kind": "followup",
+            "color": _task_color(task),
+            "done": task.status == TASK_DONE or f.done_at is not None,
+            "follow_up_done": f.done_at is not None,
+            "status": _TASK_STATUS_LABELS.get(task.status, task.status),
+            "due_date": f"{task.due_date:%d/%m/%Y}" if task.due_date else "",
+            "department": task.department.name if task.department else "",
+            "owner_name": _display_name(owner),
+            "owner_initials": "" if mine else _initials(owner),
+            "description": f.note or "",
+        },
+    }
+
+
+def _task_json(task: Task, user: User) -> dict:
     assignee_is_me = task.assigned_to == user.id
     return {
         "id": f"task-{task.id}",
@@ -278,7 +311,7 @@ def _task_json(task: Task, user: User) -> dict:
         "url": f"/tasks/{task.id}",
         "extendedProps": {
             "kind": "task",
-            "color": tag.color if tag else _PRIORITY_COLORS.get(task.priority, "gray"),
+            "color": _task_color(task),
             "done": task.status == TASK_DONE,
             "status": _TASK_STATUS_LABELS.get(task.status, task.status),
             "priority": _PRIORITY_LABELS.get(task.priority, task.priority),
@@ -439,6 +472,28 @@ def calendar_events(
                 out.append(_event_json(
                     ev, owners[ev.owner_id], ev.owner_id == current_user.id, start_at, comment_counts.get(ev.id, 0),
                 ))
+
+    # Seguimientos: en el calendario del responsable, sin depender de `work`
+    # (son tiempo reservado, como una cita).
+    responsible = func.coalesce(Task.assigned_to, Task.created_by)
+    follow_ups = (
+        db.query(TaskFollowUp)
+        .join(TaskFollowUp.task)
+        .options(
+            contains_eager(TaskFollowUp.task).joinedload(Task.department),
+            contains_eager(TaskFollowUp.task).joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
+        )
+        .filter(
+            responsible.in_(list(owners)),
+            Task.archived_at.is_(None),
+            TaskFollowUp.start_at < range_end,
+            TaskFollowUp.end_at > range_start,
+        )
+        .all()
+    )
+    for f in follow_ups:
+        owner_id = f.task.assigned_to or f.task.created_by
+        out.append(_follow_up_json(f, owners[owner_id], owner_id == current_user.id))
 
     if work:
         first_day, last_day = range_start_local.date(), range_end_local.date()

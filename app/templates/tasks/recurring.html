@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "tasks/_share_picker.html" as sharing %}
 {% block title %}Tareas recurrentes — HOSS Conocimiento{% endblock %}
 
 {% set weekdays = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'] %}
@@ -71,6 +72,7 @@
             </span>
             {% if rt.assignee %}<span>· {{ rt.assignee.name or rt.assignee.email }}</span>{% else %}<span class="text-amber-500">· Sin asignar (área)</span>{% endif %}
             {% if rt.department %}<span>· {{ rt.department.name }}</span>{% endif %}
+            {% if rt.shares %}<span title="{% for sh in rt.shares %}{{ sh.user.name or sh.user.email }}{% if not loop.last %}, {% endif %}{% endfor %}">· Compartida con {{ rt.shares | length }}</span>{% endif %}
             {% if rt.last_generated_on %}<span>· últ. generada {{ rt.last_generated_on.strftime('%d/%m/%Y') }}</span>{% endif %}
           </div>
         </div>
@@ -86,7 +88,8 @@
                     "day_of_month": rt.day_of_month or "",
                     "days_of_week": rt.days_of_week.split(',') if rt.days_of_week else [],
                     "start_date": rt.start_date.isoformat() if rt.start_date else "",
-                    "end_date": rt.end_date.isoformat() if rt.end_date else ""
+                    "end_date": rt.end_date.isoformat() if rt.end_date else "",
+                    "shared_with": rt.shares | map(attribute='user_id') | map('string') | list
                   } | tojson }})'
                   class="p-1.5 text-gray-400 hover:text-gray-700 rounded" title="Editar">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,6 +258,14 @@
       </div>
       {% endif %}
 
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Compartir con <span class="text-xs text-gray-400">(opcional)</span>
+        </label>
+        {{ sharing.share_picker(share_candidates, departments) }}
+        <p class="text-[11px] text-gray-400 mt-1">Cada tarea generada se comparte con ellos: la ven, le dan seguimiento y comentan, sin editarla.</p>
+      </div>
+
       {% if documents %}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -353,6 +364,9 @@
       var v = data ? data[map[id]] : '';
       el.value = (v === null || v === undefined) ? '' : v;
     });
+    window.dispatchEvent(new CustomEvent('share-picker-set', {
+      detail: { name: 'shared_with', ids: (data && data.shared_with) || [] },
+    }));
     var selectedDays = (data && data.days_of_week) ? data.days_of_week.map(String) : [];
     dayCheckboxes.forEach(function (cb) { cb.checked = selectedDays.indexOf(cb.value) !== -1; });
     if (!data || !data.id) {

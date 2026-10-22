@@ -9,6 +9,9 @@
   #calendar .fc-ev-done .fc-ev-title { text-decoration: line-through; opacity: .7; }
   #calendar .fc-ev-inner { display: flex; align-items: center; gap: .25rem; overflow: hidden; padding: 0 2px; }
   #calendar .fc-ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* En Semana/Día el bloque es alto pero angosto: hora y título en varias líneas. */
+  #calendar .fc-timegrid-event .fc-ev-inner { flex-wrap: wrap; align-items: flex-start; }
+  #calendar .fc-timegrid-event .fc-ev-title { white-space: normal; word-break: break-word; line-height: 1.2; }
   #calendar .fc-ev-badge { flex-shrink: 0; font-size: 9px; font-weight: 700; line-height: 1; padding: 2px 3px; border-radius: 3px; background: rgba(255,255,255,.35); }
   #calendar .fc-toolbar-title { font-size: 1.1rem; font-weight: 700; }
   #calendar .fc-button { font-size: .8rem; padding: .3rem .6rem; }
@@ -485,8 +488,12 @@
             }
             const title = document.createElement('span');
             title.className = 'fc-ev-title';
-            const prefix = p.kind === 'task' ? '☑ ' : p.kind === 'project' ? '◆ ' : p.frequency ? '↻ ' : '';
-            title.textContent = prefix + (arg.timeText && !arg.view.type.startsWith('list') ? arg.timeText + ' ' : '') + arg.event.title;
+            const prefix = { task: '☑ ', project: '◆ ', followup: '⏱ ' }[p.kind] || (p.frequency ? '↻ ' : '');
+            // En Semana/Día el bloque ya marca el rango: basta la hora de inicio.
+            const time = arg.view.type.startsWith('list') ? ''
+              : arg.view.type.startsWith('timeGrid') && !arg.event.allDay ? calSplit(arg.event.startStr).time
+              : arg.timeText;
+            title.textContent = prefix + (time ? time + ' ' : '') + arg.event.title;
             wrap.appendChild(title);
             if (p.comment_count) {
               const c = document.createElement('span');
@@ -549,6 +556,7 @@
           kind: p.kind, title: ev.title, when: calFmtRange(ev), color: p.color,
           owner: p.owner_name, location: p.location || '', description: p.description || '',
           status: p.status || '', priority: p.priority || '', department: p.department || '',
+          dueDate: p.due_date || '', followUpDone: !!p.follow_up_done,
         };
       },
 
@@ -566,7 +574,7 @@
         const dot = el('span', 'mt-1.5 w-2.5 h-2.5 rounded-full shrink-0');
         dot.style.background = this.hex(d.color);
         head.appendChild(dot);
-        const kind = { task: 'Tarea', project: 'Proyecto' }[d.kind];
+        const kind = { task: 'Tarea', project: 'Proyecto', followup: 'Seguimiento de tarea' }[d.kind];
         const titleBox = el('div', 'min-w-0');
         if (kind) titleBox.appendChild(el('p', 'text-[10px] uppercase tracking-wide font-semibold text-gray-400', kind));
         titleBox.appendChild(el('p', 'text-sm font-semibold text-gray-900 break-words', d.title));
@@ -579,6 +587,10 @@
         if (d.repeatLabel) rows.push(['Se repite', d.repeatLabel]);
         if (d.kind === 'task') rows.push(['Asignada a', d.owner], ['Estado', d.status], ['Prioridad', d.priority]);
         if (d.kind === 'project') rows.push(['Estado', d.status], ['Creado por', d.owner]);
+        if (d.kind === 'followup') {
+          rows.push(['Responsable', d.owner], ['Tarea', d.status], ['Fecha límite', d.dueDate]);
+          if (d.followUpDone) rows.push(['Seguimiento', 'Hecho']);
+        }
         if (d.department) rows.push(['Departamento', d.department]);
         if (d.location) rows.push(['Ubicación', d.location]);
         if (rows.length) {
