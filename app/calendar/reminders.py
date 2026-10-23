@@ -3,7 +3,8 @@
 Un solo ciclo de fondo que corre cada minuto (ver `reminder_scheduler_loop`,
 lanzado desde el lifespan de main.py):
 
-- Citas: avisa al dueño cuando llega `CalendarEvent.remind_at`. En las que se
+- Citas: avisa al dueño (y a con quienes lo compartió) cuando llega
+  `CalendarEvent.remind_at`. En las que se
   repiten, al avisar (o si el aviso se pasó) `remind_at` avanza a la siguiente
   ocurrencia en la misma transacción.
 - Seguimientos de tareas: avisa al responsable (asignado, o el creador si la
@@ -140,7 +141,8 @@ def send_event_reminders(now: datetime | None = None) -> int:
             for ev in db.query(CalendarEvent).filter(CalendarEvent.id.in_(list(sent_remind))).all():
                 remind_at = sent_remind[ev.id]
                 start_at = _occurrence_for(ev, remind_at) if ev.frequency else ev.start_at
-                rows.append((ev.owner_id, ev.title, start_at, ev.all_day, ev.location))
+                recipients = [ev.owner_id] + [sh.user_id for sh in ev.shares]
+                rows.append((recipients, ev.title, start_at, ev.all_day, ev.location))
                 if ev.frequency:
                     ev.remind_at = next_remind_at(ev, remind_at)
                     ev.reminded_at = None
@@ -164,18 +166,19 @@ def send_event_reminders(now: datetime | None = None) -> int:
         db.close()
 
     today = to_local(now).date()
-    for owner_id, title, start_at, all_day, location in rows:
+    for recipients, title, start_at, all_day, location in rows:
         start_local = to_local(start_at)
         body = _when_label(start_local, all_day, today)
         if location:
             body += f" · {location}"
-        realtime.notify_user(
-            owner_id,
-            title=f"Recordatorio: {title}",
-            body=body,
-            url=f"/calendar/?date={start_local.date().isoformat()}",
-            kind="calendar_reminder",
-        )
+        for user_id in recipients:
+            realtime.notify_user(
+                user_id,
+                title=f"Recordatorio: {title}",
+                body=body,
+                url=f"/calendar/?date={start_local.date().isoformat()}",
+                kind="calendar_reminder",
+            )
     return len(rows)
 
 

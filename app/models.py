@@ -691,6 +691,23 @@ class CalendarEvent(Base):
         "CalendarEventComment", back_populates="event", cascade="all, delete-orphan", passive_deletes=True,
         order_by="CalendarEventComment.created_at",
     )
+    shares = relationship(
+        "CalendarEventShare", back_populates="event", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="CalendarEventShare.created_at",
+    )
+
+
+class CalendarEventShare(Base):
+    """Persona con quien el dueño compartió un evento: le aparece en su
+    calendario (solo lectura), lo comenta y recibe sus avisos y recordatorios."""
+    __tablename__ = "calendar_event_shares"
+
+    event_id = Column(UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("CalendarEvent", back_populates="shares")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class CalendarEventComment(Base):

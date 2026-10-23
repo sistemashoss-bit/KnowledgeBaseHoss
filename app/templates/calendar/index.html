@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "tasks/_share_picker.html" as sharing %}
 {% block title %}Calendario{% endblock %}
 
 {% block content %}
@@ -199,6 +200,10 @@
               <a :href="recurringUrl(detail)" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Crear tarea recurrente</a>
             </template>
             {% endif %}
+            <template x-if="detail.sharedToMe">
+              <button type="button" @click="leaveEvent(detail)"
+                      class="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Quitar de mi calendario</button>
+            </template>
             <template x-if="detail.mine">
               <button type="button" @click="deleteEvent(detail)"
                       class="px-3 py-1.5 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50">Eliminar</button>
@@ -218,7 +223,7 @@
   <!-- Formulario crear / editar -->
   <div x-show="form" x-cloak class="fixed inset-0 z-[75] flex items-center justify-center bg-black/40 p-4"
        @keydown.escape.window="form = null">
-    <form x-show="form" @submit.prevent="saveForm()" class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3"
+    <form id="cal-event-form" x-show="form" @submit.prevent="saveForm()" class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3"
           role="dialog" aria-modal="true" aria-labelledby="cal-form-title">
       <template x-if="form">
         <div class="space-y-3">
@@ -235,49 +240,28 @@
             Todo el día
           </label>
 
+          <!-- Con repetición cada ocurrencia es de un solo día: se pide la fecha
+               (la primera) y el horario; el fin de la serie va en "Hasta". -->
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Inicio</label>
-              <input type="date" x-model="form.startDate" required @change="if (form.endDate < form.startDate) form.endDate = form.startDate"
+              <label class="block text-xs font-medium text-gray-600 mb-1" x-text="form.repeat ? 'Primera fecha' : 'Inicio'"></label>
+              <input type="date" x-model="form.startDate" required @change="syncEndDate()"
                      class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
               <input type="time" x-model="form.startTime" x-show="!form.allDay" :required="!form.allDay"
                      class="w-full mt-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
             </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Fin</label>
-              <input type="date" x-model="form.endDate" required :min="form.startDate"
+            <div x-show="!(form.repeat && form.allDay)">
+              <label class="block text-xs font-medium text-gray-600 mb-1" x-text="form.repeat ? 'Hora de fin' : 'Fin'"></label>
+              <input type="date" x-model="form.endDate" x-show="!form.repeat" required :min="form.startDate"
                      class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
               <input type="time" x-model="form.endTime" x-show="!form.allDay" :required="!form.allDay"
-                     class="w-full mt-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                     class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" :class="form.repeat ? '' : 'mt-1'" />
             </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Color</label>
-            <div class="flex flex-wrap gap-2">
-              {% for c in colors %}
-              <button type="button" @click="form.color = '{{ c }}'"
-                      class="w-7 h-7 rounded-full border-2 transition"
-                      :class="form.color === '{{ c }}' ? 'border-gray-900 scale-110' : 'border-transparent'"
-                      :style="`background:${hex('{{ c }}')}`" title="{{ c }}" aria-label="Color {{ c }}"></button>
-              {% endfor %}
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Recordatorio</label>
-            <select x-model="form.reminder"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-              <option value="">Sin recordatorio</option>
-              <template x-for="opt in reminderOptions()" :key="opt.value">
-                <option :value="opt.value" x-text="opt.label" :selected="String(opt.value) === String(form.reminder)"></option>
-              </template>
-            </select>
           </div>
 
           <div class="space-y-2">
             <label class="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" x-model="form.repeat" @change="if (form.repeat) syncRepeatDefaults()" class="rounded border-gray-300 text-blue-600" />
+              <input type="checkbox" x-model="form.repeat" @change="if (form.repeat) syncRepeatDefaults(); syncEndDate()" class="rounded border-gray-300 text-blue-600" />
               Repetir
             </label>
             <div x-show="form.repeat" class="space-y-2 pl-6">
@@ -329,8 +313,31 @@
                 <input type="number" x-model="form.dayOfMonth" min="1" max="31" :required="form.repeat && form.frequency === 'monthly'"
                        class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
               </div>
-              <p class="text-[11px] text-gray-400">Se repite desde la fecha de inicio, a la misma hora y con la misma duración.</p>
+              <p class="text-[11px] text-gray-400" x-text="repeatHint()"></p>
             </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Color</label>
+            <div class="flex flex-wrap gap-2">
+              {% for c in colors %}
+              <button type="button" @click="form.color = '{{ c }}'"
+                      class="w-7 h-7 rounded-full border-2 transition"
+                      :class="form.color === '{{ c }}' ? 'border-gray-900 scale-110' : 'border-transparent'"
+                      :style="`background:${hex('{{ c }}')}`" title="{{ c }}" aria-label="Color {{ c }}"></button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Recordatorio</label>
+            <select x-model="form.reminder"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">Sin recordatorio</option>
+              <template x-for="opt in reminderOptions()" :key="opt.value">
+                <option :value="opt.value" x-text="opt.label" :selected="String(opt.value) === String(form.reminder)"></option>
+              </template>
+            </select>
           </div>
 
           <div>
@@ -342,6 +349,12 @@
             <label class="block text-xs font-medium text-gray-600 mb-1">Descripción</label>
             <textarea x-model="form.description" rows="3"
                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Compartir con <span class="text-gray-400">(opcional)</span></label>
+            {{ sharing.share_picker(share_candidates, all_departments) }}
+            <p class="text-[11px] text-gray-400 mt-1">Les aparece en su calendario, pueden comentarlo y reciben sus avisos y recordatorios.</p>
           </div>
 
           <p x-show="error" x-text="error" class="text-sm text-red-600"></p>
@@ -495,6 +508,13 @@
               : arg.timeText;
             title.textContent = prefix + (time ? time + ' ' : '') + arg.event.title;
             wrap.appendChild(title);
+            if (p.mine && p.shared_with && p.shared_with.length) {
+              const sh = document.createElement('span');
+              sh.className = 'fc-ev-badge';
+              sh.textContent = `👥${p.shared_with.length}`;
+              sh.title = `Compartido con ${p.shared_with.map(x => x.name).join(', ')}`;
+              wrap.appendChild(sh);
+            }
             if (p.comment_count) {
               const c = document.createElement('span');
               c.className = 'fc-ev-badge';
@@ -557,6 +577,8 @@
           owner: p.owner_name, location: p.location || '', description: p.description || '',
           status: p.status || '', priority: p.priority || '', department: p.department || '',
           dueDate: p.due_date || '', followUpDone: !!p.follow_up_done,
+          sharedWith: (p.shared_with || []).map(x => x.id), sharedNames: (p.shared_with || []).map(x => x.name),
+          sharedToMe: !!p.shared_to_me,
         };
       },
 
@@ -585,6 +607,7 @@
         const rows = [];
         if (d.kind === 'event' && !d.mine) rows.push(['De', d.owner]);
         if (d.repeatLabel) rows.push(['Se repite', d.repeatLabel]);
+        if (d.sharedNames && d.sharedNames.length) rows.push(['Compartido con', d.sharedNames.join(', ')]);
         if (d.kind === 'task') rows.push(['Asignada a', d.owner], ['Estado', d.status], ['Prioridad', d.priority]);
         if (d.kind === 'project') rows.push(['Estado', d.status], ['Creado por', d.owner]);
         if (d.kind === 'followup') {
@@ -637,6 +660,29 @@
           repeat: false, frequency: 'weekly', dayOfWeek: '', dayOfMonth: '', daysOfWeek: [], repeatUntil: '',
         }, preset);
         if (this.form.allDay) this.form.reminder = '0';
+        this.setShared([]);
+      },
+
+      // El selector de "Compartir con" vive dentro del formulario (x-if): se
+      // le fija la selección cuando ya está montado.
+      setShared(ids) {
+        this.$nextTick(() => window.dispatchEvent(new CustomEvent('share-picker-set', {
+          detail: { name: 'shared_with', ids },
+        })));
+      },
+
+      // Sin repetición el fin no puede quedar antes del inicio; con repetición
+      // cada ocurrencia es de un solo día, así que el fin es la misma fecha.
+      syncEndDate() {
+        const f = this.form;
+        if (f.repeat || f.endDate < f.startDate) f.endDate = f.startDate;
+      },
+
+      repeatHint() {
+        const f = this.form;
+        const hours = f.allDay ? 'todo el día' : `de ${f.startTime || '--:--'} a ${f.endTime || '--:--'}`;
+        const until = f.repeatUntil ? `hasta el ${f.repeatUntil.split('-').reverse().join('/')}` : 'sin fecha de fin';
+        return `Cada repetición es ${hours}, desde la primera fecha ${until}.`;
       },
 
       // Al activar "Repetir", los días por defecto salen de la fecha de inicio.
@@ -654,7 +700,8 @@
         this.error = '';
         this.detail = null;
         this.form = {
-          id: d.id, title: d.title, allDay: d.allDay,
+          // eventId: en una serie, d.id es el de la ocurrencia ("<id>_<fecha>").
+          id: d.eventId, title: d.title, allDay: d.allDay,
           startDate: s.date, startTime: s.time || '09:00',
           endDate: d.allDay ? calAddDays(e.date, d.seriesEnd ? -1 : 0) : e.date, endTime: e.time || s.time || '10:00',
           color: d.color, reminder: d.reminder === null || d.reminder === undefined ? '' : String(d.reminder),
@@ -664,7 +711,8 @@
           dayOfMonth: d.dayOfMonth ? String(d.dayOfMonth) : '',
           daysOfWeek: d.daysOfWeek.map(String), repeatUntil: d.repeatUntil,
         };
-        if (this.form.repeat) this.syncRepeatDefaults();
+        if (this.form.repeat) { this.syncRepeatDefaults(); this.syncEndDate(); }
+        this.setShared(d.sharedWith || []);
       },
 
       async post(url, data) {
@@ -679,6 +727,7 @@
 
       async saveForm() {
         const f = this.form;
+        this.syncEndDate();
         if (!f.allDay && f.endDate === f.startDate && f.endTime <= f.startTime) {
           this.error = 'La hora de fin debe ser posterior a la de inicio';
           return;
@@ -711,6 +760,7 @@
       // URLSearchParams con days_of_week repetido (lista en el servidor).
       formBody(data) {
         const body = new URLSearchParams(data);
+        document.querySelectorAll('#cal-event-form input[name="shared_with"]').forEach(i => body.append('shared_with', i.value));
         if (this.form.repeat && this.form.frequency === 'custom') {
           this.form.daysOfWeek.forEach(d => body.append('days_of_week', d));
         }
@@ -726,6 +776,17 @@
           calendar.refetchEvents();
         } catch (e) {
           info.revert();
+          alert(e.message);
+        }
+      },
+
+      async leaveEvent(d) {
+        if (!confirm('¿Quitar este evento de tu calendario? Ya no recibirás sus avisos.')) return;
+        try {
+          await this.post(`/calendar/events/${d.eventId}/leave`, {});
+          this.detail = null;
+          calendar.refetchEvents();
+        } catch (e) {
           alert(e.message);
         }
       },

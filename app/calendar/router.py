@@ -5,6 +5,9 @@ opcionalmente, las fechas límite de tareas y proyectos.
 Los seguimientos de tareas (TaskFollowUp) salen siempre, como bloques con hora,
 en el calendario de su responsable (el asignado, o el creador si no hay).
 
+El dueño puede compartir un evento con otras personas: les aparece en su
+calendario (solo lectura), lo comentan y reciben sus avisos y recordatorios.
+
 Los eventos pueden repetirse con los mismos criterios que las tareas
 recurrentes (diario, semanal, mensual, días específicos); las ocurrencias se
 calculan al consultar y la serie se edita completa. Los eventos aceptan
@@ -28,7 +31,7 @@ from app.auth.utils import generate_csrf_token
 from app.calendar.reminders import STALE_AFTER, iter_occurrences, next_remind_at, to_local, to_utc
 from app.database import get_db
 from app.models import (
-    CalendarEvent, CalendarEventComment, CalendarSubscription, Department, Project, Task, TaskFollowUp,
+    CalendarEvent, CalendarEventComment, CalendarEventShare, CalendarSubscription, Department, Project, Task, TaskFollowUp,
     TaskTagAssignment, User,
     CALENDAR_MAX_SUBSCRIPTIONS, CALENDAR_REMINDER_OPTIONS, PROJECT_COMPLETED,
     ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
@@ -143,6 +146,11 @@ def _apply_recurrence(
             raise HTTPException(422, "Fecha de fin de repetición inválida")
         if until and until < to_local(ev.start_at).date():
             raise HTTPException(422, "La repetición debe terminar después del inicio")
+        # Cada ocurrencia dura a lo más un día; la serie termina en "Hasta".
+        if ev.end_at - ev.start_at > timedelta(days=1):
+            raise HTTPException(
+                422, "Un evento que se repite dura un solo día; usa «Hasta» para indicar cuándo termina la repetición",
+            )
         ev.frequency, ev.day_of_week, ev.day_of_month, ev.days_of_week, ev.repeat_until = freq, dow, dom, custom, until
     else:
         ev.frequency = ev.day_of_week = ev.day_of_month = ev.days_of_week = ev.repeat_until = None
@@ -178,8 +186,8 @@ def _own_event(event_id: str, user: User, db: Session) -> CalendarEvent:
 
 
 def _visible_event(event_id: str, user: User, db: Session) -> CalendarEvent:
-    """Evento que `user` puede ver (y comentar): el suyo o el de alguien cuyo
-    calendario puede agregar a su vista."""
+    """Evento que `user` puede ver (y comentar): el suyo, uno compartido con él
+    o el de alguien cuyo calendario puede agregar a su vista."""
     try:
         uuid.UUID(event_id)
     except ValueError:
@@ -187,11 +195,60 @@ def _visible_event(event_id: str, user: User, db: Session) -> CalendarEvent:
     ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
     if not ev:
         raise HTTPException(404)
-    if ev.owner_id != user.id and not (
+    if ev.owner_id != user.id and not _is_shared_with(ev, user, db) and not (
         _can_subscribe(user) and calendar_members_query(user, db).filter(User.id == ev.owner_id).first()
     ):
         raise HTTPException(404)
     return ev
+
+
+def _is_shared_with(ev: CalendarEvent, user: User, db: Session) -> bool:
+    return db.query(CalendarEventShare).filter(
+        CalendarEventShare.event_id == ev.id, CalendarEventShare.user_id == user.id,
+    ).first() is not None
+
+
+def _share_candidates(user: User, db: Session) -> list[User]:
+    """Cualquier persona activa (el selector filtra por departamento y nombre)."""
+    return (
+        db.query(User).options(joinedload(User.department))
+        .filter(User.is_active.is_(True), User.id != user.id)
+        .order_by(User.name, User.email).all()
+    )
+
+
+def _set_shares(ev: CalendarEvent, user_ids: list[str], db: Session) -> list:
+    """Deja el evento compartido exactamente con `user_ids` (activos, sin el
+    dueño). Devuelve los ids recién agregados, para avisarles tras el commit."""
+    try:
+        wanted = {uuid.UUID(uid) for uid in user_ids if uid} - {ev.owner_id}
+    except ValueError:
+        raise HTTPException(422, "Persona inválida")
+    valid = {
+        row[0] for row in db.query(User.id).filter(User.id.in_(wanted), User.is_active.is_(True)).all()
+    } if wanted else set()
+    current = {sh.user_id: sh for sh in ev.shares}
+    for uid, sh in current.items():
+        if uid not in valid:
+            ev.shares.remove(sh)
+    added = valid - set(current)
+    for uid in added:
+        ev.shares.append(CalendarEventShare(user_id=uid))
+    return list(added)
+
+
+def _when(ev: CalendarEvent) -> str:
+    start = to_local(ev.start_at)
+    label = f"{start:%d/%m/%Y}" + ("" if ev.all_day else f" {start:%H:%M}")
+    return f"{label} · {_repeat_label(ev)}" if ev.frequency else label
+
+
+def _notify_shared(ev: CalendarEvent, user_ids, actor: User, title: str) -> None:
+    for uid in user_ids:
+        realtime.notify_user(
+            uid, title=title, body=f"{ev.title} · {_when(ev)}",
+            url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}", kind="calendar_shared",
+        )
 
 
 def _subscriptions(user: User, db: Session) -> list[CalendarSubscription]:
@@ -235,7 +292,7 @@ def _resolve_subscriptions(user: User, subs: list[CalendarSubscription], db: Ses
     return {"members": members, "dept_ids": dept_ids, "full_dept_ids": full_dept_ids}
 
 
-def _event_json(ev: CalendarEvent, owner: User, mine: bool, start_at: datetime, comment_count: int) -> dict:
+def _event_json(ev: CalendarEvent, owner: User, mine: bool, start_at: datetime, comment_count: int, user: User) -> dict:
     """Una ocurrencia (`start_at`, UTC) del evento; sin repetición, la única."""
     end_at = start_at + (ev.end_at - ev.start_at)
     return {
@@ -266,6 +323,8 @@ def _event_json(ev: CalendarEvent, owner: User, mine: bool, start_at: datetime, 
             "reminder_minutes": ev.reminder_minutes,
             "owner_name": _display_name(owner),
             "owner_initials": "" if mine else _initials(owner),
+            "shared_with": [{"id": str(sh.user_id), "name": _display_name(sh.user)} for sh in ev.shares],
+            "shared_to_me": any(sh.user_id == user.id for sh in ev.shares),
         },
     }
 
@@ -405,6 +464,8 @@ def calendar_page(
             "department_options": [d for d in department_options if d.id not in subscribed_depts],
             "max_subscriptions": CALENDAR_MAX_SUBSCRIPTIONS,
             "colors": TASK_TAG_COLORS,
+            "share_candidates": _share_candidates(current_user, db),
+            "all_departments": db.query(Department).order_by(Department.name).all(),
             "reminder_options": CALENDAR_REMINDER_OPTIONS,
             "initial_date": initial_date,
             "csrf_token": generate_csrf_token(str(current_user.id)),
@@ -438,10 +499,15 @@ def calendar_events(
 
     # Los repetidos se traen por inicio y fin de repetición (con holgura para
     # ocurrencias de varios días que empiezan antes del rango) y se expanden aquí.
+    shared_ids = db.query(CalendarEventShare.event_id).filter(CalendarEventShare.user_id == current_user.id)
     events = (
         db.query(CalendarEvent)
+        .options(
+            joinedload(CalendarEvent.owner),
+            joinedload(CalendarEvent.shares).joinedload(CalendarEventShare.user),
+        )
         .filter(
-            CalendarEvent.owner_id.in_(list(owners)),
+            or_(CalendarEvent.owner_id.in_(list(owners)), CalendarEvent.id.in_(shared_ids)),
             CalendarEvent.start_at < range_end,
             or_(
                 and_(CalendarEvent.frequency.is_(None), CalendarEvent.end_at > range_start),
@@ -457,6 +523,7 @@ def calendar_events(
         .order_by(CalendarEvent.start_at)
         .all()
     )
+    events = list(dict.fromkeys(events))  # joinedload de colección: sin duplicados
     comment_counts = dict(
         db.query(CalendarEventComment.event_id, func.count())
         .filter(CalendarEventComment.event_id.in_([ev.id for ev in events]))
@@ -470,7 +537,8 @@ def calendar_events(
         for start_at in iter_occurrences(ev, from_day, range_end_local.date()):
             if start_at < range_end and start_at + duration > range_start:
                 out.append(_event_json(
-                    ev, owners[ev.owner_id], ev.owner_id == current_user.id, start_at, comment_counts.get(ev.id, 0),
+                    ev, owners.get(ev.owner_id) or ev.owner, ev.owner_id == current_user.id, start_at,
+                    comment_counts.get(ev.id, 0), current_user,
                 ))
 
     # Seguimientos: en el calendario del responsable, sin depender de `work`
@@ -570,6 +638,7 @@ def create_event(
     day_of_month: str = Form(""),
     days_of_week: list[str] = Form([]),
     repeat_until: str = Form(""),
+    shared_with: list[str] = Form([]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -590,8 +659,10 @@ def create_event(
     _apply_schedule(ev, start, end, all_day)
     if _apply_recurrence(ev, repeat, frequency, day_of_week, day_of_month, days_of_week, repeat_until):
         _refresh_reminder(ev)
+    added = _set_shares(ev, shared_with, db)
     db.add(ev)
     db.commit()
+    _notify_shared(ev, added, current_user, f"{_display_name(current_user)} compartió un evento contigo")
     audit.log_action(
         "calendar_event_create", user=current_user, request=request,
         resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
@@ -617,6 +688,7 @@ def edit_event(
     day_of_month: str = Form(""),
     days_of_week: list[str] = Form([]),
     repeat_until: str = Form(""),
+    shared_with: list[str] = Form([]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -640,7 +712,9 @@ def edit_event(
     )
     if reminder_changed or recurrence_changed:
         _refresh_reminder(ev)
+    added = _set_shares(ev, shared_with, db)
     db.commit()
+    _notify_shared(ev, added, current_user, f"{_display_name(current_user)} compartió un evento contigo")
     audit.log_action(
         "calendar_event_update", user=current_user, request=request,
         resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
@@ -679,6 +753,8 @@ def delete_event(
         raise HTTPException(401)
     ev = _own_event(event_id, current_user, db)
     title = ev.title
+    shared = [sh.user_id for sh in ev.shares]
+    _notify_shared(ev, shared, current_user, f"{_display_name(current_user)} canceló un evento")
     db.delete(ev)
     db.commit()
     audit.log_action(
@@ -688,7 +764,24 @@ def delete_event(
     return {"ok": True}
 
 
-# ── Comentarios (dueño y quien ve su calendario) ──────────────────────────────
+@router.post("/events/{event_id}/leave")
+def leave_event(
+    event_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Quien recibió un evento compartido lo quita de su calendario."""
+    if not current_user:
+        raise HTTPException(401)
+    ev = _visible_event(event_id, current_user, db)
+    db.query(CalendarEventShare).filter(
+        CalendarEventShare.event_id == ev.id, CalendarEventShare.user_id == current_user.id,
+    ).delete()
+    db.commit()
+    return {"ok": True}
+
+
+# ── Comentarios (dueño, compartidos y quien ve su calendario) ─────────────────
 
 def _comment_json(c: CalendarEventComment, user: User, ev: CalendarEvent) -> dict:
     return {
@@ -744,13 +837,14 @@ def add_comment(
     db.commit()
     db.refresh(comment)
 
-    # Avisa al dueño y a quienes ya comentaron (menos a quien comenta). `date`
+    # Avisa al dueño, a los compartidos y a quienes ya comentaron (menos a
+    # quien comenta). `date`
     # es la ocurrencia desde la que se comentó, para abrir el calendario ahí.
     try:
         day = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         day = to_local(ev.start_at).date()
-    followers = {ev.owner_id} | {
+    followers = {ev.owner_id} | {sh.user_id for sh in ev.shares} | {
         uid for (uid,) in db.query(CalendarEventComment.user_id).filter(CalendarEventComment.event_id == ev.id)
     }
     actor = _display_name(current_user)
