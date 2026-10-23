@@ -919,6 +919,60 @@ def unarchive_task(
     return RedirectResponse(redirect, status_code=302)
 
 
+# ── Edit (HTMX) ───────────────────────────────────────────────────────────────
+
+@router.post("/{task_id}/edit", response_class=HTMLResponse)
+def edit_task(
+    task_id: str,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    due_date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_edit_task(current_user, task, db):
+        raise HTTPException(403)
+    title = title.strip()
+    if not title:
+        raise HTTPException(422, "El título es obligatorio")
+    try:
+        new_due = date.fromisoformat(due_date) if due_date else None
+    except ValueError:
+        raise HTTPException(422, "Fecha límite inválida")
+
+    changed = []
+    if title[:255] != task.title:
+        changed.append("title")
+    if (description.strip() or None) != task.description:
+        changed.append("description")
+    if new_due != task.due_date:
+        changed.append("due_date")
+    task.title = title[:255]
+    task.description = description.strip() or None
+    task.due_date = new_due
+    db.commit()
+    if changed:
+        actor = current_user.name or current_user.email
+        for uid in _followers(task):
+            if uid and str(uid) != str(current_user.id):
+                realtime.notify_user(
+                    uid, title=f"{actor} editó la tarea", body=task.title,
+                    url=f"/tasks/{task_id}", kind="task_updated",
+                )
+        realtime.notify_tasks()
+        realtime.notify_task(task_id)
+        audit.log_action(
+            "task_update", user=current_user, request=request,
+            resource_type="task", resource_id=task_id, resource_name=task.title,
+            details=f"fields={','.join(changed)}",
+        )
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
 # ── Assign (HTMX) ─────────────────────────────────────────────────────────────
 
 @router.post("/{task_id}/assign", response_class=HTMLResponse)

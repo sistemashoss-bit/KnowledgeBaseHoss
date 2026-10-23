@@ -695,6 +695,31 @@ class CalendarEvent(Base):
         "CalendarEventShare", back_populates="event", cascade="all, delete-orphan", passive_deletes=True,
         order_by="CalendarEventShare.created_at",
     )
+    attachments = relationship(
+        "CalendarEventAttachment", back_populates="event", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="CalendarEventAttachment.created_at",
+    )
+
+
+class CalendarEventAttachment(Base):
+    """Archivo o evidencia adjunta a un evento (en el bucket de evidencias). La
+    suben y la ven quienes pueden comentar el evento; en una serie aplica a
+    todas sus fechas."""
+    __tablename__ = "calendar_event_attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id = Column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_key = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("CalendarEvent", back_populates="attachments")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
 class CalendarEventShare(Base):

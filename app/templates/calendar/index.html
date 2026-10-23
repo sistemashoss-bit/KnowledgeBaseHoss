@@ -134,6 +134,49 @@
         <div>
           <div x-effect="$el.replaceChildren(detailNodes(detail))"></div>
 
+          <!-- Archivos / evidencias (solo eventos; en una serie aplican a todas sus fechas) -->
+          <template x-if="detail.kind === 'event'">
+            <div class="mt-4 border-t border-gray-100 pt-3">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <h3 class="text-xs font-semibold text-gray-600">
+                  Archivos <span class="font-normal text-gray-400" x-show="attachments.length" x-text="`(${attachments.length})`"></span>
+                </h3>
+                <label class="text-xs font-medium text-blue-600 hover:text-blue-500 cursor-pointer"
+                       :class="attachmentUploading && 'opacity-60 pointer-events-none'">
+                  <span x-text="attachmentUploading ? 'Subiendo…' : '+ Adjuntar'"></span>
+                  <input type="file" multiple class="hidden" @change="uploadAttachments($event.target)" />
+                </label>
+              </div>
+              <p x-show="attachmentsLoading" class="text-xs text-gray-400">Cargando…</p>
+              <p x-show="!attachmentsLoading && !attachments.length" class="text-xs text-gray-400">Sin archivos adjuntos.</p>
+              <ul class="space-y-1.5 max-h-48 overflow-y-auto" x-show="attachments.length">
+                <template x-for="a in attachments" :key="a.id">
+                  <li class="flex items-center gap-2">
+                    <template x-if="a.is_image">
+                      <img :src="`${a.url}?inline=1`" :alt="a.filename" loading="lazy" data-lightbox
+                           class="w-9 h-9 shrink-0 rounded object-cover border border-gray-200 cursor-zoom-in" />
+                    </template>
+                    <template x-if="!a.is_image">
+                      <span class="w-9 h-9 shrink-0 rounded bg-gray-100 text-gray-400 flex items-center justify-center">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                        </svg>
+                      </span>
+                    </template>
+                    <div class="flex-1 min-w-0">
+                      <a :href="a.url" target="_blank" rel="noopener"
+                         class="block text-sm text-gray-800 hover:text-blue-600 truncate" x-text="a.filename" :title="a.filename"></a>
+                      <p class="text-[11px] text-gray-400 truncate" x-text="`${calFmtSize(a.size)} · ${a.uploader} · ${calFmtStamp(a.created_at)}`"></p>
+                    </div>
+                    <button type="button" x-show="a.can_delete" @click="deleteAttachment(a)"
+                            class="text-gray-400 hover:text-red-600 text-xs leading-none px-1" title="Eliminar archivo" aria-label="Eliminar archivo">✕</button>
+                  </li>
+                </template>
+              </ul>
+              <p x-show="attachmentError" x-text="attachmentError" class="text-xs text-red-600 mt-1"></p>
+            </div>
+          </template>
+
           <!-- Comentarios (solo eventos; en una serie aplican a todas sus fechas) -->
           <template x-if="detail.kind === 'event'">
             <div class="mt-4 border-t border-gray-100 pt-3">
@@ -357,6 +400,15 @@
             <p class="text-[11px] text-gray-400 mt-1">Les aparece en su calendario, pueden comentarlo y reciben sus avisos y recordatorios.</p>
           </div>
 
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">
+              Adjuntar archivos <span class="text-gray-400">(opcional, máx 50 MB por archivo)</span>
+            </label>
+            <input type="file" id="cal-form-files" multiple
+                   class="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:text-xs file:font-medium hover:file:bg-blue-100" />
+            <p x-show="form.id" class="text-[11px] text-gray-400 mt-1">Se agregan a los que ya tiene; los actuales se quitan desde el detalle del evento.</p>
+          </div>
+
           <p x-show="error" x-text="error" class="text-sm text-red-600"></p>
 
           <div class="flex justify-end gap-2 pt-1">
@@ -423,6 +475,10 @@
     return `${day}, ${s.time}`;
   }
 
+  function calFmtSize(n) {
+    return n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  }
+
   function calFmtRange(ev) {
     const s = calSplit(ev.startStr), e = calSplit(ev.endStr);
     const fmtDate = ymd => {
@@ -452,6 +508,7 @@
       saving: false,
       comments: [], commentsLoading: false, commentText: '', commentSaving: false, commentError: '',
       editingId: null, editText: '',
+      attachments: [], attachmentsLoading: false, attachmentUploading: false, attachmentError: '',
 
       init() {
         try { this.work = localStorage.getItem(CAL_WORK_KEY) === '1'; } catch (e) {}
@@ -515,6 +572,13 @@
               sh.title = `Compartido con ${p.shared_with.map(x => x.name).join(', ')}`;
               wrap.appendChild(sh);
             }
+            if (p.attachment_count) {
+              const a = document.createElement('span');
+              a.className = 'fc-ev-badge';
+              a.textContent = `📎${p.attachment_count}`;
+              a.title = `${p.attachment_count} archivo(s)`;
+              wrap.appendChild(a);
+            }
             if (p.comment_count) {
               const c = document.createElement('span');
               c.className = 'fc-ev-badge';
@@ -534,7 +598,7 @@
             info.jsEvent.preventDefault();  // tareas/proyectos traen url: se abre desde el detalle
             this.tip = null;
             this.detail = this.detailFrom(info.event);
-            if (this.detail.kind === 'event') this.loadComments();
+            if (this.detail.kind === 'event') { this.loadComments(); this.loadAttachments(); }
           },
           select: (info) => {
             const s = calSplit(info.startStr), e = calSplit(info.endStr);
@@ -745,9 +809,19 @@
           // En todo el día el servidor recibe el fin exclusivo (día siguiente al último).
           end: f.allDay ? calAddDays(f.endDate, 1) : `${f.endDate}T${f.endTime}`,
         };
+        const files = Array.from(document.getElementById('cal-form-files')?.files || []);
+        const tooBig = files.find(x => x.size > 50 * 1024 * 1024);
+        if (tooBig) {
+          this.error = `"${tooBig.name}" supera el límite de 50 MB por archivo`;
+          return;
+        }
         this.saving = true;
         try {
-          await this.post(f.id ? `/calendar/events/${f.id}/edit` : '/calendar/events', this.formBody(data));
+          const res = await this.post(f.id ? `/calendar/events/${f.id}/edit` : '/calendar/events', this.formBody(data));
+          // Si falla la subida el evento ya quedó guardado: se pasa a modo edición
+          // para que reintentar no lo duplique.
+          if (!f.id) f.id = res.id;
+          if (files.length) await this.sendAttachments(f.id, files, f.startDate);
           this.form = null;
           calendar.refetchEvents();
         } catch (e) {
@@ -828,6 +902,70 @@
           days_of_week: (d.daysOfWeek.length ? d.daysOfWeek : [String(calWeekday(start))]).join(','),
         });
         return `/tasks/recurring/?${qs}`;
+      },
+
+      async sendAttachments(eventId, files, date) {
+        const body = new FormData();
+        files.forEach(x => body.append('files', x));
+        body.append('date', date || '');
+        const r = await fetch(`/calendar/events/${eventId}/attachments`, { method: 'POST', body });
+        if (!r.ok) {
+          let msg = 'No se pudieron subir los archivos';
+          try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (e) {}
+          throw new Error(msg);
+        }
+        return r.json();
+      },
+
+      async loadAttachments() {
+        const id = this.detail.eventId;
+        this.attachments = [];
+        this.attachmentError = '';
+        this.attachmentsLoading = true;
+        try {
+          const r = await fetch(`/calendar/events/${id}/attachments`, { headers: { Accept: 'application/json' } });
+          if (!r.ok) throw new Error();
+          const list = await r.json();
+          if (this.detail && this.detail.eventId === id) this.attachments = list;
+        } catch (e) {
+          this.attachmentError = 'No se pudieron cargar los archivos';
+        } finally {
+          this.attachmentsLoading = false;
+        }
+      },
+
+      async uploadAttachments(input) {
+        const files = Array.from(input.files || []);
+        input.value = '';  // permite volver a elegir el mismo archivo
+        if (!files.length || this.attachmentUploading) return;
+        const tooBig = files.find(x => x.size > 50 * 1024 * 1024);
+        if (tooBig) {
+          this.attachmentError = `"${tooBig.name}" supera el límite de 50 MB por archivo`;
+          return;
+        }
+        const d = this.detail;
+        this.attachmentUploading = true;
+        this.attachmentError = '';
+        try {
+          const added = await this.sendAttachments(d.eventId, files, calSplit(d.startStr).date);
+          if (this.detail && this.detail.eventId === d.eventId) this.attachments.push(...added);
+          calendar.refetchEvents();
+        } catch (e) {
+          this.attachmentError = e.message;
+        } finally {
+          this.attachmentUploading = false;
+        }
+      },
+
+      async deleteAttachment(a) {
+        if (!confirm(`¿Eliminar "${a.filename}"?`)) return;
+        try {
+          await this.post(`/calendar/events/${this.detail.eventId}/attachments/${a.id}/delete`, {});
+          this.attachments = this.attachments.filter(x => x.id !== a.id);
+          calendar.refetchEvents();
+        } catch (e) {
+          alert(e.message);
+        }
       },
 
       async loadComments() {
