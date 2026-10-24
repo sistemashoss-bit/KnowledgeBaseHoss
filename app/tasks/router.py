@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -28,7 +28,7 @@ from app.models import (
     RECURRENCE_FREQUENCIES,
 )
 from app.calendar.reminders import compute_remind_at, to_local, to_utc
-from app.tasks.recurring import local_now, parse_recurrence
+from app.tasks.recurring import local_now, matches_recurrence, parse_recurrence
 from app.templating import templates
 
 
@@ -1286,6 +1286,41 @@ def _follow_up_view(f: TaskFollowUp) -> dict:
     }
 
 
+# Tope de fechas que genera un seguimiento con "Repetir" (diario por ~2 meses).
+FOLLOW_UP_MAX_REPEATS = 60
+
+
+def _follow_up_days(
+    task: Task, first: date, frequency: str, day_of_week: str, day_of_month: str,
+    days_of_week: list[str], repeat_until: str,
+) -> list[date]:
+    """Días de un seguimiento repetido: los que coinciden con la frecuencia
+    (mismos criterios que las tareas recurrentes) desde `first` hasta
+    `repeat_until`, que por defecto es la fecha límite de la tarea."""
+    freq, dow, dom, custom_days = parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
+    try:
+        until = date.fromisoformat(repeat_until) if repeat_until else task.due_date
+    except ValueError:
+        raise HTTPException(422, "Fecha de fin de la repetición inválida")
+    if until is None:
+        raise HTTPException(422, "Indica hasta cuándo se repite (la tarea no tiene fecha límite)")
+    if task.due_date and until > task.due_date:
+        raise HTTPException(422, "La repetición debe terminar antes o el día de la fecha límite")
+    if until < first:
+        raise HTTPException(422, "La repetición debe terminar después del primer día")
+    days = []
+    d = first
+    while d <= until:
+        if matches_recurrence(freq, dow, dom, custom_days, d):
+            days.append(d)
+            if len(days) > FOLLOW_UP_MAX_REPEATS:
+                raise HTTPException(422, f"La repetición genera más de {FOLLOW_UP_MAX_REPEATS} seguimientos; acorta el periodo")
+        d += timedelta(days=1)
+    if not days:
+        raise HTTPException(422, "Ningún día del periodo coincide con la repetición")
+    return days
+
+
 def _parse_follow_up(task: Task, day: str, start: str, end: str, reminder_minutes: str, existing=None):
     """Valida un seguimiento (hora local) y devuelve (start_utc, end_utc, reminder).
 
@@ -1356,6 +1391,12 @@ def add_follow_up(
     end: str = Form(...),
     reminder_minutes: str = Form(""),
     note: str = Form(""),
+    repeat: str = Form("false"),
+    frequency: str = Form(""),
+    day_of_week: str = Form(""),
+    day_of_month: str = Form(""),
+    days_of_week: list[str] = Form([]),
+    repeat_until: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1366,17 +1407,30 @@ def add_follow_up(
         raise HTTPException(422, "La tarea ya está terminada")
     start_at, end_at, reminder = _parse_follow_up(task, day, start, end, reminder_minutes)
 
-    f = TaskFollowUp(task_id=task.id, note=note.strip()[:500] or None, created_by=current_user.id)
-    _schedule_follow_up(f, start_at, end_at, reminder)
-    db.add(f)
+    first = date.fromisoformat(day)
+    if repeat == "true":
+        days = _follow_up_days(task, first, frequency, day_of_week, day_of_month, days_of_week, repeat_until)
+        series_id = uuid.uuid4()
+    else:
+        days, series_id = [first], None
+    note = note.strip()[:500] or None
+    for d in days:
+        # Zona fija (local_utc_offset_hours): basta con desplazar los días.
+        shift = timedelta(days=(d - first).days)
+        f = TaskFollowUp(task_id=task.id, note=note, series_id=series_id, created_by=current_user.id)
+        _schedule_follow_up(f, start_at + shift, end_at + shift, reminder)
+        db.add(f)
     db.commit()
 
+    when = f"{to_local(start_at):%d/%m %H:%M}"
+    if len(days) > 1:
+        when = f"{len(days)} seguimientos desde el {when}"
     # Avisa al asignado si el seguimiento lo programó alguien más.
     if task.assigned_to and task.assigned_to != current_user.id:
         realtime.notify_user(
             task.assigned_to,
             title=f"{current_user.name or current_user.email} programó un seguimiento",
-            body=f"{task.title} · {to_local(start_at):%d/%m %H:%M}",
+            body=f"{task.title} · {when}",
             url=f"/tasks/{task.id}",
             kind="task_follow_up",
         )
@@ -1384,7 +1438,8 @@ def add_follow_up(
     audit.log_action(
         "task_follow_up_add", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details=f"{to_local(start_at):%Y-%m-%d %H:%M}-{to_local(end_at):%H:%M}",
+        details=f"{to_local(start_at):%Y-%m-%d %H:%M}-{to_local(end_at):%H:%M}"
+        + (f" x{len(days)} {frequency} hasta {days[-1].isoformat()}" if series_id else ""),
     )
     return RedirectResponse(f"/tasks/{task.id}#seguimientos", status_code=302)
 
@@ -1479,15 +1534,30 @@ def delete_follow_up(
     task_id: str,
     follow_up_id: str,
     request: Request,
+    scope: str = Form("one"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    """Quita el seguimiento; con scope=following, también los siguientes de su
+    serie que sigan pendientes (los hechos se conservan como historial)."""
     if not current_user:
         raise HTTPException(401)
     task = _follow_up_task(task_id, current_user, db)
     f = _task_follow_up(task, follow_up_id, db)
     label = _follow_up_view(f)["label"]
-    db.delete(f)
+    if scope == "following" and f.series_id:
+        removed = db.query(TaskFollowUp).filter(
+            TaskFollowUp.task_id == task.id,
+            TaskFollowUp.series_id == f.series_id,
+            TaskFollowUp.start_at >= f.start_at,
+            TaskFollowUp.done_at.is_(None),
+        ).delete(synchronize_session=False)
+        if f.done_at:
+            db.delete(f)
+            removed += 1
+        label += f" y siguientes ({removed})"
+    else:
+        db.delete(f)
     db.commit()
     realtime.notify_task(task.id)
     audit.log_action(

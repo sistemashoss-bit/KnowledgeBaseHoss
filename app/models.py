@@ -612,6 +612,9 @@ class TaskFollowUp(Base):
     start_at = Column(DateTime, nullable=False)
     end_at = Column(DateTime, nullable=False)
     note = Column(String(500), nullable=True)
+    # Seguimientos creados juntos con "Repetir" (mismos criterios que
+    # RecurringTask). Cada fecha es una fila propia; null = suelto.
+    series_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 
     # Igual que CalendarEvent: null = sin recordatorio (CALENDAR_REMINDER_OPTIONS);
     # `reminded_at` se llena al enviarlo y se limpia si cambia la hora.
