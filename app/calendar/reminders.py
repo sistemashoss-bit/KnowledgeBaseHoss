@@ -142,7 +142,7 @@ def send_event_reminders(now: datetime | None = None) -> int:
                 remind_at = sent_remind[ev.id]
                 start_at = _occurrence_for(ev, remind_at) if ev.frequency else ev.start_at
                 recipients = [ev.owner_id] + [sh.user_id for sh in ev.shares]
-                rows.append((recipients, ev.title, start_at, ev.all_day, ev.location))
+                rows.append((recipients, ev.id, ev.title, start_at, ev.all_day, ev.location))
                 if ev.frequency:
                     ev.remind_at = next_remind_at(ev, remind_at)
                     ev.reminded_at = None
@@ -166,7 +166,7 @@ def send_event_reminders(now: datetime | None = None) -> int:
         db.close()
 
     today = to_local(now).date()
-    for recipients, title, start_at, all_day, location in rows:
+    for recipients, event_id, title, start_at, all_day, location in rows:
         start_local = to_local(start_at)
         body = _when_label(start_local, all_day, today)
         if location:
@@ -176,7 +176,7 @@ def send_event_reminders(now: datetime | None = None) -> int:
                 user_id,
                 title=f"Recordatorio: {title}",
                 body=body,
-                url=f"/calendar/?date={start_local.date().isoformat()}",
+                url=f"/calendar/?date={start_local.date().isoformat()}&event={event_id}",
                 kind="calendar_reminder",
             )
     return len(rows)

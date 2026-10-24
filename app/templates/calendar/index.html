@@ -430,6 +430,7 @@
   };
   const CAL_REMINDERS = {{ reminder_options | tojson }};
   const CAL_INITIAL_DATE = {{ initial_date | tojson }};
+  const CAL_INITIAL_EVENT = {{ initial_event | tojson }};
   const CAL_WORK_KEY = 'calendar.work';
   const CAL_WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const CAL_WEEKDAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -499,6 +500,8 @@
     // Fuera del estado de Alpine: la instancia de FullCalendar no debe
     // envolverse en sus proxies reactivos.
     let calendar = null;
+    // Evento a abrir al cargar (llega de una notificación); una sola vez.
+    let pendingEvent = CAL_INITIAL_EVENT;
     return {
       work: false,
       tip: null, tipX: 0, tipY: 0,
@@ -596,9 +599,20 @@
           eventMouseLeave: () => { this.tip = null; },
           eventClick: (info) => {
             info.jsEvent.preventDefault();  // tareas/proyectos traen url: se abre desde el detalle
-            this.tip = null;
-            this.detail = this.detailFrom(info.event);
-            if (this.detail.kind === 'event') { this.loadComments(); this.loadAttachments(); }
+            this.openDetail(info.event);
+          },
+          eventsSet: (events) => {
+            if (!pendingEvent) return;
+            // De una serie, la ocurrencia del día de la notificación.
+            const matches = events.filter(e => e.extendedProps.kind === 'event' && e.extendedProps.event_id === pendingEvent);
+            // eventsSet también corre antes de que llegue el feed: esperar a encontrarlo.
+            const ev = matches.find(e => calSplit(e.startStr).date === CAL_INITIAL_DATE) || matches[0];
+            if (!ev) return;
+            pendingEvent = '';
+            const url = new URL(location.href);
+            url.searchParams.delete('event');
+            history.replaceState(null, '', url);
+            this.openDetail(ev);
           },
           select: (info) => {
             const s = calSplit(info.startStr), e = calSplit(info.endStr);
@@ -616,6 +630,12 @@
       },
 
       refetch() { calendar.refetchEvents(); },
+
+      openDetail(ev) {
+        this.tip = null;
+        this.detail = this.detailFrom(ev);
+        if (this.detail.kind === 'event') { this.loadComments(); this.loadAttachments(); }
+      },
 
       hex(c) { return CAL_COLORS[c] || CAL_COLORS.gray; },
 

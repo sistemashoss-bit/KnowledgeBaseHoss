@@ -248,7 +248,7 @@ def _notify_shared(ev: CalendarEvent, user_ids, actor: User, title: str) -> None
     for uid in user_ids:
         realtime.notify_user(
             uid, title=title, body=f"{ev.title} · {_when(ev)}",
-            url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}", kind="calendar_shared",
+            url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}&event={ev.id}", kind="calendar_shared",
         )
 
 
@@ -412,6 +412,7 @@ def _project_json(project: Project) -> dict:
 def calendar_page(
     request: Request,
     date: str = "",
+    event: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -454,6 +455,10 @@ def calendar_page(
         initial_date = datetime.strptime(date, "%Y-%m-%d").date().isoformat() if date else ""
     except ValueError:
         initial_date = ""
+    try:
+        initial_event = str(uuid.UUID(event)) if event else ""
+    except ValueError:
+        initial_event = ""
 
     return templates.TemplateResponse(
         request,
@@ -472,6 +477,8 @@ def calendar_page(
             "all_departments": db.query(Department).order_by(Department.name).all(),
             "reminder_options": CALENDAR_REMINDER_OPTIONS,
             "initial_date": initial_date,
+            # Evento a abrir al cargar (desde una notificación).
+            "initial_event": initial_event,
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
@@ -869,7 +876,7 @@ def add_comment(
             uid,
             title=f"{actor} comentó en «{ev.title}»",
             body=content[:120],
-            url=f"/calendar/?date={day.isoformat()}",
+            url=f"/calendar/?date={day.isoformat()}&event={ev.id}",
             kind="calendar_comment",
         )
     audit.log_action(
@@ -1030,7 +1037,7 @@ def upload_attachments(
             uid,
             title=f"{actor} adjuntó {'un archivo' if len(added) == 1 else f'{len(added)} archivos'} en «{ev.title}»",
             body=", ".join(a.filename for a in added)[:120],
-            url=f"/calendar/?date={day.isoformat()}",
+            url=f"/calendar/?date={day.isoformat()}&event={ev.id}",
             kind="calendar_attachment",
         )
     audit.log_action(
