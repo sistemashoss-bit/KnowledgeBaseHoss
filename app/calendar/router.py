@@ -197,7 +197,9 @@ def _visible_event(event_id: str, user: User, db: Session) -> CalendarEvent:
     if not ev:
         raise HTTPException(404)
     if ev.owner_id != user.id and not _is_shared_with(ev, user, db) and not (
-        _can_subscribe(user) and calendar_members_query(user, db).filter(User.id == ev.owner_id).first()
+        _can_subscribe(user) and calendar_members_query(user, db).filter(
+            or_(User.id == ev.owner_id, User.id.in_([sh.user_id for sh in ev.shares]))
+        ).first()
     ):
         raise HTTPException(404)
     return ev
@@ -510,7 +512,9 @@ def calendar_events(
 
     # Los repetidos se traen por inicio y fin de repetición (con holgura para
     # ocurrencias de varios días que empiezan antes del rango) y se expanden aquí.
-    shared_ids = db.query(CalendarEventShare.event_id).filter(CalendarEventShare.user_id == current_user.id)
+    # Compartidos conmigo y con las personas agregadas (sin duplicar: un evento
+    # es una sola fila aunque varios lo tengan).
+    shared_ids = db.query(CalendarEventShare.event_id).filter(CalendarEventShare.user_id.in_(list(owners)))
     events = (
         db.query(CalendarEvent)
         .options(
@@ -558,8 +562,8 @@ def calendar_events(
                     comment_counts.get(ev.id, 0), attachment_counts.get(ev.id, 0), current_user,
                 ))
 
-    # Seguimientos: en el calendario del responsable, sin depender de `work`
-    # (son tiempo reservado, como una cita).
+    # Seguimientos: en el calendario del responsable y de quien los creó, sin
+    # depender de `work` (son tiempo reservado, como una cita).
     responsible = func.coalesce(Task.assigned_to, Task.created_by)
     follow_ups = (
         db.query(TaskFollowUp)
@@ -567,9 +571,11 @@ def calendar_events(
         .options(
             contains_eager(TaskFollowUp.task).joinedload(Task.department),
             contains_eager(TaskFollowUp.task).joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
+            contains_eager(TaskFollowUp.task).joinedload(Task.assignee),
+            contains_eager(TaskFollowUp.task).joinedload(Task.created_by_user),
         )
         .filter(
-            responsible.in_(list(owners)),
+            or_(responsible.in_(list(owners)), TaskFollowUp.created_by == current_user.id),
             Task.archived_at.is_(None),
             TaskFollowUp.start_at < range_end,
             TaskFollowUp.end_at > range_start,
@@ -577,12 +583,12 @@ def calendar_events(
         .all()
     )
     for f in follow_ups:
-        owner_id = f.task.assigned_to or f.task.created_by
-        out.append(_follow_up_json(f, owners[owner_id], owner_id == current_user.id))
+        owner = f.task.assignee or f.task.created_by_user
+        out.append(_follow_up_json(f, owner, owner.id == current_user.id))
 
     if work:
         first_day, last_day = range_start_local.date(), range_end_local.date()
-        task_conds = [Task.assigned_to.in_(list(owners))]
+        task_conds = [Task.assigned_to.in_(list(owners)), Task.created_by == current_user.id]
         if resolved["full_dept_ids"]:
             task_conds.append(
                 and_(Task.department_id.in_(resolved["full_dept_ids"]), Task.assigned_to.is_(None))
@@ -629,7 +635,8 @@ def calendar_events(
         )
         out += [_project_json(p) for p in projects]
 
-    return JSONResponse(out)
+    # Una entrada por id aunque llegue por varias vías (mía, compartida, agregada).
+    return JSONResponse(list({item["id"]: item for item in out}.values()))
 
 
 # ── Events CRUD (solo el dueño) ───────────────────────────────────────────────

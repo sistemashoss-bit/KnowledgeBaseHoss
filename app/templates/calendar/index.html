@@ -40,7 +40,7 @@
                        after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform
                        peer-checked:after:translate-x-4" aria-hidden="true"></span>
         </label>
-        <p class="text-xs text-gray-400">Muestra las fechas límite de tus tareas y proyectos.</p>
+        <p class="text-xs text-gray-400">Muestra las fechas límite de tus tareas (asignadas o creadas por ti) y proyectos.</p>
       </div>
 
       {% if can_subscribe %}
@@ -514,7 +514,7 @@
       attachments: [], attachmentsLoading: false, attachmentUploading: false, attachmentError: '',
 
       init() {
-        try { this.work = localStorage.getItem(CAL_WORK_KEY) === '1'; } catch (e) {}
+        try { this.work = localStorage.getItem(CAL_WORK_KEY) !== '0'; } catch (e) { this.work = true; }
         const mobile = window.matchMedia('(max-width: 639px)').matches;
         const canHover = window.matchMedia('(hover: hover)').matches;
 
