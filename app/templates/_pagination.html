@@ -1,0 +1,46 @@
+{# Paginación compacta: Anterior / 1 … 4 5 [6] 7 8 … 40 / Siguiente.
+   `extra` son los parámetros de query que se conservan (p.ej. el filtro activo). #}
+{% macro pagination(page, total, page_size, extra={}) %}
+{% set pages = (total // page_size) + (1 if total % page_size else 0) %}
+{% if pages > 1 %}
+{% set qs = extra | urlencode %}
+{% set base = '?' ~ (qs ~ '&' if qs else '') ~ 'page=' %}
+{% set lo = [1, page - 2] | max %}
+{% set hi = [pages, page + 2] | min %}
+{% set btn = 'inline-flex items-center justify-center gap-1 min-w-[2.25rem] h-9 px-2 sm:px-3 rounded-lg text-sm whitespace-nowrap' %}
+{% set idle = btn ~ ' border border-gray-300 text-gray-600 hover:bg-gray-50' %}
+{% set off = btn ~ ' border border-gray-200 text-gray-300 cursor-default' %}
+<nav class="flex flex-wrap items-center justify-center gap-1 sm:gap-1.5" aria-label="Paginación">
+  {% if page > 1 %}
+  <a href="{{ base }}{{ page - 1 }}" class="{{ idle }}" aria-label="Página anterior">&lsaquo;<span class="hidden sm:inline">Anterior</span></a>
+  {% else %}
+  <span class="{{ off }}">&lsaquo;<span class="hidden sm:inline">Anterior</span></span>
+  {% endif %}
+
+  {% if lo > 1 %}
+  <a href="{{ base }}1" class="{{ idle }}">1</a>
+  {% if lo > 2 %}<span class="px-1 text-gray-400">…</span>{% endif %}
+  {% endif %}
+
+  {% for p in range(lo, hi + 1) %}
+  {% if p == page %}
+  <span class="{{ btn }} bg-blue-600 text-white" aria-current="page">{{ p }}</span>
+  {% else %}
+  <a href="{{ base }}{{ p }}" class="{{ idle }}{{ ' hidden sm:inline-flex' if (p - page) | abs > 1 }}">{{ p }}</a>
+  {% endif %}
+  {% endfor %}
+
+  {% if hi < pages %}
+  {% if hi < pages - 1 %}<span class="px-1 text-gray-400">…</span>{% endif %}
+  <a href="{{ base }}{{ pages }}" class="{{ idle }}">{{ pages }}</a>
+  {% endif %}
+
+  {% if page < pages %}
+  <a href="{{ base }}{{ page + 1 }}" class="{{ idle }}" aria-label="Página siguiente"><span class="hidden sm:inline">Siguiente</span>&rsaquo;</a>
+  {% else %}
+  <span class="{{ off }}"><span class="hidden sm:inline">Siguiente</span>&rsaquo;</span>
+  {% endif %}
+</nav>
+<p class="text-center text-xs text-gray-400">Página {{ page }} de {{ pages }}</p>
+{% endif %}
+{% endmacro %}

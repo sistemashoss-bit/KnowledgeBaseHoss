@@ -660,7 +660,7 @@
           kind: p.kind, title: ev.title, when: calFmtRange(ev), color: p.color,
           owner: p.owner_name, location: p.location || '', description: p.description || '',
           status: p.status || '', priority: p.priority || '', department: p.department || '',
-          dueDate: p.due_date || '', followUpDone: !!p.follow_up_done,
+          dueDate: p.due_date || '', followUpDone: !!p.follow_up_done, createdBy: p.created_by_name || '',
           sharedWith: (p.shared_with || []).map(x => x.id), sharedNames: (p.shared_with || []).map(x => x.name),
           sharedToMe: !!p.shared_to_me,
         };
@@ -695,7 +695,7 @@
         if (d.kind === 'task') rows.push(['Asignada a', d.owner], ['Estado', d.status], ['Prioridad', d.priority]);
         if (d.kind === 'project') rows.push(['Estado', d.status], ['Creado por', d.owner]);
         if (d.kind === 'followup') {
-          rows.push(['Responsable', d.owner], ['Tarea', d.status], ['Fecha límite', d.dueDate]);
+          rows.push(['Responsable', d.owner], ['Agendado por', d.createdBy], ['Tarea', d.status], ['Fecha límite', d.dueDate]);
           if (d.followUpDone) rows.push(['Seguimiento', 'Hecho']);
         }
         if (d.department) rows.push(['Departamento', d.department]);

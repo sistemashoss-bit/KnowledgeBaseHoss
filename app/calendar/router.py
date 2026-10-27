@@ -340,7 +340,7 @@ def _task_color(task: Task) -> str:
     return tag.color if tag else _PRIORITY_COLORS.get(task.priority, "gray")
 
 
-def _follow_up_json(f: TaskFollowUp, owner: User, mine: bool) -> dict:
+def _follow_up_json(f: TaskFollowUp, owner: User, mine: bool, creator: User | None = None) -> dict:
     task = f.task
     return {
         "id": f"followup-{f.id}",
@@ -360,6 +360,9 @@ def _follow_up_json(f: TaskFollowUp, owner: User, mine: bool) -> dict:
             "department": task.department.name if task.department else "",
             "owner_name": _display_name(owner),
             "owner_initials": "" if mine else _initials(owner),
+            # Quien lo agendó, cuando no es el responsable (p.ej. el encargado que
+            # le reservó tiempo a alguien de su equipo).
+            "created_by_name": _display_name(creator) if creator and creator.id != owner.id else "",
             "description": f.note or "",
         },
     }
@@ -563,7 +566,8 @@ def calendar_events(
                 ))
 
     # Seguimientos: en el calendario del responsable y de quien los creó, sin
-    # depender de `work` (son tiempo reservado, como una cita).
+    # depender de `work` (son tiempo reservado, como una cita). Igual para las
+    # personas agregadas: también los que ellas agendaron en tareas de otros.
     responsible = func.coalesce(Task.assigned_to, Task.created_by)
     follow_ups = (
         db.query(TaskFollowUp)
@@ -575,16 +579,18 @@ def calendar_events(
             contains_eager(TaskFollowUp.task).joinedload(Task.created_by_user),
         )
         .filter(
-            or_(responsible.in_(list(owners)), TaskFollowUp.created_by == current_user.id),
+            or_(responsible.in_(list(owners)), TaskFollowUp.created_by.in_(list(owners))),
             Task.archived_at.is_(None),
             TaskFollowUp.start_at < range_end,
             TaskFollowUp.end_at > range_start,
         )
         .all()
     )
+    missing = {f.created_by for f in follow_ups if f.created_by and f.created_by not in owners}
+    creators = {**owners, **({u.id: u for u in db.query(User).filter(User.id.in_(missing))} if missing else {})}
     for f in follow_ups:
         owner = f.task.assignee or f.task.created_by_user
-        out.append(_follow_up_json(f, owner, owner.id == current_user.id))
+        out.append(_follow_up_json(f, owner, owner.id == current_user.id, creators.get(f.created_by)))
 
     if work:
         first_day, last_day = range_start_local.date(), range_end_local.date()

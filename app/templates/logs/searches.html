@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 {% block title %}Búsquedas{% endblock %}
 
 {% block content %}
@@ -62,17 +63,7 @@
     </div>
 
     <!-- Pagination -->
-    {% set pages = (total // page_size) + (1 if total % page_size else 0) %}
-    {% if pages > 1 %}
-    <div class="flex gap-2 justify-center">
-      {% for p in range(1, pages + 1) %}
-      <a href="?page={{ p }}{% if selected_type %}&search_type={{ selected_type }}{% endif %}"
-         class="px-3 py-1 rounded text-sm {{ 'bg-blue-600 text-white' if p == page else 'border border-gray-300 text-gray-600 hover:bg-gray-50' }}">
-        {{ p }}
-      </a>
-      {% endfor %}
-    </div>
-    {% endif %}
+    {{ pagination(page, total, page_size, {'search_type': selected_type} if selected_type else {}) }}
 
   </div>
 </div>

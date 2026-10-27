@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,7 @@ _PAGE = 100
 @router.get("/audit", response_class=HTMLResponse)
 def audit_logs(
     request: Request,
-    page: int = 1,
+    page: int = Query(1, ge=1),
     action: str = "",
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN)),
@@ -47,7 +47,7 @@ def audit_logs(
 @router.get("/searches", response_class=HTMLResponse)
 def search_logs(
     request: Request,
-    page: int = 1,
+    page: int = Query(1, ge=1),
     search_type: str = "",
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN)),
