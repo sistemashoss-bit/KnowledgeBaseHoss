@@ -38,6 +38,9 @@ from app.models import (
 router = APIRouter(prefix="/api/issue-reports", tags=["issue-reports"])
 
 MAX_DESCRIPTION = 4000
+# Mínimo para que el reporte diga qué pasó (no solo "no sirve"); igual que el widget.
+MIN_DESCRIPTION_CHARS = 30
+MIN_DESCRIPTION_WORDS = 5
 MAX_CONTEXT_BYTES = 20_000
 MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
 MAX_ERRORS = 10
@@ -118,11 +121,34 @@ def _title(description: str, app_name: str | None) -> str:
     return f"[{app_name}] {first}" if app_name else first
 
 
+def _chosen_department(raw: str, db: Session) -> Department | None:
+    """Departamento elegido a mano en el widget; vacío = que lo infiera Jev."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        dept = db.get(Department, uuid.UUID(raw))
+    except ValueError:
+        dept = None
+    if not dept:
+        raise HTTPException(400, "Departamento inválido")
+    return dept
+
+
+@router.get("/departments")
+async def list_report_departments(request: Request, db: Session = Depends(get_db)):
+    """Opciones del selector de departamento del widget."""
+    await _reporter(request, db)
+    departments = db.query(Department).order_by(Department.name).all()
+    return [{"id": str(d.id), "name": d.name} for d in departments]
+
+
 @router.post("")
 async def create_issue_report(
     request: Request,
     description: str = Form(...),
     context: str = Form("{}"),
+    department_id: str = Form(""),
     screenshot: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
 ):
@@ -133,8 +159,15 @@ async def create_issue_report(
     description = description.strip()
     if not description:
         raise HTTPException(400, "Describe el problema")
+    if len(description) < MIN_DESCRIPTION_CHARS or len(description.split()) < MIN_DESCRIPTION_WORDS:
+        raise HTTPException(
+            400,
+            f"Describe el problema con más detalle (mínimo {MIN_DESCRIPTION_CHARS} caracteres"
+            f" y {MIN_DESCRIPTION_WORDS} palabras): qué pasó y qué esperabas que pasara",
+        )
     description = description[:MAX_DESCRIPTION]
     ctx = _clean_context(context)
+    chosen = _chosen_department(department_id, db)
 
     shot = None
     if screenshot and screenshot.filename:
@@ -147,7 +180,8 @@ async def create_issue_report(
         shot = (content, screenshot.content_type, kind[1])
 
     # Clasificación. Si Jev falla, tarda o no está seguro: triage + prioridad media.
-    departments = db.query(Department).order_by(Department.name).all()
+    # Si el usuario eligió departamento, a Jev no se le pregunta: solo decide la prioridad.
+    departments = [] if chosen else db.query(Department).order_by(Department.name).all()
     jev_state = {
         "app": ctx.get("app"),
         "page_title": ctx.get("page_title"),
@@ -157,7 +191,10 @@ async def create_issue_report(
     }
     result = await classify({k: v for k, v in jev_state.items() if v}, departments)
     triage = _triage_department(db)
-    department_id = (result or {}).get("department_id") or (triage.id if triage else None)
+    if chosen:
+        department_id = chosen.id
+    else:
+        department_id = (result or {}).get("department_id") or (triage.id if triage else None)
     priority = (result or {}).get("priority") or PRIORITY_MEDIUM
     if result:
         ctx["jev"] = result["jev"]
@@ -208,7 +245,10 @@ async def create_issue_report(
     audit.log_action(
         "issue_report", user=user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details=f"app={task.source_app} priority={priority} classified={bool(result)}",
+        details=(
+            f"app={task.source_app} priority={priority} classified={bool(result)}"
+            f" department={'manual' if chosen else 'auto'}"
+        ),
     )
 
     return {

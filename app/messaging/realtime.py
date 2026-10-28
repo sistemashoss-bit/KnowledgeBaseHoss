@@ -114,6 +114,18 @@ def notify_task(task_id) -> None:
     vk.publish(task_channel(task_id), "changed")
 
 
+# Prefijo de payload que se reenvía como `event: reaction` en vez del evento del
+# canal: así una reacción no dispara el refresco del feed ni el reload de la tarea,
+# y el cliente solo vuelve a pedir el bloque de reacciones de ese id.
+_REACTION_PREFIX = "reaction:"
+
+
+def notify_reaction(chan: str, target_id) -> None:
+    """Avisa en `chan` que cambiaron las reacciones de un mensaje/comentario."""
+    from app import valkey_client as vk
+    vk.publish(chan, f"{_REACTION_PREFIX}{target_id}")
+
+
 async def _channel_stream(chan: str, request, event_name: str):
     """Yield SSE frames from a Pub/Sub channel until the client disconnects.
 
@@ -140,6 +152,9 @@ async def _channel_stream(chan: str, request, event_name: str):
                     yield ": keepalive\n\n"
                     continue
                 data = msg.get("data", "new")
+                if isinstance(data, str) and data.startswith(_REACTION_PREFIX):
+                    yield f"event: reaction\ndata: {data[len(_REACTION_PREFIX):]}\n\n"
+                    continue
                 yield f"event: {event_name}\ndata: {data}\n\n"
         except asyncio.CancelledError:
             raise

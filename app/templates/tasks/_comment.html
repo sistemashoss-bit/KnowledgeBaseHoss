@@ -1,9 +1,14 @@
 {% set is_author = current_user and comment.user_id == current_user.id %}
 {% set can_manage = is_author or can_edit|default(false) %}
-<div id="comment-{{ comment.id }}" class="flex gap-3 px-4 sm:px-6 py-4" x-data="{ editing: false }">
+<div id="comment-{{ comment.id }}" class="group flex gap-3 px-4 sm:px-6 py-4" x-data="{ editing: false }">
+  {% if comment.user and comment.user.avatar_key %}
+  <img src="{{ avatar_url(comment.user.avatar_key) }}" alt="" loading="lazy"
+       class="w-7 h-7 rounded-full object-cover shrink-0" />
+  {% else %}
   <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
-    {{ comment.user.email[0].upper() if comment.user else "?" }}
+    {{ (comment.user.name or comment.user.email)[0].upper() if comment.user else "?" }}
   </div>
+  {% endif %}
   <div class="flex-1 min-w-0">
     <div class="flex items-center gap-2 mb-1">
       <span class="text-xs font-medium text-gray-700">
@@ -34,6 +39,14 @@
 
     <!-- Vista -->
     <p x-show="!editing" class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content | linkify }}</p>
+
+    {% with rx_id=comment.id,
+            rx_list=comment_reactions.get(comment.id, []) if comment_reactions is defined else [],
+            rx_url="/tasks/" ~ comment.task_id ~ "/comments/" ~ comment.id ~ "/reactions",
+            rx_class="mt-1.5", rx_float="rx-at-corner",
+            rx_readonly=not can_comment|default(true) %}
+    {% include "_reactions.html" %}
+    {% endwith %}
 
     <!-- Edición inline (solo autor) -->
     {% if is_author %}

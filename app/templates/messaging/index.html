@@ -447,44 +447,102 @@
       {% endif %}
     </div>
 
-    <!-- Message feed (real-time via SSE; 30s poll as fallback) -->
-    <div class="flex-1 overflow-hidden relative">
+    <!-- Message feed (real-time via SSE; 30s poll as fallback). El poll es
+         incremental: pide solo lo posterior al último mensaje y lo agrega al final. -->
+    {# sse-connect va en el contenedor y no en el feed: htmx 1.9 registra los
+       triggers `sse:*` de un elemento ANTES de que la extensión abra su
+       EventSource, así que en el mismo elemento el `sse:message` nunca se
+       enganchaba (htmx:noSSESourceError) y solo quedaba el poll de 30 s. #}
+    <div class="flex-1 overflow-hidden relative" id="feed-sse"
+         hx-ext="sse" sse-connect="/messaging/{{ active_conv.id }}/events">
+      {# Recibe `event: reaction` (data = id del mensaje); el handler de abajo refresca ese bloque. #}
+      <span sse-swap="reaction" hx-target="this" hx-swap="innerHTML" hidden></span>
       <div id="message-feed"
-           hx-ext="sse"
-           sse-connect="/messaging/{{ active_conv.id }}/events"
            hx-get="/messaging/{{ active_conv.id }}/poll"
+           hx-vals="js:{after: feedLastId()}"
            hx-trigger="sse:message, refreshFeed from:body, every 30s"
-           hx-swap="innerHTML scroll:bottom"
+           hx-swap="beforeend"
            class="absolute inset-0 overflow-y-auto px-4 sm:px-6 py-4">
         {% include "messaging/_feed.html" %}
       </div>
       <script>
-        // Al entrar al chat, arranca en el mensaje más reciente (abajo), no en el más viejo.
-        // Los swaps posteriores (SSE/poll) ya usan hx-swap="scroll:bottom", pero ese
-        // scroll (igual que el inicial de abajo) se calcula ANTES de que las imágenes
-        // adjuntas terminen de cargar, así que scrollHeight queda corto y el feed no
-        // llega hasta el fondo real. Reenganchamos el scroll cuando cada imagen carga.
         (function () {
           var feed = document.getElementById('message-feed');
           if (!feed) return;
 
-          function toBottom() { feed.scrollTop = feed.scrollHeight; }
+          window.feedLastId = function () {
+            var rows = feed.querySelectorAll('[data-msg-id]');
+            return rows.length ? rows[rows.length - 1].dataset.msgId : '';
+          };
 
+          // Pegado al fondo mientras la persona no haya subido a leer: así ni
+          // un mensaje ajeno ni una imagen que termina de cargar la arrastran.
+          var stick = true;
+          function toBottom() { feed.scrollTop = feed.scrollHeight; }
+          feed.addEventListener('scroll', function () {
+            stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+          }, { passive: true });
+
+          // El scroll se calcula antes de que las imágenes adjuntas carguen
+          // (scrollHeight queda corto): se reengancha cuando cada una carga.
           function bindImages() {
             feed.querySelectorAll('img').forEach(function (img) {
               if (img.complete || img.dataset.scrollBound) return;
               img.dataset.scrollBound = '1';
-              img.addEventListener('load', toBottom);
-              img.addEventListener('error', toBottom);
+              var onDone = function () { if (stick) toBottom(); };
+              img.addEventListener('load', onDone);
+              img.addEventListener('error', onDone);
             });
           }
 
           toBottom();
           bindImages();
-          feed.addEventListener('htmx:afterSwap', function () {
-            toBottom();
+          // Tailwind (CDN) aplica estilos después de este script y cambia las alturas.
+          addEventListener('load', function () { if (stick) toBottom(); });
+
+          // "Ver anteriores": conservar a la vista el mensaje que estaba arriba.
+          function isOlder(e) {
+            return ((e.detail.pathInfo && e.detail.pathInfo.requestPath) || '').indexOf('/older') !== -1;
+          }
+          var fromBottom = null;
+          feed.addEventListener('htmx:beforeSwap', function (e) {
+            fromBottom = isOlder(e) ? feed.scrollHeight - feed.scrollTop : null;
+          });
+
+          feed.addEventListener('htmx:afterSwap', function (e) {
+            if (e.detail.target !== feed) {
+              if (fromBottom !== null && isOlder(e)) feed.scrollTop = feed.scrollHeight - fromBottom;
+              bindImages();
+              return;
+            }
+            if (!e.detail.xhr.responseText.trim()) return;
+            // Dos disparos casi juntos (SSE + el propio envío) pueden traer el mismo mensaje.
+            var seen = {};
+            feed.querySelectorAll('[data-msg-id]').forEach(function (row) {
+              if (seen[row.dataset.msgId]) row.remove(); else seen[row.dataset.msgId] = 1;
+            });
+            var empty = document.getElementById('feed-empty');
+            if (empty) empty.remove();
+            var rows = feed.querySelectorAll('[data-msg-id]');
+            var last = rows[rows.length - 1];
+            if (stick || (last && last.hasAttribute('data-mine'))) toBottom();
             bindImages();
           });
+
+          // Reacciones de otros: solo se vuelve a pedir el bloque de ese mensaje.
+          var pending = {};
+          document.getElementById('feed-sse').addEventListener('htmx:sseMessage', function (e) {
+            if (!e.detail || e.detail.type !== 'reaction') return;
+            var id = e.detail.data;
+            if (pending[id] || !document.getElementById('reactions-' + id)) return;
+            pending[id] = 1;
+            setTimeout(function () {
+              delete pending[id];
+              window.reactionsRefresh(id);
+            }, 150);
+          });
+          // Un bloque de reacciones que crece no debe tapar el último mensaje.
+          document.addEventListener('reactions:updated', function () { if (stick) toBottom(); });
         })();
       </script>
     </div>

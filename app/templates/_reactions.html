@@ -1,0 +1,27 @@
+{#- Reacciones de un mensaje o comentario (estilos en assets/reactions.css). Espera:
+    rx_id       id del objetivo (para #reactions-<id>)
+    rx_list     [{emoji, count, mine, names}] de app.reactions.summarize
+    rx_url      GET devuelve este parcial; POST (emoji) alterna una reacción y también
+    rx_class    clases extra del contenedor (alineación) — opcional
+    rx_readonly true → solo muestra los conteos (p. ej. auditor que no comenta) — opcional
+    rx_float    rx-at-left | rx-at-right | rx-at-corner: dónde flota el "+" cuando
+                aún no hay reacciones (necesita un ancestro con la clase `group`) — opcional
+  Los clics (chips y "+") los maneja app/assets/reactions.js con el data-rx-url
+  del contenedor. -#}
+{% set rx_readonly = rx_readonly|default(false) %}
+{% if rx_list or rx_readonly %}
+<div id="reactions-{{ rx_id }}" class="rx {{ rx_class|default('') }}" data-rx-url="{{ rx_url }}">
+  {% for r in rx_list %}
+  {% if rx_readonly %}
+  <span class="rx-chip" title="{{ r.names }}"><span>{{ r.emoji }}</span><span>{{ r.count }}</span></span>
+  {% else %}
+  <button type="button" class="rx-chip{% if r.mine %} rx-mine{% endif %}" title="{{ r.names }}" data-emoji="{{ r.emoji }}"><span>{{ r.emoji }}</span><span>{{ r.count }}</span></button>
+  {% endif %}
+  {% endfor %}
+  {% if not rx_readonly %}
+  <button type="button" class="rx-add" aria-label="Reaccionar"></button>
+  {% endif %}
+</div>
+{% else %}
+<div id="reactions-{{ rx_id }}" class="rx-empty" data-rx-url="{{ rx_url }}"><button type="button" class="rx-add {{ rx_float|default('rx-at-corner') }}" aria-label="Reaccionar"></button></div>
+{% endif %}

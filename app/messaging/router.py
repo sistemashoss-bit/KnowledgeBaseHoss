@@ -8,23 +8,24 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from jose import JWTError
 from livekit.api import AccessToken, VideoGrants
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
-from app import audit, notification_bus, storage, valkey_client as vk
+from app import audit, notification_bus, reactions, storage, valkey_client as vk
 from app.messaging import realtime
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
     Branch, Conversation, ConversationParticipant, Department,
-    Message, MessageAttachment, User, Zone,
+    Message, MessageAttachment, MessageReaction, User, Zone,
     ROLE_SUPERADMIN, ROLE_ADMIN, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
 
 _ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
+_FEED_PAGE = 50  # mensajes por carga del feed; los anteriores con "Ver anteriores"
 
 
 def _format_last_seen(iso_str: str | None) -> str | None:
@@ -105,26 +106,41 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 dm_other_ids.append(other.id)
     lastseen_map = vk.get_last_seen_many(dm_other_ids) if dm_other_ids else {}
 
+    # Último mensaje y no leídos de TODAS las conversaciones en dos consultas
+    # (antes eran dos por conversación); ambas van por ix_messages_conversation_created.
+    conv_ids = [c.id for c in convs]
+    last_msgs: dict = {}
+    unread_map: dict = {}
+    if conv_ids:
+        last_msgs = {
+            m.conversation_id: m
+            for m in db.query(Message)
+            .filter(Message.conversation_id.in_(conv_ids))
+            .distinct(Message.conversation_id)
+            .order_by(Message.conversation_id, Message.created_at.desc())
+        }
+        unread_map = dict(
+            db.query(Message.conversation_id, func.count(Message.id))
+            .join(ConversationParticipant, and_(
+                ConversationParticipant.conversation_id == Message.conversation_id,
+                ConversationParticipant.user_id == user.id,
+            ))
+            .filter(
+                Message.conversation_id.in_(conv_ids),
+                Message.sender_id != user.id,
+                or_(
+                    ConversationParticipant.last_read_at.is_(None),
+                    Message.created_at > ConversationParticipant.last_read_at,
+                ),
+            )
+            .group_by(Message.conversation_id)
+            .all()
+        )
+
     result = []
     for conv in convs:
-        last_msg = (
-            db.query(Message)
-            .filter(Message.conversation_id == conv.id)
-            .order_by(Message.created_at.desc())
-            .first()
-        )
-        participant = next(
-            (p for p in conv.participants if str(p.user_id) == str(user.id)), None
-        )
-        unread = 0
-        if participant:
-            q = db.query(func.count(Message.id)).filter(
-                Message.conversation_id == conv.id,
-                Message.sender_id != user.id,
-            )
-            if participant.last_read_at:
-                q = q.filter(Message.created_at > participant.last_read_at)
-            unread = q.scalar() or 0
+        last_msg = last_msgs.get(conv.id)
+        unread = unread_map.get(conv.id, 0)
 
         other_avatar_key = None
         is_online = False
@@ -250,10 +266,68 @@ def _mark_read(conv_id, user_id, db: Session, *, force_publish: bool = False):
         if p.last_read_at:
             unread = unread.filter(Message.created_at > p.last_read_at)
         had_unread = unread.first() is not None
-        p.last_read_at = datetime.utcnow()
-        db.commit()
+        # Sin nada nuevo no hace falta escribir: los no leídos se cuentan desde
+        # last_read_at, y el poll del chat abierto pasaría por aquí cada vez.
         if had_unread or force_publish:
+            p.last_read_at = datetime.utcnow()
+            db.commit()
             notification_bus.publish_read(conv_id, user_id)
+
+
+def _feed_page(conv_id, db: Session, *, before_id: str | None = None) -> tuple[list[Message], bool]:
+    """Los _FEED_PAGE mensajes más recientes (o los anteriores a `before_id`),
+    en orden cronológico, y si quedan más viejos por cargar."""
+    q = (
+        db.query(Message)
+        .options(joinedload(Message.sender), joinedload(Message.attachments))
+        .filter(Message.conversation_id == conv_id)
+    )
+    if before_id:
+        pivot = _message_created_at(conv_id, before_id, db)
+        if pivot is None:
+            return [], False
+        q = q.filter(Message.created_at < pivot)
+    rows = q.order_by(Message.created_at.desc()).limit(_FEED_PAGE + 1).all()
+    has_more = len(rows) > _FEED_PAGE
+    return list(reversed(rows[:_FEED_PAGE])), has_more
+
+
+def _message_created_at(conv_id, msg_id: str, db: Session):
+    try:
+        uuid.UUID(msg_id)
+    except ValueError:
+        raise HTTPException(400)
+    return (
+        db.query(Message.created_at)
+        .filter(Message.id == msg_id, Message.conversation_id == conv_id)
+        .scalar()
+    )
+
+
+def _require_participant(conv_id: str, user: User, db: Session) -> None:
+    try:
+        uuid.UUID(conv_id)
+    except ValueError:
+        raise HTTPException(404)
+    exists = (
+        db.query(ConversationParticipant.user_id)
+        .filter(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == user.id,
+        )
+        .first()
+    )
+    if not exists:
+        raise HTTPException(403)
+
+
+def _feed_context(messages: list[Message], current_user: User, db: Session, is_group: bool) -> dict:
+    return {
+        "messages": messages,
+        "current_user": current_user,
+        "is_group": is_group,
+        "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -269,10 +343,13 @@ def messaging_index(
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
-    departments = db.query(Department).order_by(Department.name).all()
+    departments = db.query(Department).options(joinedload(Department.branch)).order_by(Department.name).all()
     zones = db.query(Zone).order_by(Zone.name).all()
     branches = db.query(Branch).order_by(Branch.name).all()
-    all_users = db.query(User).filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
+    all_users = (
+        db.query(User).options(joinedload(User.department))
+        .filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
+    )
 
     return templates.TemplateResponse(
         request,
@@ -343,21 +420,17 @@ def conversation_view(
 
     _mark_read(conv_id, current_user.id, db, force_publish=True)
 
-    messages = (
-        db.query(Message)
-        .options(joinedload(Message.sender), joinedload(Message.attachments))
-        .filter(Message.conversation_id == conv_id)
-        .order_by(Message.created_at.asc())
-        .limit(200)
-        .all()
-    )
+    messages, has_more = _feed_page(conv_id, db)
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
-    departments = db.query(Department).order_by(Department.name).all()
+    departments = db.query(Department).options(joinedload(Department.branch)).order_by(Department.name).all()
     zones = db.query(Zone).order_by(Zone.name).all()
     branches = db.query(Branch).order_by(Branch.name).all()
-    all_users = db.query(User).filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
+    all_users = (
+        db.query(User).options(joinedload(User.department))
+        .filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
+    )
 
     other_last_seen = None
     if conv.type == CONV_DIRECT:
@@ -376,7 +449,8 @@ def conversation_view(
             "active_conv": conv,
             "active_conv_name": _conv_display_name(conv, current_user),
             "other_last_seen": other_last_seen,
-            "messages": messages,
+            **_feed_context(messages, current_user, db, conv.type == CONV_GROUP),
+            "has_more": has_more,
             "contacts": contacts,
             "departments": departments,
             "zones": zones,
@@ -391,40 +465,124 @@ def conversation_view(
 def poll_messages(
     conv_id: str,
     request: Request,
+    after: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """HTMX polling endpoint — returns message feed partial."""
+    """HTMX polling endpoint — solo los mensajes posteriores a `after` (el último
+    que ya tiene el cliente), que se agregan al final del feed. Sin `after` (chat
+    que estaba vacío) devuelve la última página."""
     if not current_user:
         raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
 
-    is_participant = (
-        db.query(ConversationParticipant)
-        .filter(
-            ConversationParticipant.conversation_id == conv_id,
-            ConversationParticipant.user_id == current_user.id,
+    if after:
+        pivot = _message_created_at(conv_id, after, db)
+        if pivot is None:
+            # El último que tenía el cliente ya no existe (purga): que recargue entero.
+            return HTMLResponse("", headers={"HX-Refresh": "true"})
+        messages = (
+            db.query(Message)
+            .options(joinedload(Message.sender), joinedload(Message.attachments))
+            .filter(Message.conversation_id == conv_id, Message.created_at > pivot)
+            .order_by(Message.created_at.asc())
+            .limit(200)
+            .all()
         )
-        .first()
-    )
-    if not is_participant:
-        raise HTTPException(403)
-
-    messages = (
-        db.query(Message)
-        .options(joinedload(Message.sender), joinedload(Message.attachments))
-        .filter(Message.conversation_id == conv_id)
-        .order_by(Message.created_at.asc())
-        .limit(200)
-        .all()
-    )
+    else:
+        messages, _ = _feed_page(conv_id, db)
+    if not messages:
+        return HTMLResponse("")
     _mark_read(conv_id, current_user.id, db)
 
     conv_type = db.query(Conversation.type).filter(Conversation.id == conv_id).scalar()
     return templates.TemplateResponse(
         request,
-        "messaging/_feed.html",
-        {"messages": messages, "current_user": current_user, "is_group": conv_type == CONV_GROUP},
+        "messaging/_messages.html",
+        _feed_context(messages, current_user, db, conv_type == CONV_GROUP),
     )
+
+
+@router.get("/{conv_id}/older", response_class=HTMLResponse)
+def older_messages(
+    conv_id: str,
+    request: Request,
+    before: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """"Ver anteriores": la página previa a `before`, que reemplaza al botón."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+
+    messages, has_more = _feed_page(conv_id, db, before_id=before)
+    conv_type = db.query(Conversation.type).filter(Conversation.id == conv_id).scalar()
+    return templates.TemplateResponse(
+        request,
+        "messaging/_older.html",
+        {**_feed_context(messages, current_user, db, conv_type == CONV_GROUP), "has_more": has_more},
+    )
+
+
+def _message_in_conv(conv_id: str, msg_id: str, db: Session) -> Message:
+    try:
+        uuid.UUID(msg_id)
+    except ValueError:
+        raise HTTPException(404)
+    msg = db.query(Message).filter(Message.id == msg_id, Message.conversation_id == conv_id).first()
+    if not msg:
+        raise HTTPException(404)
+    return msg
+
+
+def _render_message_reactions(request: Request, msg: Message, current_user: User, db: Session):
+    summary = reactions.summarize(db, MessageReaction, [msg.id], current_user.id)
+    return templates.TemplateResponse(
+        request,
+        "_reactions.html",
+        {
+            "rx_id": msg.id,
+            "rx_list": summary.get(msg.id, []),
+            "rx_url": f"/messaging/{msg.conversation_id}/messages/{msg.id}/reactions",
+            "rx_class": "justify-end" if msg.sender_id == current_user.id else "",
+        },
+    )
+
+
+@router.get("/{conv_id}/messages/{msg_id}/reactions", response_class=HTMLResponse)
+def message_reactions(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Bloque de reacciones de un mensaje (lo pide el cliente al recibir `event: reaction`)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    return _render_message_reactions(request, _message_in_conv(conv_id, msg_id, db), current_user, db)
+
+
+@router.post("/{conv_id}/messages/{msg_id}/reactions", response_class=HTMLResponse)
+def toggle_message_reaction(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    emoji: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    msg = _message_in_conv(conv_id, msg_id, db)
+    reactions.toggle(db, MessageReaction, msg.id, current_user.id, emoji)
+    # Solo el bloque de ese mensaje en los demás clientes: sin refrescar el feed
+    # ni tocar contadores de no leídos.
+    realtime.notify_reaction(realtime.channel(conv_id), msg.id)
+    return _render_message_reactions(request, msg, current_user, db)
 
 
 @router.get("/{conv_id}/events")
@@ -739,7 +897,9 @@ def download_attachment(
         raise HTTPException(404)
 
     url = storage.get_chat_file_url(att.file_key, att.filename, inline=inline)
-    return RedirectResponse(url, status_code=302)
+    # Cada firma es una URL distinta: sin caché, el navegador volvería a bajar
+    # cada imagen del chat en cada render. Menos que la expiración de la firma (900 s).
+    return RedirectResponse(url, status_code=302, headers={"Cache-Control": "private, max-age=600"})
 
 
 @router.post("/direct/{target_user_id}")

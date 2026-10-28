@@ -1,0 +1,41 @@
+/* Reacciones (templates/_reactions.html, chat y comentarios). Clases propias en
+   vez de utilidades Tailwind: el bloque se repite en cada mensaje del feed, y así
+   uno vacío pesa unos bytes en lugar de ~1 KB de clases y SVG. */
+.rx { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.rx-empty { position: relative; height: 0; }
+
+.rx-chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .125rem .375rem; border: 1px solid #e5e7eb; border-radius: 9999px;
+  background: #fff; color: #4b5563; font-size: .75rem; line-height: 1;
+  transition: background-color .15s;
+}
+button.rx-chip:hover { background: #f9fafb; }
+.rx-chip.rx-mine { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+
+.rx-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: 9999px; color: #9ca3af;
+  transition: opacity .15s, color .15s, background-color .15s;
+}
+.rx-add:hover { color: #4b5563; background: #f3f4f6; }
+.rx-add::before {
+  content: ""; width: 1rem; height: 1rem; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* Sin reacciones el "+" flota (no agrega alto a cada mensaje) y aparece al pasar
+   el cursor por el mensaje/comentario (ancestro .group). */
+.rx-empty .rx-add {
+  position: absolute; z-index: 10; background: #fff;
+  border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0, 0, 0, .05); opacity: 0;
+}
+.group:hover .rx-empty .rx-add, .rx-empty .rx-add:focus-visible { opacity: 1; }
+@media (pointer: coarse) { .rx-empty .rx-add { opacity: .7; } }
+
+/* Posición del "+" flotante (rx_float): junto a la burbuja del chat o en la
+   esquina del comentario. */
+.rx-at-left { top: -1.75rem; left: -1.75rem; }
+.rx-at-right { top: -1.75rem; right: -1.75rem; }
+.rx-at-corner { top: -.25rem; right: 0; }

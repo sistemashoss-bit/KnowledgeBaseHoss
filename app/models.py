@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Integer, String, Text, Table, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, String, Text, Table, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -71,6 +71,10 @@ RECURRENCE_FREQUENCIES = [FREQ_DAILY, FREQ_WEEKLY, FREQ_MONTHLY, FREQ_CUSTOM]
 CONV_DIRECT = "direct"
 CONV_GROUP = "group"
 CONV_TYPES = [CONV_DIRECT, CONV_GROUP]
+
+# ── Reactions (mensajes y comentarios) ────────────────────────────────────────
+# Lista fija: valida el input y evita cargar un selector completo de emojis.
+REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "✅"]
 
 
 class Base(DeclarativeBase):
@@ -585,6 +589,15 @@ class TaskComment(Base):
     user = relationship("User", back_populates="task_comments")
 
 
+class TaskCommentReaction(Base):
+    __tablename__ = "task_comment_reactions"
+
+    comment_id = Column(UUID(as_uuid=True), ForeignKey("task_comments.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    emoji = Column(String(16), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class TaskShare(Base):
     """Persona con quien se compartió una tarea para darle seguimiento: la ve,
     recibe sus avisos y comenta, pero no la edita, no cambia su estado ni sube
@@ -757,6 +770,17 @@ class CalendarEventComment(Base):
     user = relationship("User", foreign_keys=[user_id])
 
 
+class CalendarCommentReaction(Base):
+    __tablename__ = "calendar_comment_reactions"
+
+    comment_id = Column(
+        UUID(as_uuid=True), ForeignKey("calendar_event_comments.id", ondelete="CASCADE"), primary_key=True,
+    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    emoji = Column(String(16), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class CalendarSubscription(Base):
     """Calendario ajeno que `viewer_id` agregó a su vista: una persona o un
     departamento completo (exactamente uno). El permiso se revalida en cada
@@ -821,7 +845,7 @@ class ConversationParticipant(Base):
     __tablename__ = "conversation_participants"
 
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
     last_read_at = Column(DateTime, nullable=True)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
@@ -831,9 +855,12 @@ class ConversationParticipant(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -844,6 +871,15 @@ class Message(Base):
         "MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at",
         passive_deletes=True,
     )
+
+
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    emoji = Column(String(16), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class MessageAttachment(Base):

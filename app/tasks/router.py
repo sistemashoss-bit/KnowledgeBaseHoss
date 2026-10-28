@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
-from app import audit, rag, storage
+from app import audit, rag, reactions, storage
 from app.documents.router import _preview_meta
 from app.messaging import realtime
 from app.permissions import (
@@ -20,7 +20,8 @@ from app.permissions import (
     branch_user_ids as _branch_user_ids, manager_scope as _manager_scope, scope_user_condition,
 )
 from app.models import (
-    Branch, Department, Document, Project, RecurringTask, RecurringTaskShare, Task, TaskComment, TaskEvidence, TaskFollowUp,
+    Branch, Department, Document, Project, RecurringTask, RecurringTaskShare, Task, TaskComment, TaskCommentReaction,
+    TaskEvidence, TaskFollowUp,
     TaskShare, TaskStatusHistory, TaskTag, TaskTagAssignment, User,
     CALENDAR_REMINDER_OPTIONS,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
@@ -631,6 +632,10 @@ def task_detail(
             "can_approve": _can_approve_task(current_user, task),
             "can_participate": can_participate,
             "can_comment": _can_comment(current_user, task_id, db),
+            # Consulta agrupada aparte: otro joinedload multiplicaría las filas de la de arriba.
+            "comment_reactions": reactions.summarize(
+                db, TaskCommentReaction, [c.id for c in task.comments], current_user.id,
+            ),
             "can_share": can_share,
             "share_candidates": _share_candidates(current_user, db) if can_share else [],
             "can_follow_up": _can_manage_follow_ups(current_user, task, db),
@@ -1238,6 +1243,7 @@ def edit_comment(
             "comment": comment,
             "current_user": current_user,
             "csrf_token": generate_csrf_token(str(current_user.id)),
+            "comment_reactions": reactions.summarize(db, TaskCommentReaction, [comment.id], current_user.id),
         },
     )
 
@@ -1269,6 +1275,71 @@ def delete_comment(
     realtime.notify_task(task_id)
     # Cuerpo vacío + hx-swap="outerHTML" → HTMX elimina el comentario del DOM.
     return HTMLResponse("")
+
+
+def _task_comment(task_id: str, comment_id: str, db: Session) -> TaskComment:
+    try:
+        uuid.UUID(comment_id)
+    except ValueError:
+        raise HTTPException(404)
+    comment = db.query(TaskComment).filter(TaskComment.id == comment_id, TaskComment.task_id == task_id).first()
+    if not comment:
+        raise HTTPException(404)
+    return comment
+
+
+def _render_comment_reactions(request: Request, comment: TaskComment, current_user: User, db: Session):
+    summary = reactions.summarize(db, TaskCommentReaction, [comment.id], current_user.id)
+    return templates.TemplateResponse(
+        request,
+        "_reactions.html",
+        {
+            "rx_id": comment.id,
+            "rx_list": summary.get(comment.id, []),
+            "rx_url": f"/tasks/{comment.task_id}/comments/{comment.id}/reactions",
+            "rx_class": "mt-1.5",
+            "rx_readonly": not _can_comment(current_user, comment.task_id, db),
+        },
+    )
+
+
+@router.get("/{task_id}/comments/{comment_id}/reactions", response_class=HTMLResponse)
+def comment_reactions(
+    task_id: str,
+    comment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Bloque de reacciones de un comentario (lo pide el detalle al recibir `event: reaction`)."""
+    if not current_user:
+        raise HTTPException(401)
+    comment = _task_comment(task_id, comment_id, db)
+    if not _can_view_task(current_user, comment.task_id, db):
+        raise HTTPException(403)
+    return _render_comment_reactions(request, comment, current_user, db)
+
+
+@router.post("/{task_id}/comments/{comment_id}/reactions", response_class=HTMLResponse)
+def toggle_comment_reaction(
+    task_id: str,
+    comment_id: str,
+    request: Request,
+    emoji: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    comment = _task_comment(task_id, comment_id, db)
+    # Reacciona quien puede comentar (el auditor fuera de su alcance solo lee).
+    if not _can_comment(current_user, comment.task_id, db):
+        raise HTTPException(403)
+    reactions.toggle(db, TaskCommentReaction, comment.id, current_user.id, emoji)
+    # Evento propio en el canal de la tarea: el detalle refresca solo este bloque
+    # en vez del location.reload() que provoca notify_task.
+    realtime.notify_reaction(realtime.task_channel(comment.task_id), comment.id)
+    return _render_comment_reactions(request, comment, current_user, db)
 
 
 # ── Seguimientos (bloques con hora en el calendario del responsable) ─────────

@@ -10,7 +10,8 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 - **Q&A con IA** — RAG sobre los documentos vía OpenRouter; respuestas cacheadas en Valkey
 
 ### Colaboración organizacional
-- **Mensajería** — chat en tiempo real (SSE) con adjuntos; incluye aviso global tipo "Unirse" (timbre de llamada) por usuario. Purga automática de mensajes antiguos por retención
+- **Mensajería** — chat en tiempo real (SSE) con adjuntos; incluye aviso global tipo "Unirse" (timbre de llamada) por usuario. El feed carga los últimos 50 mensajes ("Ver anteriores" para el resto) y solo pide los nuevos. Purga automática de mensajes antiguos por retención
+- **Reacciones** — emojis (lista fija) en mensajes del chat y en comentarios de tareas y del calendario; se actualizan en vivo sin recargar el feed ni la tarea
 - **Tareas** — asignación y seguimiento, con **evidencias** (archivos) y **tareas recurrentes** que se materializan automáticamente por un scheduler diario
 - **Proyectos** — agrupación de trabajo
 - **Reportes** — dashboard de métricas

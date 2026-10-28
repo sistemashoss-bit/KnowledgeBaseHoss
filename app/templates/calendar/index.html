@@ -188,7 +188,8 @@
               <ul class="space-y-2 max-h-56 overflow-y-auto mb-2" x-show="comments.length">
                 <template x-for="c in comments" :key="c.id">
                   <li class="flex items-start gap-2">
-                    <span class="w-6 h-6 shrink-0 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold flex items-center justify-center" x-text="c.initials"></span>
+                    <img x-show="c.avatar_url" :src="c.avatar_url" alt="" loading="lazy" class="w-6 h-6 shrink-0 rounded-full object-cover">
+                    <span x-show="!c.avatar_url" class="w-6 h-6 shrink-0 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold flex items-center justify-center" x-text="c.initials"></span>
                     <div class="flex-1 min-w-0">
                       <p class="text-xs text-gray-500">
                         <span class="font-medium text-gray-700" x-text="c.author"></span>
@@ -198,6 +199,22 @@
                       <template x-if="editingId !== c.id">
                         <p class="text-sm text-gray-800 whitespace-pre-line break-words" x-text="c.content"></p>
                       </template>
+                      <div class="flex flex-wrap items-center gap-1 mt-1" x-show="editingId !== c.id">
+                        <template x-for="r in c.reactions" :key="r.emoji">
+                          <button type="button" @click="toggleReaction(c, r.emoji)" :title="r.names"
+                                  class="rx-chip" :class="{ 'rx-mine': r.mine }">
+                            <span x-text="r.emoji"></span><span x-text="r.count"></span>
+                          </button>
+                        </template>
+                        <button type="button" @click="reactingId = reactingId === c.id ? null : c.id"
+                                title="Reaccionar" aria-label="Reaccionar" class="rx-add"></button>
+                        <span x-show="reactingId === c.id" x-cloak class="inline-flex gap-0.5 px-1 bg-white border border-gray-200 rounded-full shadow-sm">
+                          <template x-for="emoji in reactionEmojis" :key="emoji">
+                            <button type="button" @click="toggleReaction(c, emoji)" x-text="emoji"
+                                    class="w-7 h-7 rounded-full text-base leading-none hover:bg-gray-100"></button>
+                          </template>
+                        </span>
+                      </div>
                       <template x-if="editingId === c.id">
                         <div class="mt-1">
                           <textarea x-model="editText" rows="2" maxlength="5000" x-init="$nextTick(() => $el.focus())"
@@ -518,6 +535,7 @@
       saving: false,
       comments: [], commentsLoading: false, commentText: '', commentSaving: false, commentError: '',
       editingId: null, editText: '',
+      reactionEmojis: window.REACTION_EMOJIS || [], reactingId: null,
       attachments: [], attachmentsLoading: false, attachmentUploading: false, attachmentError: '',
 
       init() {
@@ -1047,6 +1065,16 @@
           this.commentError = e.message;
         } finally {
           this.commentSaving = false;
+        }
+      },
+
+      async toggleReaction(c, emoji) {
+        this.reactingId = null;
+        try {
+          const r = await this.post(`/calendar/events/${this.detail.eventId}/comments/${c.id}/reactions`, { emoji });
+          c.reactions = r.reactions;
+        } catch (e) {
+          this.commentError = e.message;
         }
       },
 

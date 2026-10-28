@@ -1,0 +1,10 @@
+{% if has_more|default(false) and messages %}
+<div class="flex justify-center mb-3">
+  <button type="button"
+          hx-get="/messaging/{{ messages[0].conversation_id }}/older?before={{ messages[0].id }}"
+          hx-target="closest div" hx-swap="outerHTML"
+          class="px-3 py-1 text-xs text-gray-500 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors">
+    Ver mensajes anteriores
+  </button>
+</div>
+{% endif %}

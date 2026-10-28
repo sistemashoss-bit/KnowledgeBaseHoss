@@ -83,7 +83,7 @@ class ReportsCORSMiddleware:
         self.cors = CORSMiddleware(
             app,
             allow_origins=settings.report_widget_origin_list,
-            allow_methods=["POST"],
+            allow_methods=["GET", "POST"],
             allow_headers=["Authorization"],
             allow_credentials=False,
             max_age=600,

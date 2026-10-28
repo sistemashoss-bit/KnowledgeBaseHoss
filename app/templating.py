@@ -73,3 +73,7 @@ from app.auth.utils import generate_csrf_token as _generate_csrf_token  # noqa: 
 
 templates.env.filters["action_label"] = _action_label
 templates.env.globals["csrf_for"] = lambda user_id: _generate_csrf_token(str(user_id)) if user_id else ""
+
+from app.models import REACTION_EMOJIS as _REACTION_EMOJIS  # noqa: E402
+
+templates.env.globals["reaction_emojis"] = _REACTION_EMOJIS

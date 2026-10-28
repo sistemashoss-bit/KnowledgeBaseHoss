@@ -1,0 +1,93 @@
+{#- Mensajes del feed (sin estado vacío): lo usan _feed.html, el poll
+    incremental (se agrega al final) y "Ver anteriores" (_older.html). -#}
+{% set show_avatars = is_group if is_group is defined else (active_conv is defined and active_conv and active_conv.type == 'group') %}
+
+{% for msg in messages %}
+{% set is_mine = msg.sender_id == current_user.id %}
+<div data-msg-id="{{ msg.id }}" {% if is_mine %}data-mine{% endif %} class="group flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
+
+  {# ── Avatar (others, group only) ─────────────────────────────────────── #}
+  {% if show_avatars and not is_mine %}
+  <div class="shrink-0 self-end mb-5">
+    {% if msg.sender and msg.sender.avatar_key %}
+    <img src="{{ avatar_url(msg.sender.avatar_key) }}"
+         alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-white" />
+    {% else %}
+    <div class="w-7 h-7 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 text-xs font-bold ring-1 ring-white select-none">
+      {{ (msg.sender.name or msg.sender.email)[0].upper() if msg.sender else "?" }}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── Bubble ──────────────────────────────────────────────────────────── #}
+  <div class="min-w-0 max-w-[85%] sm:max-w-xs lg:max-w-md xl:max-w-lg">
+
+    {# Sender name — only in groups for others #}
+    {% if show_avatars and not is_mine and msg.sender %}
+    <p class="text-xs text-gray-400 mb-1 ml-1">
+      {{ msg.sender.name or msg.sender.email }}
+    </p>
+    {% endif %}
+
+    {# Text bubble #}
+    {% if msg.content %}
+    <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
+      {% if is_mine %}
+        ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white
+      {% else %}
+        bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
+      {% endif %}
+      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify }}</div>
+    {% endif %}
+
+    {# Attachments #}
+    {% if msg.attachments %}
+    <div class="flex flex-col gap-1 {% if msg.content %}mt-1{% endif %}">
+      {% for att in msg.attachments %}
+      {% set file_url = "/messaging/" ~ msg.conversation_id ~ "/attachments/" ~ att.id ~ "/download" %}
+      {% if att.content_type.startswith('image/') %}
+      {# Imagen: miniatura visible; clic abre el lightbox #}
+      <img src="{{ file_url }}?inline=1" alt="{{ att.filename }}" loading="lazy"
+           data-lightbox
+           class="rounded-xl max-w-full max-h-64 object-cover border cursor-zoom-in {% if is_mine %}border-blue-300{% else %}border-gray-200 shadow-sm{% endif %}" />
+      {% else %}
+      <a href="{{ file_url }}"
+         class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
+           {% if is_mine %}bg-blue-400 text-white hover:bg-blue-300{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm{% endif %}
+           transition-colors">
+        {% if 'pdf' in att.content_type %}
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+        </svg>
+        {% else %}
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+        </svg>
+        {% endif %}
+        <span class="truncate max-w-[180px]">{{ att.filename }}</span>
+        <span class="shrink-0 opacity-70">{{ (att.file_size / 1024) | round(1) }} KB</span>
+      </a>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Reacciones (bloque propio: se refresca solo, sin re-renderizar el feed) #}
+    {% with rx_id=msg.id, rx_list=reactions.get(msg.id, []) if reactions is defined else [],
+            rx_url="/messaging/" ~ msg.conversation_id ~ "/messages/" ~ msg.id ~ "/reactions",
+            rx_class=("mt-1 justify-end" if is_mine else "mt-1"),
+            rx_float=("rx-at-left" if is_mine else "rx-at-right") %}
+    {% include "_reactions.html" %}
+    {% endwith %}
+
+    {# Timestamp #}
+    <p class="text-xs text-gray-400 mt-1 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">
+      <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
+    </p>
+  </div>
+
+</div>
+{% endfor %}
