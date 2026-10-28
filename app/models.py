@@ -89,7 +89,7 @@ class Zone(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Identidad global de la región en hoss-api (mismo nombre que allá). hoss es
     # el dueño; se llena/actualiza al sincronizar. Null si la zona es solo local.
-    global_region_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
+    global_region_id = Column(UUID(as_uuid=True), unique=True, nullable=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -110,7 +110,7 @@ class Branch(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Identidad global de la sucursal en hoss-api (mismo nombre que allá). hoss es
     # el dueño; se llena/actualiza al sincronizar. Null si la sucursal es solo local.
-    global_branch_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
+    global_branch_id = Column(UUID(as_uuid=True), unique=True, nullable=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="CASCADE"), nullable=True)
@@ -164,7 +164,7 @@ class Department(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Identidad global del departamento en hoss-api (mismo nombre que allá). hoss es
     # el dueño; se llena al sincronizar. Null si el departamento es solo local.
-    global_department_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
+    global_department_id = Column(UUID(as_uuid=True), unique=True, nullable=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
@@ -194,8 +194,8 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Identidad global del staff en hoss-api (SSO). Null hasta el primer login.
-    corporate_id = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True)
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    corporate_id = Column(UUID(as_uuid=True), unique=True, nullable=True)
+    email = Column(String(255), unique=True, nullable=False)
     name = Column(String(150), nullable=True)
     # Credenciales y MFA viven en hoss-api (full SSO): knowledge no las almacena.
     role = Column(String(20), nullable=False, default=ROLE_EMPLOYEE)
@@ -413,10 +413,10 @@ class Task(Base):
     source_app = Column(String(50), nullable=True)
     context = Column(JSONB, nullable=True)
 
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     # Documento a revisar/corregir (subido o link de Drive); opcional. SET NULL si
     # el documento se elimina para no borrar la tarea.
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
@@ -576,6 +576,9 @@ class RecurringTaskShare(Base):
 
 class TaskComment(Base):
     __tablename__ = "task_comments"
+    __table_args__ = (
+        Index("ix_task_comments_task_created", "task_id", "created_at"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)

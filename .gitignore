@@ -15,3 +15,7 @@ wheels/
 *.tfstate
 *.tfstate.*
 
+
+# CSS generado por Tailwind CLI (se construye en el Dockerfile; en local, ver README)
+app/assets/tailwind.css
+node_modules/

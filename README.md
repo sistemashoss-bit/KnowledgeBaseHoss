@@ -36,7 +36,7 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 | Cache / rate limit / realtime | Valkey (Redis-compatible) |
 | IA (Q&A) | OpenRouter (`qwen/qwen3.7-flash` por defecto) |
 | Identidad (opcional) | SSO con hoss-api |
-| Frontend | HTMX + Alpine.js + Tailwind CDN |
+| Frontend | HTMX + Alpine.js + Tailwind (CLI) |
 
 ## Servicios externos requeridos
 
@@ -147,7 +147,7 @@ Al arrancar (`lifespan` en `main.py`), la app lanza:
 
 ## Desarrollo local
 
-Requiere [uv](https://docs.astral.sh/uv/).
+Requiere [uv](https://docs.astral.sh/uv/) y Node (para generar los estilos).
 
 ```bash
 # Instalar dependencias
@@ -159,11 +159,23 @@ cp .env.example .env
 # Aplicar migraciones
 uv run alembic upgrade head
 
-# Iniciar servidor con recarga automática
+# Estilos: genera app/assets/tailwind.css y lo regenera al editar plantillas
+npx tailwindcss@3.4.17 -c tailwind/tailwind.config.js -i tailwind/input.css -o app/assets/tailwind.css --watch
+
+# Iniciar servidor con recarga automática (en otra terminal)
 uv run uvicorn main:app --reload
 ```
 
 La app queda disponible en `http://localhost:8000`.
+
+### Estilos (Tailwind)
+
+`app/assets/tailwind.css` es generado (no está en git): la imagen de Docker lo
+construye en su primera etapa y en local lo genera el comando `--watch` de
+arriba. Tailwind solo incluye las clases que encuentra escritas completas en
+`app/templates`, `app/assets/*.js` y los `.py`; una clase armada con variables
+(`bg-{{ color }}-100`) no se detecta y hay que agregarla al `safelist` de
+`tailwind/tailwind.config.js`.
 
 ## Primer inicio de sesión
 

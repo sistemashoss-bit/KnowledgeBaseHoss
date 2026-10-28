@@ -477,9 +477,19 @@
 
           // Pegado al fondo mientras la persona no haya subido a leer: así ni
           // un mensaje ajeno ni una imagen que termina de cargar la arrastran.
+          // Los scrolls que hace toBottom no cuentan como "subió a leer": su evento
+          // llega después, y si entretanto el feed cambió de alto (p. ej. la barra
+          // de escribir aún no estaba parseada) se leería como que dejó el fondo.
           var stick = true;
-          function toBottom() { feed.scrollTop = feed.scrollHeight; }
+          var auto = false;
+          function toBottom() {
+            var target = feed.scrollHeight - feed.clientHeight;
+            if (Math.abs(feed.scrollTop - target) < 1) return;
+            auto = true;
+            feed.scrollTop = target;
+          }
           feed.addEventListener('scroll', function () {
+            if (auto) { auto = false; return; }
             stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
           }, { passive: true });
 
@@ -497,7 +507,9 @@
 
           toBottom();
           bindImages();
-          // Tailwind (CDN) aplica estilos después de este script y cambia las alturas.
+          // Este script corre antes de parsear lo que sigue (barra de escribir),
+          // y las imágenes/fuentes terminan después: ambos cambian las alturas.
+          document.addEventListener('DOMContentLoaded', function () { if (stick) toBottom(); });
           addEventListener('load', function () { if (stick) toBottom(); });
 
           // "Ver anteriores": conservar a la vista el mensaje que estaba arriba.

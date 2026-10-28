@@ -1,7 +1,11 @@
 import json
+import os
 import re
-from markupsafe import Markup, escape
+from pathlib import Path
+
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
+
 from app import storage as _storage
 
 templates = Jinja2Templates(directory="app/templates")
@@ -68,12 +72,27 @@ templates.env.globals["group_avatar_url"] = _group_avatar_url
 # de /reports/, el estado de mensajería y de tareas recurrentes que lo usan).
 templates.env.filters["tojson"] = lambda v: Markup(json.dumps(v, default=str))
 
-from app.audit import action_label as _action_label  # noqa: E402
-from app.auth.utils import generate_csrf_token as _generate_csrf_token  # noqa: E402
+from app.audit import action_label as _action_label
+from app.auth.utils import generate_csrf_token as _generate_csrf_token
 
 templates.env.filters["action_label"] = _action_label
 templates.env.globals["csrf_for"] = lambda user_id: _generate_csrf_token(str(user_id)) if user_id else ""
 
-from app.models import REACTION_EMOJIS as _REACTION_EMOJIS  # noqa: E402
+from app.models import REACTION_EMOJIS as _REACTION_EMOJIS
 
 templates.env.globals["reaction_emojis"] = _REACTION_EMOJIS
+
+
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+
+def _asset_version(name: str) -> str:
+    # Rompe la caché del navegador cuando cambia un asset generado (tailwind.css
+    # se reconstruye en cada build): un stat por render, sin leer el archivo.
+    try:
+        return str(int(os.stat(_ASSETS_DIR / name).st_mtime))
+    except OSError:
+        return "0"
+
+
+templates.env.globals["asset_version"] = _asset_version
