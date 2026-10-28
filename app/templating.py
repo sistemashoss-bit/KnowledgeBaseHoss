@@ -118,3 +118,12 @@ def _asset_version(name: str) -> str:
 
 
 templates.env.globals["asset_version"] = _asset_version
+
+
+def _asset(name: str) -> str:
+    """URL de un archivo de app/assets con ?v=<mtime>. /assets lo sirve con caché
+    de un año cuando trae `v` (app.static_assets): cambiar el archivo cambia la URL."""
+    return f"/assets/{name}?v={_asset_version(name)}"
+
+
+templates.env.globals["asset"] = _asset

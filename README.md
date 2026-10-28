@@ -177,6 +177,18 @@ arriba. Tailwind solo incluye las clases que encuentra escritas completas en
 (`bg-{{ color }}-100`) no se detecta y hay que agregarla al `safelist` de
 `tailwind/tailwind.config.js`.
 
+### Archivos estáticos (`app/assets`)
+
+En las plantillas se referencian con `{{ asset('archivo.ext') }}`, que agrega
+`?v=<fecha de modificación>`: con eso `/assets` responde con caché de un año
+(`immutable`) y el navegador no vuelve a pedirlos hasta que el archivo cambie.
+Las imágenes van al tamaño en que se muestran (2× para pantallas retina) y en
+WebP; un PNG de 1000 px para un icono de 40 px se descarga entero.
+
+Las URLs firmadas de Wasabi para avatares y archivos del chat se reutilizan
+50 min (`storage._stable_url`), para que el navegador las tenga en caché en vez
+de bajar la misma imagen con una firma nueva en cada página.
+
 ## Primer inicio de sesión
 
 El primer usuario registrado (`/auth/register`) obtiene automáticamente el rol **superadmin**. El enlace de registro desaparece en cuanto existe al menos un usuario.

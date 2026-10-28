@@ -299,7 +299,7 @@
           {% for f in folders %}
           <a href="/documents/folders/{{ f.id }}" draggable="false" data-folder-id="{{ f.id }}" data-folder-name="{{ f.name }}"
              class="kb-folder-drop flex items-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-gray-300 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
-            <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+            <img src="{{ asset('carpetas.webp') }}" alt=""
                  class="w-6 h-6 object-contain shrink-0" draggable="false" />
             {{ "—" * (f.depth - 1) }} {{ f.name }}
           </a>
@@ -321,7 +321,7 @@
         {% for dept in departments %}
         <a href="?view=folders&department_id={{ dept.id }}{% if query %}&q={{ query }}{% endif %}"
            class="flex items-center gap-3 bg-white rounded-xl border border-gray-200 px-4 py-4 hover:border-blue-300 hover:shadow-sm transition-all">
-          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+          <img src="{{ asset('carpetas.webp') }}" alt=""
                class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-sm font-medium text-gray-800">{{ dept.name }}</span>
         </a>

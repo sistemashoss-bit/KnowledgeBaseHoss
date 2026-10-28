@@ -1,4 +1,7 @@
 import math
+import threading
+import time
+from functools import lru_cache
 
 import boto3
 from botocore.config import Config
@@ -27,7 +30,10 @@ def check_upload_sizes(*files: UploadFile | None) -> None:
             )
 
 
+@lru_cache(maxsize=1)
 def _client():
+    # Uno por proceso (los clientes de boto3 son thread-safe): crearlo cuesta
+    # ~3 ms, y una página firma decenas de avatares.
     return boto3.client(
         "s3",
         endpoint_url=settings.wasabi_endpoint_url,
@@ -68,13 +74,33 @@ def delete_file(file_key: str) -> None:
 # solo recibe la llave en el payload de identidad y firma la URL de lectura localmente
 # (comparte el mismo Wasabi/bucket). Por eso aquí solo queda el presign de lectura.
 
-def get_avatar_signed_url(key: str, expiry: int = 3600) -> str:
-    """Presigned URL valid for 1 hour — computed locally, no network call."""
-    return _client().generate_presigned_url(
-        "get_object",
-        Params={"Bucket": settings.wasabi_avatar_bucket_name, "Key": key},
-        ExpiresIn=expiry,
-    )
+# Caché de URLs firmadas que se muestran una y otra vez (avatares, imágenes del
+# chat). Cada firma es una URL distinta (lleva fecha y firma), así que firmar en
+# cada render obliga al navegador a bajar la misma imagen en cada página. Se firma
+# por 1 h y se reutiliza 50 min: la URL que se entrega siempre vale ≥ 10 min más.
+_STABLE_TTL = 3600
+_STABLE_REUSE = 3000
+_stable_urls: dict[tuple, tuple[str, float]] = {}
+_stable_lock = threading.Lock()
+
+
+def _stable_url(params: dict) -> str:
+    cache_key = tuple(sorted(params.items()))
+    now = time.monotonic()
+    hit = _stable_urls.get(cache_key)
+    if hit and now - hit[1] < _STABLE_REUSE:
+        return hit[0]
+    url = _client().generate_presigned_url("get_object", Params=params, ExpiresIn=_STABLE_TTL)
+    with _stable_lock:
+        if len(_stable_urls) > 5000:  # tope de memoria: se vacía y se vuelve a llenar
+            _stable_urls.clear()
+        _stable_urls[cache_key] = (url, now)
+    return url
+
+
+def get_avatar_signed_url(key: str) -> str:
+    """URL firmada (local, sin red) y estable por 50 min; ver _stable_url."""
+    return _stable_url({"Bucket": settings.wasabi_avatar_bucket_name, "Key": key})
 
 
 # ── Evidence bucket ───────────────────────────────────────────────────────────
@@ -116,17 +142,14 @@ def upload_chat_file(key: str, content: bytes, content_type: str) -> None:
     )
 
 
-def get_chat_file_url(key: str, filename: str, expiry: int = 900, inline: bool = False) -> str:
+def get_chat_file_url(key: str, filename: str, inline: bool = False) -> str:
+    """Adjuntos e imágenes del chat (y fotos de grupo): URL estable, ver _stable_url."""
     disposition = "inline" if inline else "attachment"
-    return _client().generate_presigned_url(
-        "get_object",
-        Params={
-            "Bucket": settings.wasabi_chats_bucket_name,
-            "Key": key,
-            "ResponseContentDisposition": f'{disposition}; filename="{filename}"',
-        },
-        ExpiresIn=expiry,
-    )
+    return _stable_url({
+        "Bucket": settings.wasabi_chats_bucket_name,
+        "Key": key,
+        "ResponseContentDisposition": f'{disposition}; filename="{filename}"',
+    })
 
 
 def delete_chat_file(key: str) -> None:

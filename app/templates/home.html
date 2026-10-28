@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="es" class="h-full">
 <head>
-  <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
+  <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>HOSS Conocimiento</title>
-  <link rel="stylesheet" href="{{ url_for('assets', path='tailwind.css').path }}?v={{ asset_version('tailwind.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=1" />
+  <link rel="stylesheet" href="{{ asset('tailwind.css') }}" />
+  <link rel="stylesheet" href="{{ asset('responsive.css') }}" />
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -66,7 +66,7 @@
 
   <!-- ── Hero ────────────────────────────────────────────────────────────── -->
   <section class="bg-stone-900 bg-cover bg-center bg-no-repeat text-white py-10 sm:py-16 px-4 sm:px-6"
-           style="background-image: url('{{ url_for('assets', path='hossbackground.png').path }}');">
+           style="background-image: url('{{ asset('hossbackground.webp') }}');">
     <div class="max-w-3xl mx-auto text-center">
       <span class="inline-block px-3 py-1 bg-blue-600/20 text-blue-400 text-xs font-semibold rounded-full uppercase tracking-wider mb-5">
         Documentación Institucional
@@ -341,7 +341,7 @@
 
       <div class="bg-blue-600 px-4 py-3 flex items-center gap-3 shrink-0">
         <div class="w-8 h-8 shrink-0 rounded-full bg-white/20 flex items-center justify-center">
-          <img src="{{ url_for('assets', path='mascota.png') }}"
+          <img src="{{ asset('mascota.webp') }}"
                alt="" class="w-full h-full object-contain" />
         </div>
         <div class="flex-1 min-w-0">
@@ -385,7 +385,7 @@
                    @loadedmetadata="$el.currentTime = 3"
                    @ended="$el.currentTime = 3; $el.play().catch(() => {})"
                    class="w-16 h-16 object-cover rounded-full shrink-0">
-              <source src="{{ url_for('assets', path='dancemax.mp4') }}#t=3" type="video/mp4" />
+              <source src="{{ asset('dancemax.mp4') }}#t=3" type="video/mp4" />
             </video>
           </template>
           <span>Procesando...</span>
@@ -423,7 +423,7 @@
             :aria-expanded="open"
             class="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95">
       <img x-show="!open"
-           src="{{ url_for('assets', path='mascota.png') }}"
+           src="{{ asset('mascota.webp') }}"
            alt=""
            class="w-full h-full object-contain" />
       <svg x-show="open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

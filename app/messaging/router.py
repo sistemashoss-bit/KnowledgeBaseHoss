@@ -944,8 +944,9 @@ def download_attachment(
         raise HTTPException(404)
 
     url = storage.get_chat_file_url(att.file_key, att.filename, inline=inline)
-    # Cada firma es una URL distinta: sin caché, el navegador volvería a bajar
-    # cada imagen del chat en cada render. Menos que la expiración de la firma (900 s).
+    # La URL firmada se reutiliza 50 min y siempre vale ≥ 10 min más (storage._stable_url):
+    # cachear la redirección 10 min nunca lleva a una firma vencida, y la imagen
+    # queda en la caché del navegador bajo esa misma URL.
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "private, max-age=600"})
 
 

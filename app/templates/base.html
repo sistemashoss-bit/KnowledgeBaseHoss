@@ -1,23 +1,23 @@
 <!DOCTYPE html>
 <html lang="es" class="h-full bg-gray-50">
 <head>
-  <link rel="icon" type="image/png" href="{{ url_for('assets', path='favicon.png').path }}?v=2" />
+  <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>{% block title %}HOSS Conocimiento{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('assets', path='tailwind.css').path }}?v={{ asset_version('tailwind.css') }}" />
+  <link rel="stylesheet" href="{{ asset('tailwind.css') }}" />
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <link rel="stylesheet" href="{{ url_for('assets', path='responsive.css').path }}?v=2" />
-  <script defer src="{{ url_for('assets', path='navigation.js').path }}?v=1"></script>
-  <script defer src="{{ url_for('assets', path='emoji.js').path }}?v=1"></script>
+  <link rel="stylesheet" href="{{ asset('responsive.css') }}" />
+  <script defer src="{{ asset('navigation.js') }}"></script>
+  <script defer src="{{ asset('emoji.js') }}"></script>
   <style>[x-cloak] { display: none !important; }</style>
   {% if current_user %}
   <meta name="csrf-token" content="{{ csrf_for(current_user.id) }}" />
   <script>window.REACTION_EMOJIS = {{ reaction_emojis | tojson }};</script>
-  <link rel="stylesheet" href="{{ url_for('assets', path='reactions.css').path }}?v=2" />
-  <script defer src="{{ url_for('assets', path='reactions.js').path }}?v=1"></script>
+  <link rel="stylesheet" href="{{ asset('reactions.css') }}" />
+  <script defer src="{{ asset('reactions.js') }}"></script>
   <script>
     // CSRF (validado en app/auth/deps.py require_csrf): toda petición htmx y
     // todo fetch al mismo origen que modifica lleva el header X-CSRF-Token.
@@ -279,7 +279,7 @@
       <!-- Header -->
       <div class="bg-blue-600 px-4 py-3 flex items-center gap-3 shrink-0">
         <div class="w-8 h-8 shrink-0 rounded-full bg-white/20 flex items-center justify-center">
-          <img src="{{ url_for('assets', path='mascota.png') }}"
+          <img src="{{ asset('mascota.webp') }}"
                alt="" class="w-full h-full object-contain" />
         </div>
         <div class="flex-1 min-w-0">
@@ -325,7 +325,7 @@
                    @loadedmetadata="$el.currentTime = 3"
                    @ended="$el.currentTime = 3; $el.play().catch(() => {})"
                    class="w-16 h-16 object-cover rounded-full shrink-0">
-              <source src="{{ url_for('assets', path='dancemax.mp4') }}#t=3" type="video/mp4" />
+              <source src="{{ asset('dancemax.mp4') }}#t=3" type="video/mp4" />
             </video>
           </template>
           <span>Procesando...</span>
@@ -377,7 +377,7 @@
           <span class="block text-xs text-gray-400">Busca en los documentos</span>
         </span>
         <span class="w-10 h-10 rounded-full bg-blue-600 group-hover:bg-blue-500 flex items-center justify-center overflow-hidden transition-colors">
-          <img src="{{ url_for('assets', path='mascota.png') }}" alt="" class="w-full h-full object-contain" />
+          <img src="{{ asset('mascota.webp') }}" alt="" class="w-full h-full object-contain" />
         </span>
       </button>
       <button type="button" role="menuitem" @click="openReport()"
@@ -400,7 +400,7 @@
             :aria-expanded="open || menu || report"
             class="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95">
       <img x-show="!(open || menu || report)"
-           src="{{ url_for('assets', path='mascota.png') }}"
+           src="{{ asset('mascota.webp') }}"
            alt=""
            class="w-full h-full object-contain" />
       <svg x-show="open || menu || report" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

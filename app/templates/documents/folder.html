@@ -97,7 +97,7 @@
         {% for f in shared_folders %}
         <a href="/documents/folders/{{ f.id }}"
            class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-blue-300 hover:shadow-sm transition-all">
-          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+          <img src="{{ asset('carpetas.webp') }}" alt=""
                class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-base text-gray-800">{{ f.name }}</span>
           <span class="text-xs text-gray-400 ml-auto">{{ f.owner.name or f.owner.email }}</span>
@@ -115,7 +115,7 @@
         {% for f in subfolders %}
         <a href="/documents/folders/{{ f.id }}"
            class="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-blue-300 hover:shadow-sm transition-all">
-          <img src="{{ url_for('assets', path='carpetas.png') }}" alt=""
+          <img src="{{ asset('carpetas.webp') }}" alt=""
                class="w-6 h-6 object-contain shrink-0" draggable="false" />
           <span class="text-base text-gray-800">{{ f.name }}</span>
         </a>
