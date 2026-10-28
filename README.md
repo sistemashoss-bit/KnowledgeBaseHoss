@@ -11,7 +11,7 @@ Plataforma interna que combina **base de conocimiento documental** con herramien
 
 ### Colaboración organizacional
 - **Mensajería** — chat en tiempo real (SSE) con adjuntos; incluye aviso global tipo "Unirse" (timbre de llamada) por usuario. El feed carga los últimos 50 mensajes ("Ver anteriores" para el resto) y solo pide los nuevos. En grupos, `@Nombre` menciona a un participante y `@todos` a todo el grupo (autocompletado al escribir `@`); los mencionados reciben una notificación `chat_mention` en notificationservice. Purga automática de mensajes antiguos por retención
-- **Reacciones** — emojis (lista fija) en mensajes del chat y en comentarios de tareas y del calendario; se actualizan en vivo sin recargar el feed ni la tarea
+- **Reacciones** — emojis (lista fija) en mensajes del chat y en comentarios de tareas y del calendario; una por persona (elegir otro la cambia, repetir la misma la quita); se actualizan en vivo sin recargar el feed ni la tarea
 - **Tareas** — asignación y seguimiento, con **evidencias** (archivos) y **tareas recurrentes** que se materializan automáticamente por un scheduler diario
 - **Proyectos** — agrupación de trabajo
 - **Reportes** — dashboard de métricas
@@ -181,7 +181,7 @@ arriba. Tailwind solo incluye las clases que encuentra escritas completas en
 
 El primer usuario registrado (`/auth/register`) obtiene automáticamente el rol **superadmin**. El enlace de registro desaparece en cuanto existe al menos un usuario.
 
-Desde el superadmin puedes crear departamentos, zonas, usuarios adicionales y asignar roles.
+Desde el superadmin puedes crear departamentos y zonas. Los usuarios llegan de hoss al primer inicio de sesión (SSO); en `/users/` se filtran por departamento y rol y se editan. Sin SSO, se pueden pre-registrar por la API (`POST /api/users`).
 
 ## Migraciones de base de datos
 

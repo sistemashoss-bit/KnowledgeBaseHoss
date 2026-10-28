@@ -597,7 +597,7 @@ class TaskCommentReaction(Base):
 
     comment_id = Column(UUID(as_uuid=True), ForeignKey("task_comments.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    emoji = Column(String(16), primary_key=True)
+    emoji = Column(String(16), nullable=False)  # una por persona: la PK es (objetivo, user_id)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -780,7 +780,7 @@ class CalendarCommentReaction(Base):
         UUID(as_uuid=True), ForeignKey("calendar_event_comments.id", ondelete="CASCADE"), primary_key=True,
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    emoji = Column(String(16), primary_key=True)
+    emoji = Column(String(16), nullable=False)  # una por persona: la PK es (objetivo, user_id)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -881,7 +881,7 @@ class MessageReaction(Base):
 
     message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    emoji = Column(String(16), primary_key=True)
+    emoji = Column(String(16), nullable=False)  # una por persona: la PK es (objetivo, user_id)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

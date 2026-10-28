@@ -4,6 +4,8 @@
 // - Elegir un emoji o tocar un chip (.rx-chip[data-emoji]) hace POST al
 //   data-rx-url del bloque; window.reactionsRefresh(id) lo vuelve a pedir (GET)
 //   cuando llega `event: reaction` por SSE.
+// - Una reacción por persona: elegir otro emoji reemplaza la tuya (el menú la
+//   marca) y repetir el mismo la quita; eso lo resuelve el servidor.
 // Todo pasa por load(): busca el bloque por id AL RECIBIR la respuesta (el POST
 // propio y el refresco por SSE pueden cruzarse y reemplazar el nodo) y solo
 // aplica la respuesta de la petición más reciente, para no pintar un estado viejo.
@@ -47,6 +49,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = emoji;
+      b.dataset.emoji = emoji;
       b.className = 'w-9 h-9 rounded-full text-xl leading-none hover:bg-gray-100 hover:scale-110 transition';
       b.addEventListener('click', () => pick(emoji));
       menu.appendChild(b);
@@ -67,6 +70,12 @@
   function open(btn) {
     if (!menu) build();
     opener = btn;
+    const mine = btn.parentElement.querySelector('.rx-chip.rx-mine');
+    menu.querySelectorAll('button').forEach((b) => {
+      const on = !!mine && b.dataset.emoji === mine.dataset.emoji;
+      b.classList.toggle('bg-blue-100', on);
+      b.setAttribute('aria-pressed', on);
+    });
     menu.style.display = 'flex';
     place();
   }

@@ -18,9 +18,9 @@ from app import audit, mentions, notification_bus, reactions, storage, valkey_cl
 from app.messaging import realtime
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
-    Branch, Conversation, ConversationParticipant, Department,
-    Message, MessageAttachment, MessageReaction, User, Zone,
-    ROLE_SUPERADMIN, ROLE_ADMIN, CONV_DIRECT, CONV_GROUP,
+    Conversation, ConversationParticipant, Department,
+    Message, MessageAttachment, MessageReaction, User,
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP,
 )
 from app.templating import templates
 
@@ -191,10 +191,27 @@ def _team_user_ids(user: User, db: Session) -> set:
     return ids
 
 
+def _messages_anyone(user: User) -> bool:
+    """Superadmin y auditor escriben a cualquiera y arman grupos con quien sea
+    (el auditor necesita hablar con todas las áreas que revisa)."""
+    return user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR)
+
+
+def _contact_avatars(users: list[User]) -> dict[str, str]:
+    """URL firmada del avatar de cada persona de las listas (DM, nuevo grupo,
+    agregar miembros): una firma por persona aunque salga en las tres."""
+    return {str(u.id): storage.get_avatar_signed_url(u.avatar_key) for u in users if u.avatar_key}
+
+
+def _can_create_group(user: User) -> bool:
+    return user.role in (ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR)
+
+
 def _visible_users(user: User, db: Session) -> list[User]:
-    """Users this user can start a DM with."""
-    if user.role == ROLE_SUPERADMIN:
-        return db.query(User).filter(User.is_active == True, User.id != user.id).order_by(User.email).all()
+    """Users this user can start a DM with (también los que puede sumar a un grupo)."""
+    q = db.query(User).options(joinedload(User.department))
+    if _messages_anyone(user):
+        return q.filter(User.is_active == True, User.id != user.id).order_by(User.email).all()
 
     if user.role == ROLE_ADMIN:
         # Admins (with or without a zone) can only message their own team
@@ -207,12 +224,12 @@ def _visible_users(user: User, db: Session) -> list[User]:
         ids.discard(user.id)
         if not ids:
             return []
-        return db.query(User).filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
+        return q.filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
 
     ids = _team_user_ids(user, db)
     if not ids:
         return []
-    return db.query(User).filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
+    return q.filter(User.id.in_(ids), User.is_active == True).order_by(User.email).all()
 
 
 def _get_or_create_direct(user_a_id, user_b_id, db: Session) -> Conversation:
@@ -363,13 +380,7 @@ def messaging_index(
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
-    departments = db.query(Department).options(joinedload(Department.branch)).order_by(Department.name).all()
-    zones = db.query(Zone).order_by(Zone.name).all()
-    branches = db.query(Branch).order_by(Branch.name).all()
-    all_users = (
-        db.query(User).options(joinedload(User.department))
-        .filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
-    )
+    departments = db.query(Department).order_by(Department.name).all()
 
     return templates.TemplateResponse(
         request,
@@ -381,9 +392,8 @@ def messaging_index(
             "messages": [],
             "contacts": contacts,
             "departments": departments,
-            "zones": zones,
-            "branches": branches,
-            "all_users": all_users,
+            "contact_avatars": _contact_avatars(contacts),
+            "can_create_group": _can_create_group(current_user),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
@@ -444,13 +454,7 @@ def conversation_view(
 
     conv_list = _user_conversations(current_user, db)
     contacts = _visible_users(current_user, db)
-    departments = db.query(Department).options(joinedload(Department.branch)).order_by(Department.name).all()
-    zones = db.query(Zone).order_by(Zone.name).all()
-    branches = db.query(Branch).order_by(Branch.name).all()
-    all_users = (
-        db.query(User).options(joinedload(User.department))
-        .filter(User.is_active == True, User.id != current_user.id).order_by(User.email).all()
-    )
+    departments = db.query(Department).order_by(Department.name).all()
 
     other_last_seen = None
     if conv.type == CONV_DIRECT:
@@ -481,9 +485,8 @@ def conversation_view(
             ] if conv.type == CONV_GROUP else [],
             "contacts": contacts,
             "departments": departments,
-            "zones": zones,
-            "branches": branches,
-            "all_users": all_users,
+            "contact_avatars": _contact_avatars(contacts),
+            "can_create_group": _can_create_group(current_user),
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
@@ -959,7 +962,7 @@ def start_direct(
     if not target:
         raise HTTPException(404)
 
-    if current_user.role != ROLE_SUPERADMIN:
+    if not _messages_anyone(current_user):
         allowed_ids = {u.id for u in _visible_users(current_user, db)}
         if target.id not in allowed_ids:
             raise HTTPException(403)
@@ -974,14 +977,13 @@ def create_group(
     name: str = Form(...),
     member_ids: list[str] = Form(default=[]),
     department_id: str = Form(""),
-    zone_id: str = Form(""),
     branch_id: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
-    if current_user.role not in (ROLE_SUPERADMIN, ROLE_ADMIN):
+    if not _can_create_group(current_user):
         raise HTTPException(403)
 
     conv = Conversation(
@@ -989,7 +991,6 @@ def create_group(
         type=CONV_GROUP,
         name=name.strip(),
         department_id=department_id or None,
-        zone_id=zone_id or None,
         branch_id=branch_id or None,
         created_by=current_user.id,
     )
@@ -997,7 +998,7 @@ def create_group(
     db.flush()
 
     all_ids = set(member_ids) | {str(current_user.id)}
-    if current_user.role != ROLE_SUPERADMIN:
+    if not _messages_anyone(current_user):
         allowed_ids = {str(u.id) for u in _visible_users(current_user, db)} | {str(current_user.id)}
         all_ids &= allowed_ids
     for uid in all_ids:
@@ -1096,7 +1097,7 @@ def add_member(
     if not target:
         raise HTTPException(404)
 
-    if current_user.role != ROLE_SUPERADMIN:
+    if not _messages_anyone(current_user):
         allowed_ids = {u.id for u in _visible_users(current_user, db)}
         if target.id not in allowed_ids:
             raise HTTPException(403)

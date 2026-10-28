@@ -2,6 +2,19 @@
 {% block title %}Mensajes — HOSS Conocimiento{% endblock %}
 {% block ai_widget %}{% endblock %}
 
+{# Avatar de la lista de personas (DM, nuevo grupo, agregar miembros): la URL
+   firmada viene ya calculada en contact_avatars, una por persona. #}
+{% macro contact_avatar(u, size="w-6 h-6 text-xs") -%}
+  {%- set url = contact_avatars.get(u.id|string) if contact_avatars else none -%}
+  {%- if url -%}
+  <img src="{{ url }}" alt="" loading="lazy" class="{{ size }} rounded-full object-cover shrink-0" />
+  {%- else -%}
+  <div class="{{ size }} rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+    {{ (u.name or u.email)[0].upper() }}
+  </div>
+  {%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 <div class="flex-1 min-h-0 min-w-0 flex overflow-hidden">
 
@@ -23,7 +36,7 @@
             </svg>
           </button>
           <!-- New group -->
-          {% if current_user.role in ('superadmin', 'admin') %}
+          {% if can_create_group %}
           <button onclick="document.getElementById('modal-group').classList.remove('hidden')"
                   title="Nuevo grupo"
                   class="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
@@ -310,24 +323,8 @@
 
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
-            <!-- Filtros -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-              <div>
-                <label class="block text-xs font-medium text-gray-600 mb-1">
-                  Zona
-                </label>
-
-                <select id="am-zone"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-
-                  <option value="">— Todas —</option>
-
-                  {% for z in zones %}
-                  <option value="{{ z.id }}">{{ z.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
+            <!-- Filtro -->
+            <div>
 
               <div>
                 <label class="block text-xs font-medium text-gray-600 mb-1">
@@ -340,10 +337,7 @@
                   <option value="">— Todos —</option>
 
                   {% for d in departments %}
-                  <option value="{{ d.id }}"
-                          data-zone="{{ d.branch.zone_id if d.branch else '' }}">
-                    {{ d.name }}
-                  </option>
+                  <option value="{{ d.id }}">{{ d.name }}</option>
                   {% endfor %}
                 </select>
               </div>
@@ -369,7 +363,7 @@
 
               <div class="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
 
-                {% for u in all_users %}
+                {% for u in contacts %}
                 {% if u.id|string not in participant_ids %}
 
                 <label class="am-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
@@ -380,9 +374,7 @@
                         value="{{ u.id }}"
                         class="am-cb w-4 h-4 rounded border-gray-300">
 
-                  <div class="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
-                    {{ (u.name or u.email)[0].upper() }}
-                  </div>
+                  {{ contact_avatar(u) }}
 
                   <div class="min-w-0 flex-1">
                     {% if u.name %}
@@ -764,9 +756,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button type="submit"
                 class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-50 text-left transition-colors">
-          <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shrink-0">
-            {{ (contact.name or contact.email)[0].upper() }}
-          </div>
+          {{ contact_avatar(contact, "w-8 h-8 text-sm") }}
           <div class="min-w-0">
             {% if contact.name %}
             <p class="text-sm font-medium text-gray-800">{{ contact.name }}</p>
@@ -821,31 +811,17 @@
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
       </div>
 
-      <!-- Scope filters (double as group metadata) -->
-      {% if departments or zones %}
-      <div class="grid grid-cols-1 {% if departments and zones %}sm:grid-cols-2{% endif %} gap-3">
-        {% if zones %}
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Zona</label>
-          <select id="ng-zone" name="zone_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option value="">— Todas —</option>
-            {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
-          </select>
-        </div>
-        {% endif %}
-        {% if departments %}
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
-          <select id="ng-dept" name="department_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option value="">— Todos —</option>
-            {% for d in departments %}
-            <option value="{{ d.id }}" data-zone="{{ d.branch.zone_id if d.branch else '' }}">{{ d.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        {% endif %}
+      <!-- Filtro por departamento (también queda como dato del grupo) -->
+      {% if departments %}
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+        <select id="ng-dept" name="department_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <option value="">— Todos —</option>
+          {% for d in departments %}
+          <option value="{{ d.id }}">{{ d.name }}</option>
+          {% endfor %}
+        </select>
       </div>
       {% endif %}
 
@@ -867,14 +843,12 @@
         <p id="ng-count" class="text-xs text-gray-400 mb-1.5"></p>
 
         <div class="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
-          {% for u in all_users %}
+          {% for u in contacts %}
           <label class="ng-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
                  data-dept="{{ u.department_id or '' }}">
             <input type="checkbox" name="member_ids" value="{{ u.id }}"
                    class="ng-cb w-4 h-4 rounded text-blue-500 focus:ring-blue-400 border-gray-300"/>
-            <div class="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
-              {{ (u.name or u.email)[0].upper() }}
-            </div>
+            {{ contact_avatar(u) }}
             <div class="min-w-0 flex-1">
               {% if u.name %}
               <p class="text-sm text-gray-800">{{ u.name }}</p>
@@ -1013,7 +987,6 @@ function convFilter() {
 
 <script>
 (function () {
-  var zoneSel  = document.getElementById('ng-zone');
   var deptSel  = document.getElementById('ng-dept');
   var checkAll = document.getElementById('ng-check-all');
   var countEl  = document.getElementById('ng-count');
@@ -1021,17 +994,7 @@ function convFilter() {
 
   function allowedDepts() {
     var deptVal = deptSel ? deptSel.value : '';
-    var zoneVal = zoneSel ? zoneSel.value : '';
-
-    if (deptVal) return [deptVal];
-
-    if (zoneVal && deptSel) {
-      return Array.from(deptSel.options)
-        .filter(function (o) { return o.value && o.dataset.zone === zoneVal; })
-        .map(function (o) { return o.value; });
-    }
-
-    return null; // no filter → show all
+    return deptVal ? [deptVal] : null; // sin filtro → todos
   }
 
   function applyFilter() {
@@ -1061,12 +1024,6 @@ function convFilter() {
       ? checked.length + ' seleccionado(s) de ' + visible.length + ' visible(s)'
       : visible.length + ' disponible(s)';
   }
-
-  if (zoneSel) zoneSel.addEventListener('change', function () {
-    // When zone changes, reset dept to "Todos" and refilter
-    if (deptSel) deptSel.value = '';
-    applyFilter();
-  });
 
   if (deptSel) deptSel.addEventListener('change', applyFilter);
 
@@ -1098,7 +1055,6 @@ function convFilter() {
   const modal = document.getElementById('modal-add-members');
   if (!modal) return;
 
-  const zoneSel = modal.querySelector('#am-zone');
   const deptSel = modal.querySelector('#am-dept');
   const checkAll = modal.querySelector('#am-check-all');
   const countEl = modal.querySelector('#am-count');
@@ -1106,22 +1062,10 @@ function convFilter() {
     modal.querySelectorAll('.am-member-row')
   );
 
-  // Obtener departamentos permitidos según filtros
+  // Obtener departamentos permitidos según el filtro
   function allowedDepts() {
     const deptVal = deptSel ? deptSel.value : '';
-    const zoneVal = zoneSel ? zoneSel.value : '';
-
-    if (deptVal) return [deptVal];
-
-    if (zoneVal && deptSel) {
-      return Array.from(deptSel.options)
-        .filter(option =>
-          option.value && option.dataset.zone === zoneVal
-        )
-        .map(option => option.value);
-    }
-
-    return null;
+    return deptVal ? [deptVal] : null;
   }
 
   // Mostrar u ocultar miembros según departamento
@@ -1183,14 +1127,6 @@ function convFilter() {
     countEl.textContent = checked.length
       ? `${checked.length} seleccionado(s) de ${visible.length} visible(s)`
       : `${visible.length} disponible(s)`;
-  }
-
-  // Cambio de zona
-  if (zoneSel) {
-    zoneSel.addEventListener('change', () => {
-      if (deptSel) deptSel.value = '';
-      applyFilter();
-    });
   }
 
   // Cambio de departamento

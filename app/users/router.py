@@ -4,6 +4,7 @@ Two routers in this file:
 - mgmt_router → /users      (HTML, for admin/superadmin UI)
 """
 import uuid
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -141,9 +142,13 @@ mgmt_router = APIRouter(prefix="/users", tags=["user-management"])
 @mgmt_router.get("/", response_class=HTMLResponse)
 def user_management(
     request: Request,
+    department: str = "",
+    role: str = "",
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
+    """Lista con filtro por departamento y rol (?department=<id>|none&role=…).
+    Las altas no se hacen aquí: llegan de hoss en el primer inicio de sesión."""
     opts = [
         joinedload(User.department),
         joinedload(User.branch),
@@ -151,25 +156,38 @@ def user_management(
         joinedload(User.department_access).joinedload(UserDepartmentAccess.department),
     ]
     # Admin acotado por sucursal (coordinador/supervisor de Comercial): solo la
-    # gente de sus sucursales, y solo puede dar de alta en ellas.
+    # gente de sus sucursales.
     scoped_branch_ids = managed_branch_ids(actor)
     if actor.role == ROLE_SUPERADMIN:
-        users = db.query(User).options(*opts).order_by(User.role, User.email).all()
+        q = db.query(User)
+        role_options = ROLES
     else:
-        q = (
-            db.query(User)
-            .options(*opts)
-            .filter(User.department_id == actor.department_id, User.role.in_((ROLE_EMPLOYEE, ROLE_AUDITOR)))
+        q = db.query(User).filter(
+            User.department_id == actor.department_id, User.role.in_((ROLE_EMPLOYEE, ROLE_AUDITOR)),
         )
         if scoped_branch_ids is not None:
             q = q.filter(User.branch_id.in_(scoped_branch_ids or {None}))
-        users = q.order_by(User.email).all()
+        role_options = [ROLE_EMPLOYEE, ROLE_AUDITOR]
+    total = q.count()
+
+    # El admin solo ve su departamento: ahí el filtro de departamento no aplica.
+    if actor.role == ROLE_SUPERADMIN and department:
+        if department == "none":
+            q = q.filter(User.department_id.is_(None))
+        else:
+            try:
+                q = q.filter(User.department_id == uuid.UUID(department))
+            except ValueError:
+                department = ""
+    if role in role_options:
+        q = q.filter(User.role == role)
+    else:
+        role = ""
+    order = (User.role, User.email) if actor.role == ROLE_SUPERADMIN else (User.email,)
+    users = q.options(*opts).order_by(*order).all()
 
     departments = db.query(Department).order_by(Department.name).all()
     branches = db.query(Branch).order_by(Branch.name).all()
-    admin_branches = (
-        [b for b in branches if b.id in scoped_branch_ids] if scoped_branch_ids is not None else None
-    )
     csrf = generate_csrf_token(str(actor.id))
     return templates.TemplateResponse(
         request, "users/list.html",
@@ -177,7 +195,9 @@ def user_management(
             "users": users,
             "departments": departments,
             "branches": branches,
-            "admin_branches": admin_branches,
+            "total": total,
+            "filters": {"department": department, "role": role},
+            "role_options": role_options,
             "current_user": actor,
             "csrf_token": csrf,
             "roles": ROLES,
@@ -186,68 +206,18 @@ def user_management(
     )
 
 
-@mgmt_router.post("/create")
-def create_user_html(
-    email: str = Form(...),
-    role: str = Form(...),
-    name: str = Form(default=""),
-    department_id: str = Form(default=""),
-    branch_id: str = Form(default=""),
-    branch_ids: list[str] = Form(default=[]),
-    all_branches: bool = Form(default=False),
-    db: Session = Depends(get_db),
-    actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
-):
-
-    if actor.role == ROLE_ADMIN:
-        role = ROLE_EMPLOYEE
-        department_id = str(actor.department_id)
-        branch_ids = []
-        all_branches = False
-        scoped_branch_ids = managed_branch_ids(actor)
-        if scoped_branch_ids is not None and branch_id not in {str(b) for b in scoped_branch_ids}:
-            raise HTTPException(400, "Elige una de tus sucursales")
-    elif role not in ROLES:
-        raise HTTPException(400, "Invalid role")
-
-    if org_managed_by_hoss():
-        # Llegan de hoss al primer login. El depto del admin se conserva solo para
-        # que lo vea en su lista mientras tanto (hoss lo reemplaza si el puesto tiene).
-        role = ROLE_EMPLOYEE
-        if actor.role != ROLE_ADMIN:
-            department_id = ""
-        # Sucursales que cubre: llegan de hoss en cada login.
-        branch_ids = []
-        all_branches = False
-
-    if db.query(User).filter(User.email == email).first():
-        raise HTTPException(400, "Email already registered")
-
-    # Pre-aprovisionamiento: se crea sin credencial. Al entrar por hoss (SSO) se
-    # enlaza por email y toma rol/depto de hoss. corporate_id queda null hasta entonces.
-    new_user = User(
-        id=uuid.uuid4(),
-        email=email,
-        name=name.strip() or None,
-        role=role,
-        department_id=department_id or None,
-        branch_id=branch_id or None,
-        all_branches=all_branches,
-    )
-    db.add(new_user)
-    db.flush()
-
-    for bid in branch_ids:
-        if bid:
-            db.add(UserBranch(user_id=new_user.id, branch_id=bid))
-
-    db.commit()
-    return RedirectResponse("/users/", status_code=302)
+def _back_to_list(back: str) -> RedirectResponse:
+    """Regresa a /users/ con los filtros que tenía (`back` = su query string).
+    Solo se reconstruyen department y role: nunca una URL arbitraria."""
+    qs = parse_qs(back.lstrip("?"))
+    params = {k: qs[k][0] for k in ("department", "role") if qs.get(k, [""])[0]}
+    return RedirectResponse("/users/" + ("?" + urlencode(params) if params else ""), status_code=302)
 
 
 @mgmt_router.post("/{user_id}/toggle")
 def toggle_user(
     user_id: str,
+    back: str = Form(default=""),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
@@ -256,7 +226,7 @@ def toggle_user(
         raise HTTPException(403, "Access denied")
     target.is_active = not target.is_active
     db.commit()
-    return RedirectResponse("/users/", status_code=302)
+    return _back_to_list(back)
 
 
 @mgmt_router.post("/{user_id}/edit")
@@ -270,6 +240,7 @@ def edit_user(
     branch_ids: list[str] = Form(default=[]),
     all_branches: bool = Form(default=False),
     access: list[str] = Form(default=[]),
+    back: str = Form(default=""),
     db: Session = Depends(get_db),
     actor=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
@@ -314,4 +285,4 @@ def edit_user(
             db.add(UserDepartmentAccess(user_id=target.id, department_id=dept_id, level=grants[dept_id]))
 
     db.commit()
-    return RedirectResponse("/users/", status_code=302)
+    return _back_to_list(back)

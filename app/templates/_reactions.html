@@ -1,7 +1,7 @@
 {#- Reacciones de un mensaje o comentario (estilos en assets/reactions.css). Espera:
     rx_id       id del objetivo (para #reactions-<id>)
     rx_list     [{emoji, count, mine, names}] de app.reactions.summarize
-    rx_url      GET devuelve este parcial; POST (emoji) alterna una reacción y también
+    rx_url      GET devuelve este parcial; POST (emoji) pone, cambia o quita la reacción de la persona (una por objetivo) y también
     rx_class    clases extra del contenedor (alineación) — opcional
     rx_readonly true → solo muestra los conteos (p. ej. auditor que no comenta) — opcional
     rx_float    rx-at-left | rx-at-right | rx-at-corner: dónde flota el "+" cuando

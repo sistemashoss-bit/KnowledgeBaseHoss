@@ -211,6 +211,8 @@
                         <span x-show="reactingId === c.id" x-cloak class="inline-flex gap-0.5 px-1 bg-white border border-gray-200 rounded-full shadow-sm">
                           <template x-for="emoji in reactionEmojis" :key="emoji">
                             <button type="button" @click="toggleReaction(c, emoji)" x-text="emoji"
+                                    :class="{ 'bg-blue-100': c.reactions.some(r => r.mine && r.emoji === emoji) }"
+                                    :aria-pressed="c.reactions.some(r => r.mine && r.emoji === emoji)"
                                     class="w-7 h-7 rounded-full text-base leading-none hover:bg-gray-100"></button>
                           </template>
                         </span>

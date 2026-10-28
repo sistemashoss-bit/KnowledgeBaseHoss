@@ -16,8 +16,8 @@ from app.models import REACTION_EMOJIS, User
 
 
 def _target_col(model):
-    """Columna que apunta al mensaje/comentario reaccionado (la PK que no es user/emoji)."""
-    return next(c for c in model.__table__.primary_key.columns if c.name not in ("user_id", "emoji"))
+    """Columna que apunta al mensaje/comentario reaccionado (la PK que no es user_id)."""
+    return next(c for c in model.__table__.primary_key.columns if c.name != "user_id")
 
 
 def summarize(db: Session, model, target_ids, user_id) -> dict:
@@ -52,17 +52,21 @@ def summarize(db: Session, model, target_ids, user_id) -> dict:
 
 
 def toggle(db: Session, model, target_id, user_id, emoji: str) -> None:
-    """Pone la reacción si no existía, o la quita si ya estaba. Hace commit."""
+    """Una reacción por persona: el mismo emoji la quita; otro la reemplaza
+    (o la pone si no tenía). Hace commit."""
     if emoji not in REACTION_EMOJIS:
         raise HTTPException(400, "Reacción no válida")
     col_name = _target_col(model).name
-    inserted = db.execute(
-        insert(model.__table__)
-        .values({col_name: target_id, "user_id": user_id, "emoji": emoji, "created_at": datetime.utcnow()})
-        .on_conflict_do_nothing()
-    ).rowcount
-    if not inserted:
-        db.query(model).filter(
-            getattr(model, col_name) == target_id, model.user_id == user_id, model.emoji == emoji,
-        ).delete(synchronize_session=False)
+    col = getattr(model, col_name)
+    removed = db.query(model).filter(
+        col == target_id, model.user_id == user_id, model.emoji == emoji,
+    ).delete(synchronize_session=False)
+    if not removed:
+        stmt = insert(model.__table__).values(
+            {col_name: target_id, "user_id": user_id, "emoji": emoji, "created_at": datetime.utcnow()},
+        )
+        db.execute(stmt.on_conflict_do_update(
+            index_elements=[col_name, "user_id"],
+            set_={"emoji": stmt.excluded.emoji, "created_at": stmt.excluded.created_at},
+        ))
     db.commit()

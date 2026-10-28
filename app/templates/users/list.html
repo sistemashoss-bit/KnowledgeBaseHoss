@@ -8,111 +8,42 @@
 
     <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
       <h1 class="text-xl font-bold text-gray-900">Usuarios</h1>
-      <span class="text-sm text-gray-400">{{ users|length }} usuario{{ 's' if users|length != 1 }}</span>
+      <span class="text-sm text-gray-400">
+        {% if users|length != total %}{{ users|length }} de {{ total }}{% else %}{{ total }}{% endif %} usuario{{ 's' if total != 1 }}
+      </span>
     </div>
 
-    <!-- ── Create user ──────────────────────────────────────────────────── -->
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-      <h2 class="text-sm font-semibold text-gray-700 mb-4">Nuevo usuario</h2>
-      <form method="post" action="/users/create" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Correo <span class="text-red-500">*</span></label>
-          <input type="email" name="email" required placeholder="usuario@empresa.com"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
-        </div>
-
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Nombre completo</label>
-          <input type="text" name="name" placeholder="Opcional"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
-        </div>
-
-        {% if current_user.role == "superadmin" %}
-        {% if org_managed %}
-        <input type="hidden" name="role" value="employee" />
-        <p class="md:col-span-2 text-xs text-gray-500">
-          El rol y el departamento se toman de su puesto en hoss al iniciar sesión.
-        </p>
-        {% else %}
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
-          <select name="role"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
-            {% for r in roles %}<option value="{{ r }}">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(r, r) }}</option>{% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
-          <select name="department_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
-            <option value="">Sin departamento</option>
-            {% for dept in departments %}<option value="{{ dept.id }}">{{ dept.name }}</option>{% endfor %}
-          </select>
-        </div>
-        {% endif %}
-
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursal</label>
-          <select name="branch_id"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
-            <option value="">Sin sucursal</option>
-            {% for b in branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
-          </select>
-        </div>
-
-        {% if not org_managed %}
-        <div class="md:col-span-2">
-          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursales que cubre (solo acota en departamentos por sucursal, p. ej. Comercial)</label>
-          <label class="flex items-center gap-2 mb-1.5 cursor-pointer">
-            <input type="checkbox" name="all_branches" value="1"
-                   class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
-            <span class="text-xs text-gray-700">Todas las sucursales</span>
-          </label>
-          {% if branches %}
-          <div class="max-h-44 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded-lg bg-gray-50"
-               role="group" aria-label="Sucursales asignadas">
-            {% for b in branches %}
-            <label class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors">
-              <input type="checkbox" name="branch_ids" value="{{ b.id }}"
-                     class="w-3.5 h-3.5 rounded text-blue-500 border-gray-300 focus:ring-blue-400" />
-              <span class="text-xs text-gray-700">{{ b.name }}</span>
-            </label>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
-            No hay sucursales creadas.
-          </p>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        {% else %}
-        <input type="hidden" name="role" value="employee" />
-        <input type="hidden" name="department_id" value="" />
-        {% if admin_branches is not none %}
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Sucursal <span class="text-red-500">*</span></label>
-          <select name="branch_id" required
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
-            <option value="">Elige una sucursal</option>
-            {% for b in admin_branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
-          </select>
-        </div>
-        {% endif %}
-        {% endif %}
-
-        <div class="md:col-span-2">
-          <button type="submit"
-                  class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
-            Crear usuario
-          </button>
-        </div>
-      </form>
-    </div>
+    <!-- ── Filtros (las altas llegan de hoss al primer inicio de sesión) ─── -->
+    {% set role_names = {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'} %}
+    <form method="get" action="/users/" class="flex flex-wrap items-end gap-3">
+      {% if current_user.role == "superadmin" %}
+      <div class="w-full sm:w-64">
+        <label for="f-dept" class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+        <select id="f-dept" name="department" onchange="this.form.requestSubmit()"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Todos</option>
+          <option value="none" {% if filters.department == 'none' %}selected{% endif %}>Sin departamento</option>
+          {% for dept in departments %}
+          <option value="{{ dept.id }}" {% if filters.department == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="w-full sm:w-48">
+        <label for="f-role" class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
+        <select id="f-role" name="role" onchange="this.form.requestSubmit()"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Todos</option>
+          {% for r in role_options %}
+          <option value="{{ r }}" {% if filters.role == r %}selected{% endif %}>{{ role_names.get(r, r) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button type="submit" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">Filtrar</button></noscript>
+      {% if filters.department or filters.role %}
+      <a href="/users/" class="py-2 text-sm text-blue-600 hover:text-blue-500">Quitar filtros</a>
+      {% endif %}
+    </form>
 
     <!-- ── User table ──────────────────────────────────────────────────── -->
     <div class="table-scroll bg-white rounded-xl border border-gray-200">
@@ -159,7 +90,7 @@
                 {% if u.role == 'superadmin' %}bg-blue-100 text-blue-700
                 {% elif u.role == 'admin' %}bg-blue-100 text-blue-700
                 {% else %}bg-gray-100 text-gray-600{% endif %}">
-                {{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(u.role, u.role) }}
+                {{ role_names.get(u.role, u.role) }}
               </span>
             </td>
 
@@ -210,6 +141,7 @@
                 <!-- Toggle active -->
                 <form method="post" action="/users/{{ u.id }}/toggle">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="back" value="{{ request.url.query }}" />
                   <button type="submit"
                           class="text-xs px-2 py-1 rounded border transition-colors
                             {% if u.is_active %}border-red-200 text-red-600 hover:bg-red-50
@@ -231,6 +163,7 @@
                 <form method="post" action="/users/{{ u.id }}/edit"
                       class="grid grid-cols-2 gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="back" value="{{ request.url.query }}" />
 
                   <div class="col-span-2 sm:col-span-1">
                     <label class="block text-xs font-medium text-gray-600 mb-0.5">Nombre</label>
@@ -257,7 +190,7 @@
                     <select name="role"
                             class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-blue-500 bg-white">
                       {% for r in roles %}
-                      <option value="{{ r }}" {% if u.role == r %}selected{% endif %}>{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(r, r) }}</option>
+                      <option value="{{ r }}" {% if u.role == r %}selected{% endif %}>{{ role_names.get(r, r) }}</option>
                       {% endfor %}
                     </select>
                   </div>
@@ -353,7 +286,7 @@
       </table>
       {% else %}
       <div class="text-center py-12 text-gray-400 text-sm">
-        No hay usuarios en tu departamento todavía.
+        {% if filters.department or filters.role %}Ningún usuario coincide con el filtro.{% else %}No hay usuarios en tu departamento todavía.{% endif %}
       </div>
       {% endif %}
     </div>
