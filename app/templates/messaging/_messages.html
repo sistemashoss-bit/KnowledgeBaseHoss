@@ -34,11 +34,11 @@
     {% if msg.content %}
     <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
       {% if is_mine %}
-        ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white
+        msg-mine ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white
       {% else %}
         bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
       {% endif %}
-      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify }}</div>
+      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify | mentionify(mention_names|default([]), mention_me|default('')) }}</div>
     {% endif %}
 
     {# Attachments #}

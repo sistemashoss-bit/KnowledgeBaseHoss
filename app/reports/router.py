@@ -11,10 +11,11 @@ from app.database import get_db
 from app.permissions import granted_department_ids, has_oversight
 from app.models import (
     AuditLog, Branch, Department, Project, SearchLog,
-    Task, User, Zone,
+    Task, TaskStatusHistory, User, Zone,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, PROJECT_STATUSES,
 )
+from app.tasks.business_hours import business_hours_label, business_seconds
 from app.templating import templates
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -114,8 +115,9 @@ def _tasks_over_time(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
 def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> list[dict]:
     """Horas acumuladas por departamento en el período: para cada tarea que llegó
     a 'done' (mismo universo que _task_stats, filtrado por fecha de creación),
-    suma el tiempo transcurrido entre su creación y su último cambio (`updated_at`
-    como proxy de completado, igual que _tasks_over_time)."""
+    suma sus horas laborales del primer estado al paso a "Listo", según el
+    historial — el mismo "Total" del detalle de la tarea. Sin historial (tareas
+    anteriores a él) se usa creación → `updated_at`, también en horas laborales."""
     q = db.query(Task).filter(
         Task.created_at >= dt_from, Task.created_at < dt_to, Task.status == TASK_DONE,
     )
@@ -123,14 +125,23 @@ def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
         q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
     tasks = q.all()
 
+    # Inicio y fin por tarea en UNA consulta (no el historial completo de cada una).
+    spans = {
+        r.task_id: (r.first_at, r.last_at)
+        for r in db.query(
+            TaskStatusHistory.task_id,
+            func.min(TaskStatusHistory.changed_at).label("first_at"),
+            func.max(TaskStatusHistory.changed_at).label("last_at"),
+        ).filter(TaskStatusHistory.task_id.in_([t.id for t in tasks])).group_by(TaskStatusHistory.task_id)
+    } if tasks else {}
+
     seconds_by_dept: dict[str, float] = defaultdict(float)
     count_by_dept: dict[str, int] = defaultdict(int)
     for t in tasks:
-        if not t.updated_at or not t.created_at:
+        start, end = spans.get(t.id) or (t.created_at, t.updated_at)
+        if not start or not end:
             continue
-        elapsed = (t.updated_at - t.created_at).total_seconds()
-        if elapsed < 0:
-            continue
+        elapsed = business_seconds(start, end)
         key = str(t.department_id) if t.department_id else ""
         seconds_by_dept[key] += elapsed
         count_by_dept[key] += 1
@@ -295,6 +306,7 @@ def reports_dashboard(
             # KPIs
             "task_stats": task_stats,
             "dept_time_stats": dept_time_stats,
+            "business_hours_label": business_hours_label(),
             "project_stats": project_stats,
             # tables
             "top_users": top_users,

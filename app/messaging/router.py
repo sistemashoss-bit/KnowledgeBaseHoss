@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
-from app import audit, notification_bus, reactions, storage, valkey_client as vk
+from app import audit, mentions, notification_bus, reactions, storage, valkey_client as vk
 from app.messaging import realtime
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
@@ -321,12 +321,32 @@ def _require_participant(conv_id: str, user: User, db: Session) -> None:
         raise HTTPException(403)
 
 
-def _feed_context(messages: list[Message], current_user: User, db: Session, is_group: bool) -> dict:
+def _group_members(conv_id, db: Session) -> list[User]:
+    return (
+        db.query(User)
+        .join(ConversationParticipant, ConversationParticipant.user_id == User.id)
+        .filter(ConversationParticipant.conversation_id == conv_id)
+        .all()
+    )
+
+
+def _feed_context(
+    messages: list[Message], current_user: User, db: Session, is_group: bool,
+    conv_id=None, members: list[User] | None = None,
+) -> dict:
+    """Contexto de _messages.html. En grupos incluye los nombres a resaltar como
+    mención (`members` si ya están cargados; si no, una consulta, y solo si
+    algún mensaje trae "@")."""
+    names = []
+    if is_group and any("@" in (m.content or "") for m in messages):
+        names = [mentions.display_name(u) for u in (members if members is not None else _group_members(conv_id, db))]
     return {
         "messages": messages,
         "current_user": current_user,
         "is_group": is_group,
         "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
+        "mention_names": names,
+        "mention_me": mentions.display_name(current_user),
     }
 
 
@@ -449,8 +469,16 @@ def conversation_view(
             "active_conv": conv,
             "active_conv_name": _conv_display_name(conv, current_user),
             "other_last_seen": other_last_seen,
-            **_feed_context(messages, current_user, db, conv.type == CONV_GROUP),
+            **_feed_context(
+                messages, current_user, db, conv.type == CONV_GROUP,
+                members=[p.user for p in conv.participants if p.user],
+            ),
             "has_more": has_more,
+            # Autocompletado de @menciones del compositor (solo grupos).
+            "mention_people": [
+                {"name": mentions.display_name(p.user), "email": p.user.email}
+                for p in conv.participants if p.user and str(p.user_id) != str(current_user.id)
+            ] if conv.type == CONV_GROUP else [],
             "contacts": contacts,
             "departments": departments,
             "zones": zones,
@@ -499,7 +527,7 @@ def poll_messages(
     return templates.TemplateResponse(
         request,
         "messaging/_messages.html",
-        _feed_context(messages, current_user, db, conv_type == CONV_GROUP),
+        _feed_context(messages, current_user, db, conv_type == CONV_GROUP, conv_id),
     )
 
 
@@ -521,7 +549,7 @@ def older_messages(
     return templates.TemplateResponse(
         request,
         "messaging/_older.html",
-        {**_feed_context(messages, current_user, db, conv_type == CONV_GROUP), "has_more": has_more},
+        {**_feed_context(messages, current_user, db, conv_type == CONV_GROUP, conv_id), "has_more": has_more},
     )
 
 
@@ -811,11 +839,27 @@ def send_message(
         f"/messaging/{conv_id}",
     )
 
+    # Menciones (solo grupos): a quien se mencionó le llega una notificación
+    # `chat_mention` en vez del simple refresco del badge.
+    mentioned: set = set()
+    if conv.type == CONV_GROUP and "@" in content:
+        others = [u for u in _group_members(conv_id, db) if u.id != current_user.id]
+        mentioned, everyone = mentions.find(content, others)
+        group = conv.name or "Grupo sin nombre"
+        actor = mentions.display_name(current_user)
+        url = f"/messaging/{conv_id}"
+        if everyone:
+            mentioned = {u.id for u in others}
+            realtime.notify_users(mentioned, f"{actor} mencionó a todos en «{group}»", preview, url, "chat_mention")
+        elif mentioned:
+            realtime.notify_users(mentioned, f"{actor} te mencionó en «{group}»", preview, url, "chat_mention")
+
     # Real-time fan-out to every open client in this conversation.
     vk.publish(realtime.channel(conv_id))
     # Poke each recipient's Mensajes badge (SSE refresh trigger).
     for uid in recipient_ids:
-        realtime.notify_user(uid)
+        if uid not in mentioned:
+            realtime.notify_user(uid)
 
     if valid_files:
         audit.log_action(

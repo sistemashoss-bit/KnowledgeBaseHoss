@@ -86,6 +86,18 @@ def notify_user(
         notification_bus.publish(user_id, kind, title, body, url)
 
 
+def notify_users(user_ids, title: str, body: str, url: str, kind: str) -> None:
+    """notify_user para varios a la vez: refresca el badge de cada uno y manda
+    a notificationservice un solo evento con todos los destinatarios."""
+    from app import notification_bus
+    from app import valkey_client as vk
+
+    user_ids = list(user_ids)
+    for uid in user_ids:
+        vk.publish(user_channel(uid), json.dumps({"type": "notify"}))
+    notification_bus.publish_many(user_ids, kind, title, body, url)
+
+
 def tasks_channel() -> str:
     """Global channel: any task board change, for everyone currently viewing it."""
     return "tasks:changes"

@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     task_archive_after_days: int = 7
     # Hora local a partir de la cual se avisa de tareas que vencen hoy/mañana
     task_due_reminder_hour_local: int = 8
+    # Horario laboral con el que se mide el "Tiempo por estado": noches y días
+    # no listados (domingo) no cuentan. Día (0=lunes … 6=domingo) → [abre, cierra]
+    # en hora local (UTC-6). La jornada real es 8–18 (sábado 8–14) en cada zona;
+    # se cierra una hora después para cubrir las sucursales con 1 h de desfase.
+    work_hours: dict[int, list[int]] = {
+        0: [8, 19], 1: [8, 19], 2: [8, 19], 3: [8, 19], 4: [8, 19], 5: [8, 15],
+    }
 
     # Wasabi S3-compatible — solo las credenciales son secretas (van en .env).
     # Los nombres de bucket, región y endpoint son estables y viven aquí.

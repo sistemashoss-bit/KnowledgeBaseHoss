@@ -161,7 +161,7 @@
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
       <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
         <h2 class="text-sm font-semibold text-gray-700">Horas acumuladas por departamento</h2>
-        <p class="text-xs text-gray-400 mt-0.5">Tiempo total (creación → completado) de tareas terminadas en el período</p>
+        <p class="text-xs text-gray-400 mt-0.5" title="Hora del centro: {{ business_hours_label }}">Horas laborales (inicio → completado) de tareas terminadas en el período</p>
       </div>
       {% if dept_time_stats %}
       <div class="divide-y divide-gray-100">

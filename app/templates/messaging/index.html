@@ -560,7 +560,7 @@
     </div>
 
     <!-- Input bar -->
-    <div class="chat-composer bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+    <div class="chat-composer relative bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
             hx-target="#send-form"
@@ -620,7 +620,96 @@
           </button>
         </div>
       </form>
-      <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea</p>
+      <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea{% if mention_people %} · @ para mencionar{% endif %}</p>
+
+      {% if mention_people %}
+      <!-- Autocompletado de @menciones (la detección real la hace el servidor: app/mentions.py) -->
+      <div id="mention-menu" role="listbox" aria-label="Mencionar"
+           class="hidden absolute bottom-full left-4 right-4 sm:right-auto sm:w-72 mb-1 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20"></div>
+      <script>
+        (function () {
+          var input = document.getElementById('msg-input');
+          var form = document.getElementById('send-form');
+          var menu = document.getElementById('mention-menu');
+          var people = {{ mention_people | tojson }};
+          var items = [], active = 0, isOpen = false;
+
+          function norm(s) { return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+
+          // "@texto" justo antes del cursor (al inicio o tras un espacio).
+          function query() {
+            var pos = input.selectionStart;
+            var m = input.value.slice(0, pos).match(/(^|[\s(])@([^\s@]{0,30})$/);
+            return m ? { start: pos - m[2].length - 1, end: pos, q: norm(m[2]) } : null;
+          }
+
+          function close() { isOpen = false; menu.classList.add('hidden'); }
+
+          function render() {
+            menu.textContent = '';
+            items.forEach(function (it, i) {
+              var row = document.createElement('div');
+              row.setAttribute('role', 'option');
+              row.className = 'px-3 py-2 cursor-pointer text-sm ' + (i === active ? 'bg-blue-50' : 'hover:bg-gray-50');
+              var name = document.createElement('p');
+              name.className = 'font-medium text-gray-800 truncate';
+              name.textContent = '@' + it.name;
+              var hint = document.createElement('p');
+              hint.className = 'text-xs text-gray-400 truncate';
+              hint.textContent = it.hint;
+              row.append(name, hint);
+              // mousedown (no click): no quitarle el foco al textarea.
+              row.addEventListener('mousedown', function (e) { e.preventDefault(); pick(it); });
+              menu.appendChild(row);
+            });
+            isOpen = items.length > 0;
+            menu.classList.toggle('hidden', !isOpen);
+          }
+
+          function update() {
+            var r = query();
+            if (!r) return close();
+            items = people.filter(function (p) {
+              return norm(p.name).split(/\s+/).some(function (w) { return w.indexOf(r.q) === 0; })
+                || norm(p.name).indexOf(r.q) === 0 || norm(p.email).indexOf(r.q) === 0;
+            }).slice(0, 8).map(function (p) { return { name: p.name, hint: p.email }; });
+            if ('todos'.indexOf(r.q) === 0) items.push({ name: 'todos', hint: 'Notifica a todo el grupo' });
+            active = 0;
+            render();
+          }
+
+          function pick(it) {
+            var r = query();
+            if (!r) return close();
+            input.setRangeText('@' + it.name + ' ', r.start, r.end, 'end');
+            close();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.focus();
+          }
+
+          input.addEventListener('input', update);
+          input.addEventListener('click', update);
+          input.addEventListener('blur', function () { setTimeout(close, 150); });
+          form.addEventListener('htmx:afterRequest', close);
+          // Captura en el form: corre ANTES del onkeydown del textarea, que envía con Enter.
+          form.addEventListener('keydown', function (e) {
+            if (!isOpen || e.target !== input) return;
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+              render();
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+              pick(items[active]);
+            } else if (e.key === 'Escape') {
+              close();
+            } else {
+              return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+          }, true);
+        })();
+      </script>
+      {% endif %}
     </div>
 
     {% else %}

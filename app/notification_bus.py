@@ -41,9 +41,17 @@ def publish(user_id, kind: str, title: str, body: str = "", url: str = "/", data
     """Encola la notificación para el usuario local `user_id`. Usuarios sin
     corporate_id (cuentas solo locales, sin SSO) no existen fuera de knowledge
     y se omiten."""
-    if not settings.rabbitmq_url or not user_id:
+    if not user_id:
         return
-    recipients = _corporate_ids([user_id])
+    publish_many([user_id], kind, title, body, url, data)
+
+
+def publish_many(user_ids, kind: str, title: str, body: str = "", url: str = "/", data: dict | None = None) -> None:
+    """La misma notificación para varios usuarios en UN evento (una sola
+    consulta de corporate_ids): p. ej. un @todos en un grupo grande."""
+    if not settings.rabbitmq_url:
+        return
+    recipients = _corporate_ids(user_ids)
     if not recipients:
         return
     _enqueue(EXCHANGE, {

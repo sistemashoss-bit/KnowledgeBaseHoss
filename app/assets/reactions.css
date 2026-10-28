@@ -1,4 +1,5 @@
-/* Reacciones (templates/_reactions.html, chat y comentarios). Clases propias en
+/* Reacciones (templates/_reactions.html, chat y comentarios) y menciones del
+   chat (app/mentions.py) al final. Clases propias en
    vez de utilidades Tailwind: el bloque se repite en cada mensaje del feed, y así
    uno vacío pesa unos bytes en lugar de ~1 KB de clases y SVG. */
 .rx { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
@@ -39,3 +40,8 @@ button.rx-chip:hover { background: #f9fafb; }
 .rx-at-left { top: -1.75rem; left: -1.75rem; }
 .rx-at-right { top: -1.75rem; right: -1.75rem; }
 .rx-at-corner { top: -.25rem; right: 0; }
+
+/* Menciones (@Nombre / @todos) dentro de una burbuja del chat. */
+.mention { font-weight: 600; color: #2563eb; }
+.mention-me { font-weight: 600; color: #92400e; background: #fef3c7; border-radius: .25rem; padding: 0 .125rem; }
+.msg-mine .mention, .msg-mine .mention-me { color: #fff; background: rgba(255, 255, 255, .2); }

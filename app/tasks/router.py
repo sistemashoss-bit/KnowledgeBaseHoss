@@ -29,6 +29,7 @@ from app.models import (
     RECURRENCE_FREQUENCIES,
 )
 from app.calendar.reminders import compute_remind_at, to_local, to_utc
+from app.tasks.business_hours import business_hours_label, business_seconds
 from app.tasks.recurring import local_now, matches_recurrence, parse_recurrence
 from app.templating import templates
 
@@ -186,6 +187,7 @@ def _notify_shared(task: Task, user_ids: list, actor: User) -> None:
 def _status_durations(task: Task) -> dict:
     """Tiempo acumulado en cada estado (sin contar "Listo", que es terminal y no
     aporta al desglose) más el tiempo total que tardó la tarea, de punta a punta.
+    Ambos en horas laborales (app/tasks/business_hours.py), no de reloj.
 
     El tramo del estado actual se cuenta hasta ahora, así que el desglose siempre
     refleja algo aunque la tarea siga abierta. El total, en cambio, sólo tiene
@@ -200,7 +202,7 @@ def _status_durations(task: Task) -> dict:
     now_end = datetime.utcnow()
     for i, entry in enumerate(history):
         segment_end = history[i + 1].changed_at if i + 1 < len(history) else now_end
-        seconds = (segment_end - entry.changed_at).total_seconds()
+        seconds = business_seconds(entry.changed_at, segment_end)
         if entry.to_status in totals and seconds > 0:
             totals[entry.to_status] += seconds
 
@@ -211,7 +213,8 @@ def _status_durations(task: Task) -> dict:
             {"status": s, "seconds": totals[s]}
             for s in TASK_STATUSES if s != TASK_DONE and totals[s] > 0
         ],
-        "total_seconds": (finished_at - history[0].changed_at).total_seconds() if finished_at else None,
+        "total_seconds": business_seconds(history[0].changed_at, finished_at) if finished_at else None,
+        "hours_label": business_hours_label(),
     }
 
 

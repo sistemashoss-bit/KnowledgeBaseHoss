@@ -38,6 +38,15 @@ def _linkify(text: str | None) -> Markup:
 templates.env.filters["linkify"] = _linkify
 
 
+def _mentionify(html, names=None, me: str = "") -> Markup:
+    # Después de linkify: resalta @Nombre/@todos de los participantes del grupo.
+    from app.mentions import highlight
+    return highlight(html, names or [], me)
+
+
+templates.env.filters["mentionify"] = _mentionify
+
+
 def _avatar_url(key: str | None) -> str | None:
     # hoss-api (SSO) es dueño del avatar y manda la LLAVE en el payload de identidad.
     # Como knowledge comparte el mismo Wasabi/bucket (hossavatars), firma la URL él
@@ -70,7 +79,20 @@ templates.env.globals["group_avatar_url"] = _group_avatar_url
 # convierte las comillas del JSON en &#34;, dejando el <script> con JS inválido
 # (rompe silenciosamente cualquier `const x = {{ ... | tojson }}` — los gráficos
 # de /reports/, el estado de mensajería y de tareas recurrentes que lo usan).
-templates.env.filters["tojson"] = lambda v: Markup(json.dumps(v, default=str))
+# Para que sea seguro, <, >, & y ' van como \u00XX (como el tojson de Jinja):
+# un texto con "</script>" (p. ej. un nombre de usuario) no cierra el script, y
+# JS/JSON los leen igual.
+_JSON_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "'": "\\u0027"}
+
+
+def _tojson(v) -> Markup:
+    out = json.dumps(v, default=str)
+    for ch, esc in _JSON_ESCAPES.items():
+        out = out.replace(ch, esc)
+    return Markup(out)
+
+
+templates.env.filters["tojson"] = _tojson
 
 from app.audit import action_label as _action_label
 from app.auth.utils import generate_csrf_token as _generate_csrf_token
