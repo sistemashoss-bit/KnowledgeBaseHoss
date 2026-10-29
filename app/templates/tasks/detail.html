@@ -899,9 +899,21 @@
               class="flex gap-3 items-end">
           <div class="flex-1">
             <label class="block text-xs font-medium text-gray-600 mb-1">Agregar comentario</label>
-            <textarea name="content" rows="2" required
-                      placeholder="Escribe un comentario..."
-                      class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+            
+            <div class="relative">
+              <div class="flex flex-col justify-end">
+                <textarea
+                  name="content"
+                  rows="2"
+                  required
+                  placeholder="Escribe un comentario..."
+                  oninput="ajustarAltura(this)"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto"
+                  style="max-height: 432px;"
+                ></textarea>
+              </div>
+            </div>
+
           </div>
           <button type="button" data-emoji-picker aria-expanded="false" title="Emojis"
                   class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-200 transition-colors shrink-0">
@@ -959,6 +971,22 @@
     // EventSource reconnects on its own after transient errors.
   } catch (e) {}
 })();
+
+
+
+function ajustarAltura(textarea) {
+  const maxAltura = 432; // Aproximadamente 18 renglones
+
+  textarea.style.height = "auto";
+
+  const alturaNecesaria = textarea.scrollHeight;
+  textarea.style.height = Math.min(alturaNecesaria, maxAltura) + "px";
+
+  textarea.style.overflowY =
+    alturaNecesaria > maxAltura ? "auto" : "hidden";
+}
+
+
 </script>
 
 {% endblock %}
