@@ -129,7 +129,7 @@
   <!-- Detalle (clic / toque) -->
   <div x-show="detail" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
        @click.self="detail = null" @keydown.escape.window="detail = null">
-    <div class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-md p-5" role="dialog" aria-modal="true">
+    <div class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" role="dialog" aria-modal="true">
       <template x-if="detail">
         <div>
           <div x-effect="$el.replaceChildren(detailNodes(detail))"></div>
@@ -185,7 +185,7 @@
               </h3>
               <p x-show="commentsLoading" class="text-xs text-gray-400">Cargando…</p>
               <p x-show="!commentsLoading && !comments.length" class="text-xs text-gray-400">Sin comentarios todavía.</p>
-              <ul class="space-y-2 max-h-56 overflow-y-auto mb-2" x-show="comments.length">
+             <ul class="space-y-2 min-h-32 max-h-80 overflow-y-auto mb-3" x-show="comments.length">
                 <template x-for="c in comments" :key="c.id">
                   <li class="flex items-start gap-2">
                     <img x-show="c.avatar_url" :src="c.avatar_url" alt="" loading="lazy" class="w-6 h-6 shrink-0 rounded-full object-cover">
@@ -239,9 +239,13 @@
                 </template>
               </ul>
               <form @submit.prevent="addComment()" class="flex items-end gap-2">
-                <textarea x-model="commentText" rows="2" maxlength="5000" placeholder="Escribe un comentario…"
-                          @keydown.enter.ctrl.prevent="addComment()"
-                          class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+                <textarea   x-model="commentText"
+                            rows="4"
+                            maxlength="5000"
+                            placeholder="Escribe un comentario…"
+                            @keydown.enter.ctrl.prevent="addComment()"
+                            @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                            class="flex-1 min-w-0 px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"></textarea>
                 <button type="button" data-emoji-picker aria-expanded="false" title="Emojis"
                         class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 transition-colors shrink-0">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
