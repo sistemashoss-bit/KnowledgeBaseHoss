@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import os
 import re
 import uuid
@@ -808,18 +809,24 @@ def send_message(
     db.add(msg)
     db.flush()
 
+    content_types = []
     for f in valid_files:
         data = f.file.read()
         safe = _safe_filename(f.filename)
         key = f"chats/{conv_id}/{msg.id}/{uuid.uuid4()}_{safe}"
-        storage.upload_chat_file(key, data, f.content_type or "application/octet-stream")
+        # Algunos navegadores mandan .m4a/.opus sin tipo: se deduce por extensión.
+        ctype = f.content_type
+        if not ctype or ctype == "application/octet-stream":
+            ctype = mimetypes.guess_type(f.filename)[0] or "application/octet-stream"
+        content_types.append(ctype)
+        storage.upload_chat_file(key, data, ctype)
         db.add(MessageAttachment(
             id=uuid.uuid4(),
             message_id=msg.id,
             uploaded_by=current_user.id,
             filename=f.filename,
             file_key=key,
-            content_type=f.content_type or "application/octet-stream",
+            content_type=ctype,
             file_size=len(data),
         ))
 
@@ -829,7 +836,12 @@ def send_message(
     # El mensaje va a notificationservice ANTES del fan-out en tiempo real: si el
     # destinatario tiene el chat abierto, su refresco publica `read` y debe
     # llegar después del `message`, o el contador queda en 1 para siempre.
-    preview = content[:120] if content else "Archivo adjunto"
+    if content:
+        preview = content[:120]
+    elif all(ct.startswith("audio/") for ct in content_types):
+        preview = "🎤 Nota de voz"
+    else:
+        preview = "Archivo adjunto"
     recipient_ids = _other_participant_ids(conv_id, current_user.id, db)
     conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
     notification_bus.publish_message(

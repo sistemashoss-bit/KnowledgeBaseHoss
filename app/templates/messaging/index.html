@@ -574,7 +574,26 @@
                   class="ml-auto text-gray-400 hover:text-red-400 transition-colors">Quitar</button>
         </div>
 
-        <div class="flex gap-2 items-end">
+        <!-- Grabación de nota de voz (script al final del composer) -->
+        <div id="voice-bar" class="hidden items-center gap-3 h-9">
+          <button type="button" id="voice-cancel" title="Descartar"
+                  class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 transition-colors shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+          <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0"></span>
+          <span class="flex-1 text-sm text-gray-600 tabular-nums"><span id="voice-time">0:00</span> <span class="text-gray-300">/ 3:00</span></span>
+          <button type="button" id="voice-send" title="Enviar nota de voz"
+                  class="w-9 h-9 bg-blue-500 hover:bg-blue-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
+            <svg class="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            </svg>
+          </button>
+        </div>
+
+        <div id="composer-row" class="flex gap-2 items-end">
           <!-- Attach button -->
           <label class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 cursor-pointer transition-colors shrink-0"
                  title="Adjuntar archivo">
@@ -604,6 +623,15 @@
                     class="flex-1 resize-none px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder-gray-400 leading-snug"
                     style="max-height:120px"></textarea>
 
+          <!-- Nota de voz -->
+          <button type="button" id="voice-btn" title="Grabar nota de voz (máx 3 min)"
+                  class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 transition-colors shrink-0 disabled:opacity-50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+            </svg>
+          </button>
+
           <button type="submit"
                   class="w-9 h-9 bg-blue-500 hover:bg-blue-400 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors">
             <svg class="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -612,6 +640,100 @@
           </button>
         </div>
       </form>
+      <script>
+        // Notas de voz estilo WhatsApp: MediaRecorder graba (Chrome/Firefox: webm/opus,
+        // Safari: mp4/aac) y se manda como un adjunto más al mismo /send. Corta solo
+        // a los 3 min. El cron de cleanup.py las borra como cualquier adjunto.
+        (function () {
+          var MAX_MS = 3 * 60 * 1000;
+          var TYPES = [['audio/webm;codecs=opus', 'webm'], ['audio/mp4', 'm4a'], ['audio/ogg;codecs=opus', 'ogg']];
+          var form = document.getElementById('send-form');
+          var btn = document.getElementById('voice-btn');
+          var bar = document.getElementById('voice-bar');
+          var row = document.getElementById('composer-row');
+          var timeEl = document.getElementById('voice-time');
+          if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            btn.classList.add('hidden');
+            return;
+          }
+          var rec = null, stream = null, chunks = [], sendOnStop = false, startedAt = 0, tick = null, limit = null;
+
+          function fmt(ms) {
+            var s = Math.floor(ms / 1000);
+            return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+          }
+          function showBar(on) {
+            bar.classList.toggle('hidden', !on);
+            bar.classList.toggle('flex', on);
+            row.classList.toggle('hidden', on);
+          }
+          function stop(send) {
+            if (!rec || rec.state === 'inactive') return;
+            sendOnStop = send;
+            rec.stop();
+          }
+
+          function upload(blob, ext) {
+            var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            var fd = new FormData();
+            fd.append('content', '');
+            fd.append('files', new File([blob], 'nota-de-voz-' + stamp + '.' + ext, { type: blob.type }));
+            btn.disabled = true;
+            fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
+              .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                htmx.trigger(document.body, 'refreshFeed');
+              })
+              .catch(function (e) { alert('No se pudo enviar la nota de voz (' + e.message + ').'); })
+              .finally(function () { btn.disabled = false; });
+          }
+
+          btn.addEventListener('click', async function () {
+            if (rec) return;
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (e) {
+              alert('No se pudo acceder al micrófono.\n\nRevisa los permisos del navegador.');
+              return;
+            }
+            var t = TYPES.find(function (x) { return MediaRecorder.isTypeSupported(x[0]); });
+            var r = rec = new MediaRecorder(stream, t ? { mimeType: t[0], audioBitsPerSecond: 32000 } : undefined);
+            chunks = [];
+            sendOnStop = false;
+            r.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
+            r.onstop = function () {
+              var mime = (r.mimeType || 'audio/webm').split(';')[0];
+              var ext = t ? t[1] : (mime.indexOf('mp4') !== -1 ? 'm4a' : mime.indexOf('ogg') !== -1 ? 'ogg' : 'webm');
+              clearInterval(tick);
+              clearTimeout(limit);
+              stream.getTracks().forEach(function (tr) { tr.stop(); });
+              rec = stream = null;
+              showBar(false);
+              if (sendOnStop && chunks.length) upload(new Blob(chunks, { type: mime }), ext);
+            };
+            r.start(1000);
+            startedAt = Date.now();
+            timeEl.textContent = '0:00';
+            tick = setInterval(function () { timeEl.textContent = fmt(Math.min(Date.now() - startedAt, MAX_MS)); }, 250);
+            limit = setTimeout(function () { stop(true); }, MAX_MS);
+            showBar(true);
+          });
+          document.getElementById('voice-send').addEventListener('click', function () { stop(true); });
+          document.getElementById('voice-cancel').addEventListener('click', function () { stop(false); });
+
+          // Chrome guarda los webm de MediaRecorder sin duración (duration = Infinity):
+          // saltar al final la fuerza a calcularse y luego se regresa a 0.
+          document.addEventListener('loadedmetadata', function (e) {
+            var a = e.target;
+            if (a.tagName !== 'AUDIO' || a.duration !== Infinity) return;
+            a.addEventListener('timeupdate', function fix() {
+              a.removeEventListener('timeupdate', fix);
+              a.currentTime = 0;
+            });
+            a.currentTime = 1e101;
+          }, true);
+        })();
+      </script>
       <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea{% if mention_people %} · @ para mencionar{% endif %}</p>
 
       {% if mention_people %}

@@ -51,6 +51,10 @@
       <img src="{{ file_url }}?inline=1" alt="{{ att.filename }}" loading="lazy"
            data-lightbox
            class="rounded-xl max-w-full max-h-64 object-cover border cursor-zoom-in {% if is_mine %}border-blue-300{% else %}border-gray-200 shadow-sm{% endif %}" />
+      {% elif att.content_type.startswith('audio/') %}
+      {# Audio / nota de voz: reproductor nativo #}
+      <audio controls preload="metadata" src="{{ file_url }}?inline=1"
+             class="w-64 max-w-full h-10 {% if is_mine %}ml-auto{% endif %}"></audio>
       {% else %}
       <a href="{{ file_url }}"
          class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
