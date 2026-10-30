@@ -108,7 +108,10 @@ def run_cleanup() -> dict | None:
     """
     # When Redis is up, the lock ensures a single instance runs. When Redis is
     # down, try_acquire_daily_lock returns False; fall through and run anyway.
-    if vk.available() and not vk.try_acquire_daily_lock(_LOCK_KEY):
+    # Lock por fecha (UTC, como cleanup_hour_utc): con una llave fija y TTL de
+    # 24 h, una corrida que caía milisegundos antes que la del día anterior se saltaba.
+    today = datetime.utcnow().date()
+    if vk.available() and not vk.try_acquire_daily_lock(f"{_LOCK_KEY}:{today.isoformat()}"):
         return None
     messages, files = purge_old_messages(settings.message_retention_days)
     audit_logs, search_logs = purge_old_logs(settings.audit_retention_days)
