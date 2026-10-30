@@ -635,6 +635,17 @@
             </svg>
           </button>
 
+          {% if stickers_enabled() %}
+          <!-- Stickers (mssgs-stickers.com; panel y script al final del composer) -->
+          <button type="button" id="sticker-btn" title="Stickers" aria-haspopup="dialog" aria-expanded="false"
+                  class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 transition-colors shrink-0 disabled:opacity-50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M15 3H7a4 4 0 00-4 4v10a4 4 0 004 4h6l8-8V7a4 4 0 00-4-4h-2zm0 18v-4a4 4 0 014-4h2M9 10h.01M15 10h.01M9.5 14.5a3.5 3.5 0 004 .5"/>
+            </svg>
+          </button>
+          {% endif %}
+
           <textarea id="msg-input"
                     name="content"
                     rows="1"
@@ -816,6 +827,140 @@
           }, true);
         })();
       </script>
+      {% if stickers_enabled() %}
+      <div id="sticker-panel" role="dialog" aria-label="Stickers"
+           class="hidden absolute bottom-full left-2 right-2 sm:left-4 sm:right-auto sm:w-96 mb-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 flex-col overflow-hidden">
+        <div class="p-2 border-b border-gray-100">
+          <input id="sticker-q" type="search" placeholder="Buscar stickers..." autocomplete="off"
+                 class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" />
+        </div>
+        <div id="sticker-packs" class="flex gap-1 px-2 py-1.5 overflow-x-auto border-b border-gray-100 shrink-0"></div>
+        <div id="sticker-grid" class="grid grid-cols-4 gap-1 p-2 h-64 overflow-y-auto content-start"></div>
+        <a href="https://mssgs-stickers.com" target="_blank" rel="noopener noreferrer"
+           class="block px-3 py-1 text-[10px] text-gray-400 border-t border-gray-100 hover:text-gray-600">Stickers by mssgs-stickers.com</a>
+      </div>
+      <script>
+        // Selector de stickers: packs y búsqueda pasan por /messaging/stickers/*
+        // (la key y la caché viven en el servidor, app/messaging/stickers.py); al
+        // elegir uno se manda solo su id y el servidor guarda la URL del APNG.
+        (function () {
+          var form = document.getElementById('send-form');
+          var btn = document.getElementById('sticker-btn');
+          var panel = document.getElementById('sticker-panel');
+          var q = document.getElementById('sticker-q');
+          var packsEl = document.getElementById('sticker-packs');
+          var grid = document.getElementById('sticker-grid');
+          var loaded = false, current = { q: '', pack: '' }, nextOffset = null, loading = false, seq = 0, debounce = null;
+
+          function open(on) {
+            panel.classList.toggle('hidden', !on);
+            panel.classList.toggle('flex', on);
+            btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+            if (on && !loaded) { loaded = true; loadPacks(); }
+            if (on) q.focus();
+          }
+          function msg(text) {
+            grid.innerHTML = '';
+            var p = document.createElement('p');
+            p.className = 'col-span-4 text-center text-sm text-gray-400 py-8';
+            p.textContent = text;
+            grid.appendChild(p);
+          }
+          function selectPack(slug) {
+            packsEl.querySelectorAll('button').forEach(function (b) {
+              var on = b.dataset.slug === slug;
+              b.classList.toggle('bg-blue-50', on);
+              b.classList.toggle('ring-1', on);
+              b.classList.toggle('ring-blue-300', on);
+            });
+          }
+          function loadPacks() {
+            msg('Cargando...');
+            fetch('/messaging/stickers/packs').then(function (r) {
+              if (!r.ok) throw new Error(r.status);
+              return r.json();
+            }).then(function (d) {
+              d.packs.forEach(function (p) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.dataset.slug = p.slug;
+                b.title = p.name;
+                b.className = 'w-10 h-10 shrink-0 rounded-lg p-1 hover:bg-gray-100';
+                var img = document.createElement('img');
+                img.src = p.cover; img.alt = p.name; img.loading = 'lazy';
+                img.className = 'w-full h-full object-contain';
+                b.appendChild(img);
+                b.addEventListener('click', function () { q.value = ''; load({ q: '', pack: p.slug }); });
+                packsEl.appendChild(b);
+              });
+              if (d.packs.length) load({ q: '', pack: d.packs[0].slug });
+              else msg('No hay stickers disponibles.');
+            }).catch(function () { msg('No se pudieron cargar los stickers.'); });
+          }
+          function load(params, append) {
+            if (!append) { current = params; nextOffset = 0; grid.scrollTop = 0; msg('Cargando...'); }
+            if (nextOffset === null || loading && append) return;
+            selectPack(current.pack);
+            var mine = ++seq;
+            loading = true;
+            var url = '/messaging/stickers/search?' + new URLSearchParams({ q: current.q, pack: current.pack, offset: nextOffset });
+            fetch(url).then(function (r) {
+              if (!r.ok) throw new Error(r.status);
+              return r.json();
+            }).then(function (d) {
+              if (mine !== seq) return;
+              if (!append) grid.innerHTML = '';
+              d.stickers.forEach(function (s) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.title = s.name + ' · ' + s.credit;
+                b.className = 'aspect-square rounded-lg p-1 hover:bg-gray-100';
+                var img = document.createElement('img');
+                img.src = s.thumb; img.alt = s.name; img.loading = 'lazy';
+                img.className = 'w-full h-full object-contain';
+                b.appendChild(img);
+                b.addEventListener('click', function () { send(s.id); });
+                grid.appendChild(b);
+              });
+              nextOffset = d.next_offset;
+              if (!grid.children.length) msg('Sin resultados.');
+            }).catch(function () {
+              if (mine === seq) msg('No se pudieron cargar los stickers.');
+            }).finally(function () { if (mine === seq) loading = false; });
+          }
+          function send(id) {
+            open(false);
+            btn.disabled = true;
+            var fd = new FormData();
+            fd.append('sticker', id);
+            fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
+              .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                htmx.trigger(document.body, 'refreshFeed');
+              })
+              .catch(function (e) { alert('No se pudo enviar el sticker (' + e.message + ').'); })
+              .finally(function () { btn.disabled = false; });
+          }
+
+          btn.addEventListener('click', function () { open(panel.classList.contains('hidden')); });
+          document.addEventListener('click', function (e) {
+            if (!panel.contains(e.target) && !btn.contains(e.target)) open(false);
+          });
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') open(false); });
+          q.addEventListener('input', function () {
+            clearTimeout(debounce);
+            debounce = setTimeout(function () {
+              var term = q.value.trim();
+              if (term) load({ q: term, pack: '' });
+              else if (packsEl.firstChild) load({ q: '', pack: packsEl.firstChild.dataset.slug });
+            }, 350);
+          });
+          grid.addEventListener('scroll', function () {
+            if (grid.scrollTop + grid.clientHeight > grid.scrollHeight - 120) load(current, true);
+          });
+        })();
+      </script>
+      {% endif %}
       <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea{% if mention_people %} · @ para mencionar{% endif %}</p>
 
       {% if mention_people %}

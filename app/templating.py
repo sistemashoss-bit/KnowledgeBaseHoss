@@ -68,6 +68,22 @@ def _osm_location(text: str | None) -> dict | None:
 templates.env.filters["osm_location"] = _osm_location
 
 
+def _sticker_url(text: str | None) -> str | None:
+    # Mensaje-sticker del chat: su contenido es solo la URL del APNG (app/messaging/stickers.py).
+    from app.messaging.stickers import STICKER_URL_RE
+    text = (text or "").strip()
+    return text if STICKER_URL_RE.fullmatch(text) else None
+
+
+def _stickers_enabled() -> bool:
+    from app.messaging.stickers import enabled
+    return enabled()
+
+
+templates.env.filters["sticker_url"] = _sticker_url
+templates.env.globals["stickers_enabled"] = _stickers_enabled
+
+
 def _mentionify(html, names=None, me: str = "") -> Markup:
     # Después de linkify: resalta @Nombre/@todos de los participantes del grupo.
     from app.mentions import highlight

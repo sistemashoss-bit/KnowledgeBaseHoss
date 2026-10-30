@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # widget, p. ej. "https://app.hoss.com.mx,https://meta.hoss.com.mx".
     report_widget_origins: str = ""
 
+    # Stickers de mssgs-stickers.com para el chat (vacío = sin stickers).
+    mssgs_stickers_api_key: str = ""
+
     # Voyage AI (embeddings + rerank)
     voyage_api_key: str
     voyage_embedding_model: str = "voyage-4-large"

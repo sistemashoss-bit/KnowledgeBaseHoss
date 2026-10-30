@@ -16,7 +16,7 @@ from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, mentions, notification_bus, reactions, storage, valkey_client as vk
-from app.messaging import realtime
+from app.messaging import realtime, stickers
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
     Conversation, ConversationParticipant, Department,
@@ -429,6 +429,21 @@ async def user_signals(request: Request):
     )
 
 
+@router.get("/stickers/packs")
+def sticker_packs(current_user=Depends(get_current_user)):
+    """Packs para el selector (registrado antes de GET /{conv_id})."""
+    if not current_user:
+        raise HTTPException(401)
+    return {"packs": stickers.packs(), "credit": stickers.CREDIT}
+
+
+@router.get("/stickers/search")
+def sticker_search(q: str = "", pack: str = "", offset: int = 0, current_user=Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(401)
+    return stickers.search(q, pack, offset)
+
+
 @router.get("/{conv_id}", response_class=HTMLResponse)
 def conversation_view(
     conv_id: str,
@@ -781,6 +796,7 @@ def send_message(
     content: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
     location: str = Form(default=""),
+    sticker: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -812,6 +828,12 @@ def send_message(
         if not (-90 <= lat <= 90 and -180 <= lng <= 180):
             raise HTTPException(400)
         content = osm_location_url(lat, lng)
+        valid_files = []
+    elif sticker:
+        # El mensaje es la URL del APNG (la plantilla lo dibuja con sticker_url).
+        content = stickers.animation_url(sticker)
+        if not content:
+            raise HTTPException(400)
         valid_files = []
     if not content and not valid_files:
         raise HTTPException(400)
@@ -854,6 +876,8 @@ def send_message(
     # llegar después del `message`, o el contador queda en 1 para siempre.
     if location:
         preview = "📍 Ubicación"
+    elif sticker:
+        preview = "Sticker"
     elif content:
         preview = content[:120]
     elif all(ct.startswith("audio/") for ct in content_types):

@@ -4,6 +4,7 @@ Used for: RAG response cache + user presence.
 Falls back gracefully if VALKEY_URL is not configured.
 """
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -92,6 +93,30 @@ def cache_rag(query: str, role: str, dept_id: str | None, response: str, user_id
         return
     try:
         r.setex(_rag_key(query, role, dept_id, user_id), _RAG_TTL, response)
+    except Exception:
+        pass
+
+
+# ── Caché JSON genérica ───────────────────────────────────────────────────────
+
+def get_json(key: str):
+    """Valor cacheado (ya decodificado) o None. Sin Valkey siempre None."""
+    r = _get()
+    if r is None:
+        return None
+    try:
+        raw = r.get(key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def set_json(key: str, value, ttl: int) -> None:
+    r = _get()
+    if r is None:
+        return
+    try:
+        r.set(key, json.dumps(value), ex=ttl)
     except Exception:
         pass
 

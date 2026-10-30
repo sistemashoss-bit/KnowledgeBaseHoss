@@ -32,7 +32,12 @@
 
     {# Ubicación compartida: tarjeta con mapa de OpenStreetMap #}
     {% set loc = msg.content | osm_location %}
-    {% if loc %}
+    {% set sticker = msg.content | sticker_url %}
+    {% if sticker %}
+    {# Sticker de mssgs-stickers.com: APNG animado, sin burbuja #}
+    <img src="{{ sticker }}" alt="Sticker" loading="lazy" width="144" height="144"
+         class="block w-36 h-36 object-contain {% if is_mine %}ml-auto{% endif %}" />
+    {% elif loc %}
     <div class="w-64 max-w-full overflow-hidden rounded-2xl border {% if is_mine %}ml-auto border-blue-300 rounded-br-sm{% else %}border-gray-200 shadow-sm rounded-bl-sm{% endif %} bg-white">
       {# El iframe es más alto que la ventana y se recorta igual arriba y abajo: el
          marcador queda al centro sin los controles ni el pie del embed, cuya
