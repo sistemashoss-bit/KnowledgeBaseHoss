@@ -594,16 +594,37 @@
         </div>
 
         <div id="composer-row" class="flex gap-2 items-end">
-          <!-- Attach button -->
-          <label class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 cursor-pointer transition-colors shrink-0"
-                 title="Adjuntar archivo">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-            </svg>
+          <!-- Attach button: menú Archivo / Ubicación (script al final del composer) -->
+          <div class="relative shrink-0">
+            <button type="button" id="attach-btn" title="Adjuntar" aria-haspopup="menu" aria-expanded="false"
+                    class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 transition-colors disabled:opacity-50">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+              </svg>
+            </button>
+            <div id="attach-menu" role="menu"
+                 class="hidden absolute bottom-full left-0 mb-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20">
+              <button type="button" role="menuitem" id="attach-file"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                </svg>
+                Adjuntar archivo
+              </button>
+              <button type="button" role="menuitem" id="attach-location"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Compartir ubicación
+              </button>
+            </div>
             <input id="file-input" type="file" name="files" multiple class="hidden"
                    onchange="document.getElementById('file-preview-bar').classList.toggle('hidden', this.files.length === 0)" />
-          </label>
+          </div>
 
           <!-- Emoji button (app/assets/emoji.js) -->
           <button type="button" data-emoji-picker aria-expanded="false" title="Emojis"
@@ -640,6 +661,61 @@
           </button>
         </div>
       </form>
+      <script>
+        (function () {
+          var form = document.getElementById('send-form');
+          // Menú de adjuntar: archivo o ubicación. La ubicación se toma UNA vez
+          // (getCurrentPosition, sin seguimiento) y el servidor la guarda como enlace OSM.
+          var attachBtn = document.getElementById('attach-btn');
+          var attachMenu = document.getElementById('attach-menu');
+          function menu(open) {
+            attachMenu.classList.toggle('hidden', !open);
+            attachBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          }
+          attachBtn.addEventListener('click', function () { menu(attachMenu.classList.contains('hidden')); });
+          document.addEventListener('click', function (e) {
+            if (!attachBtn.parentNode.contains(e.target)) menu(false);
+          });
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu(false); });
+          document.getElementById('attach-file').addEventListener('click', function () {
+            menu(false);
+            document.getElementById('file-input').click();
+          });
+          document.getElementById('attach-location').addEventListener('click', function () {
+            menu(false);
+            if (!navigator.geolocation) {
+              alert('Este navegador no permite obtener la ubicación.');
+              return;
+            }
+            attachBtn.disabled = true;
+            navigator.geolocation.getCurrentPosition(function (pos) {
+              var lat = pos.coords.latitude.toFixed(6), lng = pos.coords.longitude.toFixed(6);
+              var acc = Math.round(pos.coords.accuracy);
+              if (!confirm('¿Enviar tu ubicación actual a este chat?\n\n' + lat + ', ' + lng + ' (precisión ±' + acc + ' m)')) {
+                attachBtn.disabled = false;
+                return;
+              }
+              var fd = new FormData();
+              fd.append('location', lat + ',' + lng);
+              fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) {
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  htmx.trigger(document.body, 'refreshFeed');
+                })
+                .catch(function (e) { alert('No se pudo enviar la ubicación (' + e.message + ').'); })
+                .finally(function () { attachBtn.disabled = false; });
+            }, function (e) {
+              attachBtn.disabled = false;
+              var why = {
+                1: 'El permiso está bloqueado. Habilítalo en el candado de la barra de direcciones (Ubicación → Permitir) y, si persiste, en la configuración de privacidad del sistema operativo.',
+                2: 'No se pudo determinar la ubicación (sin GPS/red disponible).',
+                3: 'Se agotó el tiempo para obtener la ubicación. Intenta de nuevo.'
+              }[e.code] || '';
+              alert('No se pudo obtener tu ubicación.\n\n' + why);
+            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+          });
+        })();
+      </script>
       <script>
         // Notas de voz estilo WhatsApp: MediaRecorder graba (Chrome/Firefox: webm/opus,
         // Safari: mp4/aac) y se manda como un adjunto más al mismo /send. Corta solo
@@ -693,7 +769,13 @@
             try {
               stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             } catch (e) {
-              alert('No se pudo acceder al micrófono.\n\nRevisa los permisos del navegador.');
+              var why = {
+                NotAllowedError: 'El permiso está bloqueado. Habilítalo en el candado de la barra de direcciones (Micrófono → Permitir) y, si persiste, en la configuración de privacidad del sistema operativo.',
+                NotFoundError: 'No se detectó ningún micrófono conectado.',
+                NotReadableError: 'El micrófono está en uso por otra aplicación o el sistema no permite usarlo.',
+                SecurityError: 'El sitio debe abrirse por HTTPS.'
+              }[e.name] || '';
+              alert('No se pudo acceder al micrófono.\n\n' + why + '\n\nDetalle: ' + e.name + (e.message ? ' — ' + e.message : ''));
               return;
             }
             var t = TYPES.find(function (x) { return MediaRecorder.isTypeSupported(x[0]); });

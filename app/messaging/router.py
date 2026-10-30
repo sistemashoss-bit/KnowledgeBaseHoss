@@ -52,6 +52,10 @@ def _format_last_seen(iso_str: str | None) -> str | None:
         return None
 
 
+def osm_location_url(lat: float, lng: float) -> str:
+    return f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lng:.6f}#map=17/{lat:.6f}/{lng:.6f}"
+
+
 def _safe_filename(name: str) -> str:
     name = re.sub(r"[^\w.\-]", "_", name)
     return name[:200] or "file"
@@ -776,6 +780,7 @@ def send_message(
     request: Request,
     content: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
+    location: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -797,6 +802,17 @@ def send_message(
 
     content = content.strip()
     valid_files = [f for f in files if f.filename]
+    if location:
+        # Ubicación compartida una sola vez ("lat,lng" del navegador): el mensaje es
+        # solo el enlace de OSM, que la plantilla dibuja como mapa (filtro osm_location).
+        try:
+            lat, lng = (float(v) for v in location.split(","))
+        except ValueError:
+            raise HTTPException(400)
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            raise HTTPException(400)
+        content = osm_location_url(lat, lng)
+        valid_files = []
     if not content and not valid_files:
         raise HTTPException(400)
 
@@ -836,7 +852,9 @@ def send_message(
     # El mensaje va a notificationservice ANTES del fan-out en tiempo real: si el
     # destinatario tiene el chat abierto, su refresco publica `read` y debe
     # llegar después del `message`, o el contador queda en 1 para siempre.
-    if content:
+    if location:
+        preview = "📍 Ubicación"
+    elif content:
         preview = content[:120]
     elif all(ct.startswith("audio/") for ct in content_types):
         preview = "🎤 Nota de voz"

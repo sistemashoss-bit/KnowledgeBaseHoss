@@ -30,8 +30,34 @@
     </p>
     {% endif %}
 
+    {# Ubicación compartida: tarjeta con mapa de OpenStreetMap #}
+    {% set loc = msg.content | osm_location %}
+    {% if loc %}
+    <div class="w-64 max-w-full overflow-hidden rounded-2xl border {% if is_mine %}ml-auto border-blue-300 rounded-br-sm{% else %}border-gray-200 shadow-sm rounded-bl-sm{% endif %} bg-white">
+      {# El iframe es más alto que la ventana y se recorta igual arriba y abajo: el
+         marcador queda al centro sin los controles ni el pie del embed, cuya
+         atribución se repite abajo (requisito de la licencia de OSM). #}
+      <div class="h-40 overflow-hidden">
+        <iframe src="{{ loc.embed }}" title="Ubicación compartida" loading="lazy" tabindex="-1"
+                class="block w-full h-[19rem] -mt-[4.5rem] border-0 pointer-events-none"></iframe>
+      </div>
+      <a href="{{ loc.url }}" target="_blank" rel="noopener noreferrer"
+         class="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+        <svg class="w-4 h-4 shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="min-w-0">
+          <span class="block font-medium">Ubicación</span>
+          <span class="block text-gray-400 tabular-nums">{{ '%.6f' | format(loc.lat) }}, {{ '%.6f' | format(loc.lng) }}</span>
+        </span>
+        <span class="ml-auto shrink-0 text-blue-500">Abrir</span>
+      </a>
+      <p class="px-3 pb-1.5 -mt-1 text-[10px] text-gray-400">© colaboradores de OpenStreetMap</p>
+    </div>
+
     {# Text bubble #}
-    {% if msg.content %}
+    {% elif msg.content %}
     <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
       {% if is_mine %}
         msg-mine ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white

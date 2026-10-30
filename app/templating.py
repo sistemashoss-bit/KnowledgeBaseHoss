@@ -38,6 +38,36 @@ def _linkify(text: str | None) -> Markup:
 templates.env.filters["linkify"] = _linkify
 
 
+# Mensaje de "compartir ubicación" del chat: su contenido es exactamente el enlace
+# que arma app/messaging/router.py (osm_location_url). Se dibuja como tarjeta con mapa.
+_OSM_LOCATION_RE = re.compile(
+    r"https://www\.openstreetmap\.org/\?mlat=(-?\d{1,2}\.\d+)&mlon=(-?\d{1,3}\.\d+)#map=\d+/[-\d.]+/[-\d.]+"
+)
+
+
+def _osm_location(text: str | None) -> dict | None:
+    m = _OSM_LOCATION_RE.fullmatch((text or "").strip())
+    if not m:
+        return None
+    lat, lng = float(m.group(1)), float(m.group(2))
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    d = 0.003
+    return {
+        "lat": lat,
+        "lng": lng,
+        "url": m.group(0),
+        "embed": (
+            "https://www.openstreetmap.org/export/embed.html"
+            f"?bbox={lng - d:.6f},{lat - d / 2:.6f},{lng + d:.6f},{lat + d / 2:.6f}"
+            f"&layer=mapnik&marker={lat:.6f},{lng:.6f}"
+        ),
+    }
+
+
+templates.env.filters["osm_location"] = _osm_location
+
+
 def _mentionify(html, names=None, me: str = "") -> Markup:
     # Después de linkify: resalta @Nombre/@todos de los participantes del grupo.
     from app.mentions import highlight
