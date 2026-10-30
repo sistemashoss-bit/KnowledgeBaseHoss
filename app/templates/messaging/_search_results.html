@@ -1,0 +1,25 @@
+{#- Resultados de búsqueda del chat abierto (GET /messaging/{conv}/search).
+    Clic en uno → window.feedJumpTo(id) (script del feed en index.html). -#}
+{% if q | length < 2 %}
+<p class="px-3 py-6 text-center text-sm text-gray-400">Escribe al menos 2 letras.</p>
+{% elif not results %}
+<p class="px-3 py-6 text-center text-sm text-gray-400">Sin resultados para «{{ q }}».</p>
+{% else %}
+<ul class="divide-y divide-gray-100">
+  {% for msg in results %}
+  <li>
+    <button type="button" onclick="feedJumpTo('{{ msg.id }}')"
+            class="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors">
+      <span class="flex items-center justify-between gap-2 text-xs text-gray-400">
+        <span class="truncate font-medium text-gray-600">{% if msg.sender_id == current_user.id %}Tú{% else %}{{ (msg.sender.name or msg.sender.email) if msg.sender else "?" }}{% endif %}</span>
+        <time class="shrink-0" datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
+      </span>
+      <span class="block text-sm text-gray-700 line-clamp-2 [overflow-wrap:anywhere]">{{ msg.content | highlight(q) }}</span>
+    </button>
+  </li>
+  {% endfor %}
+</ul>
+{% if results | length >= limit %}
+<p class="px-3 py-2 text-center text-xs text-gray-400">Se muestran los {{ limit }} más recientes.</p>
+{% endif %}
+{% endif %}

@@ -1,9 +1,10 @@
 import json
+import logging
 import mimetypes
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -23,9 +24,11 @@ from app.models import (
     Message, MessageAttachment, MessageReaction, User,
     ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP,
 )
-from app.templating import templates
+from app.templating import _osm_location, templates
 
 _ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
+EDIT_WINDOW = timedelta(minutes=15)  # editar el propio mensaje; eliminar no tiene límite
+_SEARCH_LIMIT = 50
 _FEED_PAGE = 50  # mensajes por carga del feed; los anteriores con "Ver anteriores"
 
 
@@ -60,6 +63,8 @@ def _safe_filename(name: str) -> str:
     name = re.sub(r"[^\w.\-]", "_", name)
     return name[:200] or "file"
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/messaging", tags=["messaging"])
 
@@ -369,6 +374,7 @@ def _feed_context(
         "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
         "mention_names": names,
         "mention_me": mentions.display_name(current_user),
+        "edit_since": datetime.utcnow() - EDIT_WINDOW,
     }
 
 
@@ -634,6 +640,145 @@ def toggle_message_reaction(
     # ni tocar contadores de no leídos.
     realtime.notify_reaction(realtime.channel(conv_id), msg.id)
     return _render_message_reactions(request, msg, current_user, db)
+
+
+def _editable(msg: Message) -> bool:
+    """Solo texto (no sticker/ubicación ni solo-adjuntos), dentro de EDIT_WINDOW."""
+    return (
+        not msg.deleted_at
+        and bool(msg.content)
+        and not stickers.STICKER_URL_RE.fullmatch(msg.content)
+        and not _osm_location(msg.content)
+        and datetime.utcnow() - msg.created_at <= EDIT_WINDOW
+    )
+
+
+def _own_message(conv_id: str, msg_id: str, current_user, db: Session) -> Message:
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    msg = _message_in_conv(conv_id, msg_id, db)
+    if msg.sender_id != current_user.id:
+        raise HTTPException(403)
+    return msg
+
+
+def _render_message(request: Request, msg: Message, current_user: User, db: Session):
+    """Una sola fila del feed (para reemplazarla tras editar/eliminar)."""
+    conv_type = db.query(Conversation.type).filter(Conversation.id == msg.conversation_id).scalar()
+    return templates.TemplateResponse(
+        request,
+        "messaging/_messages.html",
+        _feed_context([msg], current_user, db, conv_type == CONV_GROUP, msg.conversation_id),
+    )
+
+
+@router.get("/{conv_id}/messages/{msg_id}", response_class=HTMLResponse)
+def message_row(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Fila de un mensaje (la pide el cliente al recibir `event: msgupdate`)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    return _render_message(request, _message_in_conv(conv_id, msg_id, db), current_user, db)
+
+
+@router.post("/{conv_id}/messages/{msg_id}/edit", response_class=HTMLResponse)
+def edit_message(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    content: str = Form(default=""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    msg = _own_message(conv_id, msg_id, current_user, db)
+    if not _editable(msg):
+        raise HTTPException(409, "Este mensaje ya no se puede editar (solo durante 15 minutos).")
+    content = content.strip()
+    if not content:
+        raise HTTPException(400)
+    if content != msg.content:
+        msg.content = content
+        msg.edited_at = datetime.utcnow()
+        db.commit()
+        realtime.notify_message_update(conv_id, msg.id)
+    return _render_message(request, msg, current_user, db)
+
+
+@router.post("/{conv_id}/messages/{msg_id}/delete", response_class=HTMLResponse)
+def delete_message(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Eliminar para todos: queda "Mensaje eliminado"; se borran texto, adjuntos
+    (también de Wasabi) y reacciones."""
+    msg = _own_message(conv_id, msg_id, current_user, db)
+    if not msg.deleted_at:
+        names = [a.filename for a in msg.attachments]
+        for att in msg.attachments:
+            try:
+                storage.delete_chat_file(att.file_key)
+            except Exception:
+                logger.warning("delete_message: no se pudo borrar %s", att.file_key, exc_info=True)
+        db.query(MessageAttachment).filter(MessageAttachment.message_id == msg.id).delete(synchronize_session=False)
+        db.query(MessageReaction).filter(MessageReaction.message_id == msg.id).delete(synchronize_session=False)
+        msg.content = ""
+        msg.deleted_at = datetime.utcnow()
+        db.commit()
+        db.refresh(msg)
+        realtime.notify_message_update(conv_id, msg.id)
+        audit.log_action(
+            "chat_message_delete", user=current_user, request=request,
+            resource_type="conversation", resource_id=conv_id,
+            details=f"message={msg.id}" + (f" files={','.join(names[:5])}" if names else ""),
+        )
+    return _render_message(request, msg, current_user, db)
+
+
+@router.get("/{conv_id}/search", response_class=HTMLResponse)
+def search_messages(
+    conv_id: str,
+    request: Request,
+    q: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Buscar texto en el chat abierto (sin eliminados, stickers ni ubicaciones)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    q = q.strip()[:100]
+    results = []
+    if len(q) >= 2:
+        pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        results = (
+            db.query(Message)
+            .options(joinedload(Message.sender))
+            .filter(
+                Message.conversation_id == conv_id,
+                Message.deleted_at.is_(None),
+                Message.content.ilike(pattern, escape="\\"),
+                ~Message.content.like("https://mssgs-stickers.com/files/%"),
+                ~Message.content.like("https://www.openstreetmap.org/?mlat=%"),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(_SEARCH_LIMIT)
+            .all()
+        )
+    return templates.TemplateResponse(
+        request,
+        "messaging/_search_results.html",
+        {"q": q, "results": results, "limit": _SEARCH_LIMIT, "current_user": current_user},
+    )
 
 
 @router.get("/{conv_id}/events")

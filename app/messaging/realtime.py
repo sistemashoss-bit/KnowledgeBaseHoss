@@ -138,6 +138,16 @@ def notify_reaction(chan: str, target_id) -> None:
     vk.publish(chan, f"{_REACTION_PREFIX}{target_id}")
 
 
+# Igual que las reacciones, pero para un mensaje editado o eliminado: sale como
+# `event: msgupdate` y el cliente vuelve a pedir solo esa fila del feed.
+_UPDATE_PREFIX = "msgupdate:"
+
+
+def notify_message_update(conv_id, msg_id) -> None:
+    from app import valkey_client as vk
+    vk.publish(channel(conv_id), f"{_UPDATE_PREFIX}{msg_id}")
+
+
 async def _channel_stream(chan: str, request, event_name: str):
     """Yield SSE frames from a Pub/Sub channel until the client disconnects.
 
@@ -166,6 +176,9 @@ async def _channel_stream(chan: str, request, event_name: str):
                 data = msg.get("data", "new")
                 if isinstance(data, str) and data.startswith(_REACTION_PREFIX):
                     yield f"event: reaction\ndata: {data[len(_REACTION_PREFIX):]}\n\n"
+                    continue
+                if isinstance(data, str) and data.startswith(_UPDATE_PREFIX):
+                    yield f"event: msgupdate\ndata: {data[len(_UPDATE_PREFIX):]}\n\n"
                     continue
                 yield f"event: {event_name}\ndata: {data}\n\n"
         except asyncio.CancelledError:

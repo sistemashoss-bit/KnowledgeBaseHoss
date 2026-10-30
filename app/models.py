@@ -867,6 +867,10 @@ class Message(Base):
     sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    edited_at = Column(DateTime, nullable=True)
+    # Eliminado por su autor: queda como "Mensaje eliminado" (contenido vacío,
+    # sin adjuntos ni reacciones) hasta que lo purgue la retención.
+    deleted_at = Column(DateTime, nullable=True)
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="sent_messages")

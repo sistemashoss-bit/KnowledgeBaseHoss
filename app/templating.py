@@ -81,6 +81,33 @@ def _stickers_enabled() -> bool:
 
 
 templates.env.filters["sticker_url"] = _sticker_url
+
+
+def _msg_preview(msg) -> str:
+    """Texto corto de un mensaje para la lista de chats (no la URL cruda de un
+    sticker o una ubicación)."""
+    if getattr(msg, "deleted_at", None):
+        return "Mensaje eliminado"
+    content = msg.content or ""
+    if _sticker_url(content):
+        return "Sticker"
+    if _osm_location(content):
+        return "📍 Ubicación"
+    return content or "📎 Archivo adjunto"
+
+
+def _highlight(text: str | None, term: str | None) -> Markup:
+    """Escapa `text` y marca cada aparición de `term` (sin distinguir mayúsculas)."""
+    escaped = str(escape(text or ""))
+    term = str(escape((term or "").strip()))
+    if not term:
+        return Markup(escaped)
+    return Markup(re.sub(re.escape(term), lambda m: f'<mark class="bg-yellow-200 rounded px-0.5">{m.group(0)}</mark>',
+                         escaped, flags=re.IGNORECASE))
+
+
+templates.env.filters["msg_preview"] = _msg_preview
+templates.env.filters["highlight"] = _highlight
 templates.env.globals["stickers_enabled"] = _stickers_enabled
 
 

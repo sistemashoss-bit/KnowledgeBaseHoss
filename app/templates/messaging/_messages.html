@@ -4,6 +4,12 @@
 
 {% for msg in messages %}
 {% set is_mine = msg.sender_id == current_user.id %}
+{% set loc = msg.content | osm_location %}
+{% set sticker = msg.content | sticker_url %}
+{#- Editable: texto propio dentro de los 15 min (EDIT_WINDOW en messaging/router.py,
+    que es quien lo valida; el script del feed oculta "Editar" al vencer). -#}
+{% set editable = is_mine and not msg.deleted_at and msg.content and not sticker and not loc
+                  and edit_since is defined and msg.created_at > edit_since %}
 <div data-msg-id="{{ msg.id }}" {% if is_mine %}data-mine{% endif %} class="group flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
 
   {# ── Avatar (others, group only) ─────────────────────────────────────── #}
@@ -30,13 +36,17 @@
     </p>
     {% endif %}
 
-    {# Ubicación compartida: tarjeta con mapa de OpenStreetMap #}
-    {% set loc = msg.content | osm_location %}
-    {% set sticker = msg.content | sticker_url %}
-    {% if sticker %}
+    {% if msg.deleted_at %}
+    {# Eliminado por su autor (contenido, adjuntos y reacciones ya se borraron) #}
+    <div class="w-fit px-4 py-2.5 rounded-2xl text-sm italic text-gray-400 border border-dashed border-gray-300 bg-white {% if is_mine %}ml-auto rounded-br-sm{% else %}rounded-bl-sm{% endif %}">
+      Mensaje eliminado
+    </div>
+
     {# Sticker de mssgs-stickers.com: APNG animado, sin burbuja #}
+    {% elif sticker %}
     <img src="{{ sticker }}" alt="Sticker" loading="lazy" width="144" height="144"
          class="block w-36 h-36 object-contain {% if is_mine %}ml-auto{% endif %}" />
+    {# Ubicación compartida: tarjeta con mapa de OpenStreetMap #}
     {% elif loc %}
     <div class="w-64 max-w-full overflow-hidden rounded-2xl border {% if is_mine %}ml-auto border-blue-300 rounded-br-sm{% else %}border-gray-200 shadow-sm rounded-bl-sm{% endif %} bg-white">
       {# El iframe es más alto que la ventana y se recorta igual arriba y abajo: el
@@ -63,7 +73,8 @@
 
     {# Text bubble #}
     {% elif msg.content %}
-    <div class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
+    <div data-msg-text {% if editable %}data-raw="{{ msg.content }}"{% endif %}
+         class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]
       {% if is_mine %}
         msg-mine ml-auto bg-blue-500 text-white rounded-br-sm [&_a]:text-white
       {% else %}
@@ -111,16 +122,38 @@
     {% endif %}
 
     {# Reacciones (bloque propio: se refresca solo, sin re-renderizar el feed) #}
+    {% if not msg.deleted_at %}
     {% with rx_id=msg.id, rx_list=reactions.get(msg.id, []) if reactions is defined else [],
             rx_url="/messaging/" ~ msg.conversation_id ~ "/messages/" ~ msg.id ~ "/reactions",
             rx_class=("mt-1 justify-end" if is_mine else "mt-1"),
             rx_float=("rx-at-left" if is_mine else "rx-at-right") %}
     {% include "_reactions.html" %}
     {% endwith %}
+    {% endif %}
 
     {# Timestamp #}
     <p class="text-xs text-gray-400 mt-1 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">
-      <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
+      {#- Opciones del mensaje propio (Editar / Eliminar). Van junto a la hora y no
+          al lado de la burbuja, donde flota el "+" de reacciones. -#}
+      {% if is_mine and not msg.deleted_at %}
+      <span class="relative inline-block align-middle mr-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+        <button type="button" data-msg-menu aria-label="Opciones del mensaje" aria-haspopup="menu" aria-expanded="false"
+                class="w-6 h-5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600 inline-flex items-center justify-center">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+        <span data-msg-menu-list role="menu"
+              class="hidden absolute right-0 bottom-full mb-1 w-36 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20 text-left">
+          {% if editable %}
+          <button type="button" role="menuitem" data-msg-edit
+                  data-created="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+                  class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Editar</button>
+          {% endif %}
+          <button type="button" role="menuitem" data-msg-delete
+                  class="block w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">Eliminar</button>
+        </span>
+      </span>
+      {% endif %}
+      <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>{% if msg.edited_at and not msg.deleted_at %} · editado{% endif %}
     </p>
   </div>
 

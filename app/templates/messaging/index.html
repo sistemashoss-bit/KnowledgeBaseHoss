@@ -110,7 +110,7 @@
               <p class="text-xs text-gray-400 truncate">
                 {% if item.last_msg %}
                   {% if item.last_msg.sender_id == current_user.id %}Tú: {% endif %}
-                  {{ item.last_msg.content[:40] }}{% if item.last_msg.content | length > 40 %}…{% endif %}
+                  {% set pv = item.last_msg | msg_preview %}{{ pv[:40] }}{% if pv | length > 40 %}…{% endif %}
                 {% elif item.last_seen_text %}
                   <span class="{% if item.is_online %}text-green-500{% endif %}">{{ item.last_seen_text }}</span>
                 {% else %}
@@ -189,6 +189,13 @@
             {% endif %}
           </p>
         </div>
+        <!-- Buscar en el chat -->
+        <button type="button" onclick="toggleMsgSearch()" title="Buscar en el chat"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/>
+          </svg>
+        </button>
         <!-- Audio call -->
         <button onclick="var m=document.getElementById('conv-meta'); initiateCall(m.dataset.convId, m.dataset.convName, false)"
                 title="Llamada de voz"
@@ -449,6 +456,21 @@
          hx-ext="sse" sse-connect="/messaging/{{ active_conv.id }}/events">
       {# Recibe `event: reaction` (data = id del mensaje); el handler de abajo refresca ese bloque. #}
       <span sse-swap="reaction" hx-target="this" hx-swap="innerHTML" hidden></span>
+      {# `event: msgupdate` (mensaje editado/eliminado): el handler de abajo vuelve a pedir esa fila. #}
+      <span sse-swap="msgupdate" hx-target="this" hx-swap="innerHTML" hidden></span>
+      <!-- Búsqueda en este chat (botón de lupa del encabezado) -->
+      <div id="msg-search" class="hidden absolute top-0 inset-x-0 z-30 bg-white border-b border-gray-200 shadow-md">
+        <div class="flex items-center gap-2 px-3 py-2">
+          <input id="msg-search-q" type="search" name="q" placeholder="Buscar en este chat..." autocomplete="off"
+                 hx-get="/messaging/{{ active_conv.id }}/search"
+                 hx-trigger="input changed delay:300ms, search"
+                 hx-target="#msg-search-results"
+                 class="flex-1 min-w-0 px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" />
+          <button type="button" onclick="toggleMsgSearch(false)"
+                  class="shrink-0 px-2 py-1 text-sm text-gray-500 hover:text-gray-700">Cerrar</button>
+        </div>
+        <div id="msg-search-results" class="max-h-72 overflow-y-auto"></div>
+      </div>
       <div id="message-feed"
            hx-get="/messaging/{{ active_conv.id }}/poll"
            hx-vals="js:{after: feedLastId()}"
@@ -547,6 +569,153 @@
           });
           // Un bloque de reacciones que crece no debe tapar el último mensaje.
           document.addEventListener('reactions:updated', function () { if (stick) toBottom(); });
+
+          // ── Editar / eliminar mensajes propios ─────────────────────────────
+          var convUrl = '/messaging/{{ active_conv.id }}';
+          var EDIT_MS = 15 * 60 * 1000;  // EDIT_WINDOW de messaging/router.py (quien lo valida)
+          function rowOf(id) { return feed.querySelector('[data-msg-id="' + id + '"]'); }
+          function replaceRow(id, html) {
+            var old = rowOf(id);
+            if (!old) return;
+            var tpl = document.createElement('template');
+            tpl.innerHTML = html.trim();
+            var row = tpl.content.querySelector('[data-msg-id]');
+            if (!row) return;
+            old.replaceWith(row);
+            htmx.process(row);
+            // base.html formatea las horas en htmx:afterSwap; este reemplazo no es de htmx.
+            row.dispatchEvent(new CustomEvent('htmx:afterSwap', { bubbles: true, detail: { target: row } }));
+          }
+          function refreshRow(id) {
+            if (!rowOf(id) || rowOf(id).querySelector('[data-edit-form]')) return;
+            fetch(convUrl + '/messages/' + id)
+              .then(function (r) { return r.ok ? r.text() : ''; })
+              .then(function (html) { if (html) replaceRow(id, html); });
+          }
+          function post(id, action, body) {
+            return fetch(convUrl + '/messages/' + id + '/' + action, { method: 'POST', body: body || new FormData(), credentials: 'same-origin' })
+              .then(function (r) {
+                if (r.ok) return r.text();
+                return r.json().then(function (d) { return d.detail; }, function () { return null; })
+                  .then(function (t) { throw new Error(t || ('error ' + r.status)); });
+              })
+              .then(function (html) { replaceRow(id, html); });
+          }
+          function closeMenus(except) {
+            feed.querySelectorAll('[data-msg-menu-list]').forEach(function (m) {
+              if (m === except) return;
+              m.classList.add('hidden');
+              m.previousElementSibling.setAttribute('aria-expanded', 'false');
+            });
+          }
+          function startEdit(row) {
+            var bubble = row.querySelector('[data-msg-text]');
+            if (!bubble || row.querySelector('[data-edit-form]')) return;
+            var box = document.createElement('div');
+            box.setAttribute('data-edit-form', '');
+            box.className = 'flex flex-col gap-1 items-end';
+            var ta = document.createElement('textarea');
+            ta.value = bubble.dataset.raw;
+            ta.rows = Math.min(6, ta.value.split('\n').length + 1);
+            ta.className = 'w-72 max-w-full px-3 py-2 border border-blue-300 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-blue-400';
+            var bar = document.createElement('div');
+            bar.className = 'flex items-center gap-2 text-xs';
+            bar.innerHTML = '<span class="text-gray-400">Enter guarda · Esc cancela</span>' +
+              '<button type="button" data-cancel class="px-2 py-1 rounded-lg text-gray-500 hover:bg-gray-100">Cancelar</button>' +
+              '<button type="button" data-save class="px-2 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-400">Guardar</button>';
+            box.appendChild(ta);
+            box.appendChild(bar);
+            bubble.classList.add('hidden');
+            bubble.after(box);
+            ta.focus();
+            ta.setSelectionRange(ta.value.length, ta.value.length);
+            function cancel() { box.remove(); bubble.classList.remove('hidden'); }
+            function save() {
+              var text = ta.value.trim();
+              if (!text) return;
+              if (text === bubble.dataset.raw.trim()) return cancel();
+              var fd = new FormData();
+              fd.append('content', text);
+              ta.disabled = true;
+              post(row.dataset.msgId, 'edit', fd).catch(function (e) {
+                ta.disabled = false;
+                alert('No se pudo editar el mensaje: ' + e.message);
+              });
+            }
+            bar.querySelector('[data-cancel]').addEventListener('click', cancel);
+            bar.querySelector('[data-save]').addEventListener('click', save);
+            ta.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); }
+              else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+            });
+          }
+          feed.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-msg-menu]');
+            if (btn) {
+              var list = btn.nextElementSibling;
+              closeMenus(list);
+              var edit = list.querySelector('[data-msg-edit]');
+              if (edit && Date.now() - Date.parse(edit.dataset.created) > EDIT_MS) edit.remove();
+              list.classList.toggle('hidden');
+              btn.setAttribute('aria-expanded', list.classList.contains('hidden') ? 'false' : 'true');
+              return;
+            }
+            var row = e.target.closest('[data-msg-id]');
+            if (e.target.closest('[data-msg-edit]')) {
+              closeMenus();
+              startEdit(row);
+            } else if (e.target.closest('[data-msg-delete]')) {
+              closeMenus();
+              if (!confirm('¿Eliminar este mensaje para todos?')) return;
+              post(row.dataset.msgId, 'delete').catch(function (err) { alert('No se pudo eliminar el mensaje: ' + err.message); });
+            }
+          });
+          document.addEventListener('click', function (e) {
+            if (!e.target.closest('[data-msg-menu], [data-msg-menu-list]')) closeMenus();
+          });
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenus(); });
+
+          // Editado/eliminado en otro cliente: solo se vuelve a pedir esa fila.
+          document.getElementById('feed-sse').addEventListener('htmx:sseMessage', function (e) {
+            if (e.detail && e.detail.type === 'msgupdate') refreshRow(e.detail.data);
+          });
+
+          // ── Búsqueda en el chat ────────────────────────────────────────────
+          var search = document.getElementById('msg-search');
+          window.toggleMsgSearch = function (on) {
+            if (on === undefined) on = search.classList.contains('hidden');
+            search.classList.toggle('hidden', !on);
+            if (on) document.getElementById('msg-search-q').focus();
+          };
+          // Salta al mensaje; si no está cargado, pide "Ver anteriores" hasta encontrarlo.
+          // Cada página se pide cuando htmx terminó la anterior (htmx 1.9 dispara un
+          // afterSwap por cada elemento nuevo, antes de procesar el botón siguiente).
+          window.feedJumpTo = function (id) {
+            var clicked = null, ticks = 0;
+            toggleMsgSearch(false);
+            (function step() {
+              var row = rowOf(id);
+              if (row) {
+                stick = false;
+                // Sin 'smooth': el reajuste de scroll de "Ver anteriores" lo cortaría.
+                row.scrollIntoView({ block: 'center' });
+                row.classList.add('bg-yellow-100', 'rounded-xl');
+                setTimeout(function () { row.classList.remove('bg-yellow-100', 'rounded-xl'); }, 2000);
+                return;
+              }
+              var busy = feed.querySelector('.htmx-request, .htmx-settling');
+              var older = feed.querySelector('[hx-get*="/older?before="]');
+              if (!busy && !older || ++ticks > 300) {
+                alert('No se encontró el mensaje en este chat.');
+                return;
+              }
+              if (!busy && older !== clicked) {
+                clicked = older;
+                htmx.trigger(older, 'click');
+              }
+              setTimeout(step, 100);
+            })();
+          };
         })();
       </script>
     </div>
