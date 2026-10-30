@@ -11,6 +11,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
+from sqlalchemy import and_
+
 from app.config import settings
 from app.database import SessionLocal
 from app.models import AuditLog, Message, MessageAttachment, SearchLog, Task, TASK_DONE
@@ -28,11 +30,14 @@ def purge_old_messages(days: int) -> tuple[int, int]:
     try:
         cutoff = datetime.utcnow() - timedelta(days=days)
 
+        # Los fijados (pinned_at) se conservan con sus adjuntos hasta que se desfijen.
+        expired = and_(Message.created_at < cutoff, Message.pinned_at.is_(None))
+
         # Delete storage objects first — we need the keys before the rows vanish.
         keys = (
             db.query(MessageAttachment.file_key)
             .join(Message, MessageAttachment.message_id == Message.id)
-            .filter(Message.created_at < cutoff)
+            .filter(expired)
             .all()
         )
         for (key,) in keys:
@@ -44,13 +49,13 @@ def purge_old_messages(days: int) -> tuple[int, int]:
 
         # Explicit ordered delete (attachments → messages) so it works whether or
         # not the DB-level ON DELETE CASCADE migration has been applied.
-        old_msg_ids = db.query(Message.id).filter(Message.created_at < cutoff)
+        old_msg_ids = db.query(Message.id).filter(expired)
         db.query(MessageAttachment).filter(
             MessageAttachment.message_id.in_(old_msg_ids)
         ).delete(synchronize_session=False)
         messages_deleted = (
             db.query(Message)
-            .filter(Message.created_at < cutoff)
+            .filter(expired)
             .delete(synchronize_session=False)
         )
         db.commit()

@@ -38,7 +38,7 @@ from app.models import (
     CALENDAR_MAX_SUBSCRIPTIONS, CALENDAR_REMINDER_OPTIONS, PROJECT_COMPLETED,
     ROLE_SUPERADMIN, TASK_DONE, TASK_TAG_COLORS,
 )
-from app.messaging import realtime
+from app.messaging import realtime, stickers
 from app.permissions import (
     calendar_department_ids, calendar_members_query, granted_department_ids, has_oversight, is_manager,
     manager_scope, visible_projects_filter,
@@ -824,6 +824,8 @@ def _comment_json(c: CalendarEventComment, user: User, ev: CalendarEvent, rx: li
     return {
         "id": str(c.id),
         "content": c.content,
+        # Comentario-sticker: URL del APNG (se dibuja como imagen y no se edita).
+        "sticker": c.content if stickers.is_sticker(c.content) else None,
         "author": _display_name(c.user),
         "initials": _initials(c.user),
         # Firma local (sin red), igual que avatar_url en las plantillas.
@@ -831,7 +833,7 @@ def _comment_json(c: CalendarEventComment, user: User, ev: CalendarEvent, rx: li
         "created_at": to_local(c.created_at).isoformat(timespec="minutes"),
         "edited": c.edited,
         # Edita solo el autor; borra el autor o el dueño del evento.
-        "can_edit": c.user_id == user.id,
+        "can_edit": c.user_id == user.id and not stickers.is_sticker(c.content),
         "can_delete": c.user_id == user.id or ev.owner_id == user.id,
         "reactions": rx or [],
     }
@@ -861,15 +863,17 @@ def list_comments(
 def add_comment(
     event_id: str,
     request: Request,
-    content: str = Form(...),
+    content: str = Form(default=""),
     date: str = Form(""),
+    sticker: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     if not current_user:
         raise HTTPException(401)
     ev = _visible_event(event_id, current_user, db)
-    content = content.strip()[:5000]
+    # Un sticker se guarda como la URL de su APNG (igual que en el chat).
+    content = stickers.require_url(sticker) if sticker else content.strip()[:5000]
     if not content:
         raise HTTPException(422, "Escribe un comentario")
 
@@ -893,14 +897,14 @@ def add_comment(
         realtime.notify_user(
             uid,
             title=f"{actor} comentó en «{ev.title}»",
-            body=content[:120],
+            body="Sticker" if sticker else content[:120],
             url=f"/calendar/?date={day.isoformat()}&event={ev.id}",
             kind="calendar_comment",
         )
     audit.log_action(
         "calendar_event_comment", user=current_user, request=request,
         resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
-        details=content[:80],
+        details="sticker" if sticker else content[:80],
     )
     return _comment_json(comment, current_user, ev)
 
@@ -932,6 +936,8 @@ def edit_comment(
     comment = _event_comment(ev, comment_id, db)
     if comment.user_id != current_user.id:
         raise HTTPException(403)
+    if stickers.is_sticker(comment.content):
+        raise HTTPException(400, "Un sticker no se puede editar")
     content = content.strip()[:5000]
     if not content:
         raise HTTPException(422, "Escribe un comentario")

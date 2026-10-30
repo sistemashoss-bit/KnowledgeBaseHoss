@@ -152,5 +152,11 @@ def get_chat_file_url(key: str, filename: str, inline: bool = False) -> str:
     })
 
 
+def copy_chat_file(src_key: str, dst_key: str) -> None:
+    """Copia dentro del bucket de chats sin descargar (mensajes reenviados)."""
+    bucket = settings.wasabi_chats_bucket_name
+    _client().copy_object(Bucket=bucket, Key=dst_key, CopySource={"Bucket": bucket, "Key": src_key})
+
+
 def delete_chat_file(key: str) -> None:
     _client().delete_object(Bucket=settings.wasabi_chats_bucket_name, Key=key)

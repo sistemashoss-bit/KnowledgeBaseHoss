@@ -922,6 +922,17 @@
                     d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </button>
+          {% if stickers_enabled() %}
+          <!-- Stickers (app/assets/stickers.js): se envían solos, sin el texto -->
+          <button type="button" data-sticker-picker aria-expanded="false" title="Stickers"
+                  class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-200 transition-colors shrink-0"
+                  hx-on:sticker-pick="htmx.ajax('POST', '/tasks/{{ task.id }}/comments', { target: '#comments-list', swap: 'beforeend', values: { sticker: event.detail.id } }).then(function () { var e = document.getElementById('no-comments'); if (e) e.remove(); })">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M15 3H7a4 4 0 00-4 4v10a4 4 0 004 4h6l8-8V7a4 4 0 00-4-4h-2zm0 18v-4a4 4 0 014-4h2M9 10h.01M15 10h.01M9.5 14.5a3.5 3.5 0 004 .5"/>
+            </svg>
+          </button>
+          {% endif %}
           <button type="submit"
                   class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors shrink-0">
             Enviar

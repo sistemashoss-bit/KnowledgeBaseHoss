@@ -8,9 +8,13 @@
 {% set sticker = msg.content | sticker_url %}
 {#- Editable: texto propio dentro de los 15 min (EDIT_WINDOW en messaging/router.py,
     que es quien lo valida; el script del feed oculta "Editar" al vencer). -#}
-{% set editable = is_mine and not msg.deleted_at and msg.content and not sticker and not loc
+{% set editable = is_mine and not msg.deleted_at and not msg.forwarded and msg.content and not sticker and not loc
                   and edit_since is defined and msg.created_at > edit_since %}
-<div data-msg-id="{{ msg.id }}" {% if is_mine %}data-mine{% endif %} class="group flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
+{#- data-sender/data-preview: los usa la barra "Respondiendo a…" del composer. -#}
+<div data-msg-id="{{ msg.id }}" {% if is_mine %}data-mine{% endif %}
+     data-sender="{{ 'Tú' if is_mine else ((msg.sender.name or msg.sender.email) if msg.sender else '') }}"
+     data-preview="{{ (msg | msg_preview)[:120] }}"
+     class="group flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
 
   {# ── Avatar (others, group only) ─────────────────────────────────────── #}
   {% if show_avatars and not is_mine %}
@@ -34,6 +38,19 @@
     <p class="text-xs text-gray-400 mb-1 ml-1">
       {{ msg.sender.name or msg.sender.email }}
     </p>
+    {% endif %}
+
+    {# Reenviado / cita del mensaje al que responde (clic → salta al original) #}
+    {% if msg.forwarded and not msg.deleted_at %}
+    <p class="text-[11px] italic text-gray-400 mb-0.5 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">↪ Reenviado</p>
+    {% endif %}
+    {% if msg.reply_to and not msg.deleted_at %}
+    {% set orig = msg.reply_to %}
+    <button type="button" data-jump="{{ orig.id }}"
+            class="block w-fit max-w-full mb-1 px-3 py-1.5 rounded-xl border-l-4 border-blue-400 bg-gray-100 hover:bg-gray-200 text-left text-xs transition-colors {% if is_mine %}ml-auto{% endif %}">
+      <span class="block font-medium text-blue-600">{{ 'Tú' if orig.sender_id == current_user.id else ((orig.sender.name or orig.sender.email) if orig.sender else '') }}</span>
+      <span class="block text-gray-600 truncate max-w-[16rem]">{{ orig | msg_preview }}</span>
+    </button>
     {% endif %}
 
     {% if msg.deleted_at %}
@@ -133,26 +150,41 @@
 
     {# Timestamp #}
     <p class="text-xs text-gray-400 mt-1 {% if is_mine %}text-right mr-1{% else %}ml-1{% endif %}">
-      {#- Opciones del mensaje propio (Editar / Eliminar). Van junto a la hora y no
-          al lado de la burbuja, donde flota el "+" de reacciones. -#}
-      {% if is_mine and not msg.deleted_at %}
+      {#- Opciones del mensaje (Responder / Fijar / Reenviar; en los propios también
+          Editar / Eliminar). Van junto a la hora y no al lado de la burbuja, donde
+          flota el "+" de reacciones. -#}
+      {% if not msg.deleted_at %}
       <span class="relative inline-block align-middle mr-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
         <button type="button" data-msg-menu aria-label="Opciones del mensaje" aria-haspopup="menu" aria-expanded="false"
                 class="w-6 h-5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600 inline-flex items-center justify-center">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
         <span data-msg-menu-list role="menu"
-              class="hidden absolute right-0 bottom-full mb-1 w-36 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20 text-left">
+              class="hidden absolute {% if is_mine %}right-0{% else %}left-0{% endif %} bottom-full mb-1 w-36 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-20 text-left">
+          <button type="button" role="menuitem" data-msg-reply
+                  class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Responder</button>
+          {% if msg.pinned_at %}
+          <button type="button" role="menuitem" data-msg-unpin
+                  class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Desfijar</button>
+          {% else %}
+          <button type="button" role="menuitem" data-msg-pin
+                  class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Fijar</button>
+          {% endif %}
+          <button type="button" role="menuitem" data-msg-forward
+                  class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Reenviar</button>
           {% if editable %}
           <button type="button" role="menuitem" data-msg-edit
                   data-created="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
                   class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Editar</button>
           {% endif %}
+          {% if is_mine %}
           <button type="button" role="menuitem" data-msg-delete
                   class="block w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">Eliminar</button>
+          {% endif %}
         </span>
       </span>
       {% endif %}
+      {% if msg.pinned_at %}<span title="Fijado" aria-label="Fijado">📌</span>{% endif %}
       <time datetime="{{ msg.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</time>{% if msg.edited_at and not msg.deleted_at %} · editado{% endif %}
     </p>
   </div>

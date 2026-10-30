@@ -196,7 +196,10 @@
                         · <span x-text="calFmtStamp(c.created_at)"></span>
                         <span x-show="c.edited" class="text-gray-400">(editado)</span>
                       </p>
-                      <template x-if="editingId !== c.id">
+                      <template x-if="editingId !== c.id && c.sticker">
+                        <img :src="c.sticker" alt="Sticker" loading="lazy" width="112" height="112" class="block w-28 h-28 object-contain">
+                      </template>
+                      <template x-if="editingId !== c.id && !c.sticker">
                         <p class="text-sm text-gray-800 whitespace-pre-line break-words" x-text="c.content"></p>
                       </template>
                       <div class="flex flex-wrap items-center gap-1 mt-1" x-show="editingId !== c.id">
@@ -253,6 +256,17 @@
                           d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
                 </button>
+                {% if stickers_enabled() %}
+                <!-- Stickers (app/assets/stickers.js): se envían solos, sin el texto -->
+                <button type="button" data-sticker-picker aria-expanded="false" title="Stickers"
+                        @sticker-pick="addSticker($event.detail.id)" :disabled="commentSaving"
+                        class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 transition-colors shrink-0">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M15 3H7a4 4 0 00-4 4v10a4 4 0 004 4h6l8-8V7a4 4 0 00-4-4h-2zm0 18v-4a4 4 0 014-4h2M9 10h.01M15 10h.01M9.5 14.5a3.5 3.5 0 004 .5"/>
+                  </svg>
+                </button>
+                {% endif %}
                 <button type="submit" :disabled="commentSaving || !commentText.trim()"
                         class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-sm">Enviar</button>
               </form>
@@ -1035,6 +1049,24 @@
           this.commentError = 'No se pudieron cargar los comentarios';
         } finally {
           this.commentsLoading = false;
+        }
+      },
+
+      async addSticker(id) {
+        if (!id || this.commentSaving) return;
+        const d = this.detail;
+        this.commentSaving = true;
+        this.commentError = '';
+        try {
+          const c = await this.post(`/calendar/events/${d.eventId}/comments`, {
+            sticker: id, date: calSplit(d.startStr).date,
+          });
+          this.comments.push(c);
+          calendar.refetchEvents();
+        } catch (e) {
+          this.commentError = e.message;
+        } finally {
+          this.commentSaving = false;
         }
       },
 

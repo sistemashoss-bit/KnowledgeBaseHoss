@@ -1,0 +1,14 @@
+{#- Barra de fijados del chat (GET /messaging/{conv}/pins). Clic → salta al mensaje
+    (feedJumpTo carga páginas anteriores si hace falta); ✕ desfija. -#}
+{% for msg in pins %}
+<div class="flex items-center gap-2 px-4 py-1.5 text-xs {% if not loop.last %}border-b border-amber-100{% endif %}">
+  <span aria-hidden="true">📌</span>
+  <button type="button" onclick="feedJumpTo('{{ msg.id }}')" class="flex-1 min-w-0 text-left truncate hover:underline">
+    <span class="font-medium text-gray-700">{{ 'Tú' if msg.sender_id == current_user.id else ((msg.sender.name or msg.sender.email) if msg.sender else '') }}:</span>
+    <span class="text-gray-600">{{ msg | msg_preview }}</span>
+  </button>
+  <button type="button" title="Desfijar" aria-label="Desfijar"
+          hx-post="/messaging/{{ conv_id }}/messages/{{ msg.id }}/unpin" hx-swap="none"
+          class="shrink-0 w-5 h-5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-amber-100">✕</button>
+</div>
+{% endfor %}

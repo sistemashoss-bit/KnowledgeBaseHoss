@@ -24,10 +24,12 @@ from app.models import (
     Message, MessageAttachment, MessageReaction, User,
     ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP,
 )
-from app.templating import _osm_location, templates
+from app.templating import _msg_preview, _osm_location, templates
 
 _ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
 EDIT_WINDOW = timedelta(minutes=15)  # editar el propio mensaje; eliminar no tiene límite
+MAX_PINNED = 3  # fijados por chat; fijar otro desfija el más antiguo (como WhatsApp)
+MAX_FORWARD_TARGETS = 10
 _SEARCH_LIMIT = 50
 _FEED_PAGE = 50  # mensajes por carga del feed; los anteriores con "Ver anteriores"
 
@@ -301,12 +303,20 @@ def _mark_read(conv_id, user_id, db: Session, *, force_publish: bool = False):
             notification_bus.publish_read(conv_id, user_id)
 
 
+# Lo que dibuja _messages.html de cada mensaje, incluida la cita si es respuesta.
+_FEED_LOAD = (
+    joinedload(Message.sender),
+    joinedload(Message.attachments),
+    joinedload(Message.reply_to).joinedload(Message.sender),
+)
+
+
 def _feed_page(conv_id, db: Session, *, before_id: str | None = None) -> tuple[list[Message], bool]:
     """Los _FEED_PAGE mensajes más recientes (o los anteriores a `before_id`),
     en orden cronológico, y si quedan más viejos por cargar."""
     q = (
         db.query(Message)
-        .options(joinedload(Message.sender), joinedload(Message.attachments))
+        .options(*_FEED_LOAD)
         .filter(Message.conversation_id == conv_id)
     )
     if before_id:
@@ -540,7 +550,7 @@ def poll_messages(
             return HTMLResponse("", headers={"HX-Refresh": "true"})
         messages = (
             db.query(Message)
-            .options(joinedload(Message.sender), joinedload(Message.attachments))
+            .options(*_FEED_LOAD)
             .filter(Message.conversation_id == conv_id, Message.created_at > pivot)
             .order_by(Message.created_at.asc())
             .limit(200)
@@ -643,9 +653,10 @@ def toggle_message_reaction(
 
 
 def _editable(msg: Message) -> bool:
-    """Solo texto (no sticker/ubicación ni solo-adjuntos), dentro de EDIT_WINDOW."""
+    """Solo texto propio (no sticker/ubicación, solo-adjuntos ni reenviado), dentro de EDIT_WINDOW."""
     return (
         not msg.deleted_at
+        and not msg.forwarded
         and bool(msg.content)
         and not stickers.STICKER_URL_RE.fullmatch(msg.content)
         and not _osm_location(msg.content)
@@ -733,6 +744,7 @@ def delete_message(
         db.query(MessageReaction).filter(MessageReaction.message_id == msg.id).delete(synchronize_session=False)
         msg.content = ""
         msg.deleted_at = datetime.utcnow()
+        msg.pinned_at = msg.pinned_by = None
         db.commit()
         db.refresh(msg)
         realtime.notify_message_update(conv_id, msg.id)
@@ -742,6 +754,154 @@ def delete_message(
             details=f"message={msg.id}" + (f" files={','.join(names[:5])}" if names else ""),
         )
     return _render_message(request, msg, current_user, db)
+
+
+@router.get("/{conv_id}/pins", response_class=HTMLResponse)
+def pinned_messages(
+    conv_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Barra de fijados del chat (se vuelve a pedir con cada `msgupdate`)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    pins = (
+        db.query(Message)
+        .options(joinedload(Message.sender))
+        .filter(Message.conversation_id == conv_id, Message.pinned_at.isnot(None))
+        .order_by(Message.pinned_at.desc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        request, "messaging/_pins.html", {"pins": pins, "conv_id": conv_id, "current_user": current_user},
+    )
+
+
+@router.post("/{conv_id}/messages/{msg_id}/pin", response_class=HTMLResponse)
+def pin_message(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Fija para todo el chat (cualquier participante). Con MAX_PINNED ya fijados
+    se desfija el más antiguo."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    msg = _message_in_conv(conv_id, msg_id, db)
+    if msg.deleted_at:
+        raise HTTPException(400, "No se puede fijar un mensaje eliminado.")
+    if not msg.pinned_at:
+        pinned = (
+            db.query(Message)
+            .filter(Message.conversation_id == conv_id, Message.pinned_at.isnot(None))
+            .order_by(Message.pinned_at.asc())
+            .all()
+        )
+        for old in pinned[: max(0, len(pinned) - MAX_PINNED + 1)]:
+            old.pinned_at = old.pinned_by = None
+            realtime.notify_message_update(conv_id, old.id)
+        msg.pinned_at = datetime.utcnow()
+        msg.pinned_by = current_user.id
+        db.commit()
+        realtime.notify_message_update(conv_id, msg.id)
+    return _render_message(request, msg, current_user, db)
+
+
+@router.post("/{conv_id}/messages/{msg_id}/unpin", response_class=HTMLResponse)
+def unpin_message(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    msg = _message_in_conv(conv_id, msg_id, db)
+    if msg.pinned_at:
+        msg.pinned_at = msg.pinned_by = None
+        db.commit()
+        realtime.notify_message_update(conv_id, msg.id)
+    return _render_message(request, msg, current_user, db)
+
+
+def _forward_target(target: str, current_user: User, db: Session) -> str:
+    """"c:<conv_id>" (chat propio) o "u:<user_id>" (persona: abre el chat directo
+    si aún no existe, con la misma regla que start_direct). Devuelve el conv_id."""
+    kind, _, raw = target.partition(":")
+    try:
+        target_id = uuid.UUID(raw)
+    except ValueError:
+        raise HTTPException(400)
+    if kind == "c":
+        _require_participant(str(target_id), current_user, db)
+        return str(target_id)
+    if kind == "u":
+        user = db.query(User).filter(User.id == target_id, User.is_active == True).first()
+        if not user or user.id == current_user.id:
+            raise HTTPException(404)
+        if not _messages_anyone(current_user) and user.id not in {u.id for u in _visible_users(current_user, db)}:
+            raise HTTPException(403)
+        return str(_get_or_create_direct(current_user.id, user.id, db).id)
+    raise HTTPException(400)
+
+
+@router.post("/{conv_id}/messages/{msg_id}/forward")
+def forward_message(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    targets: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Reenvía una copia (marcada "Reenviado") a uno o varios chats o personas.
+    Los adjuntos se copian en Wasabi con llave propia: el reenvío no depende del
+    original (que puede eliminarse o purgarse)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    src = _message_in_conv(conv_id, msg_id, db)
+    if src.deleted_at:
+        raise HTTPException(400, "No se puede reenviar un mensaje eliminado.")
+    targets = list(dict.fromkeys(t for t in targets if t))
+    if not targets or len(targets) > MAX_FORWARD_TARGETS:
+        raise HTTPException(400, f"Elige de 1 a {MAX_FORWARD_TARGETS} chats.")
+    conv_ids = list(dict.fromkeys(_forward_target(t, current_user, db) for t in targets))
+
+    preview = "↪ " + _msg_preview(src)
+    sent = []
+    for target_conv in conv_ids:
+        msg = Message(
+            id=uuid.uuid4(), conversation_id=target_conv, sender_id=current_user.id,
+            content=src.content, forwarded=True,
+        )
+        db.add(msg)
+        db.flush()
+        for att in src.attachments:
+            key = f"chats/{target_conv}/{msg.id}/{uuid.uuid4()}_{_safe_filename(att.filename)}"
+            storage.copy_chat_file(att.file_key, key)
+            db.add(MessageAttachment(
+                id=uuid.uuid4(), message_id=msg.id, uploaded_by=current_user.id, filename=att.filename,
+                file_key=key, content_type=att.content_type, file_size=att.file_size,
+            ))
+        _mark_read(target_conv, current_user.id, db)
+        db.commit()
+        _after_new_message(target_conv, msg.id, current_user, db, preview)
+        sent.append(target_conv)
+
+    audit.log_action(
+        "chat_message_forward", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id,
+        details=f"message={src.id} to={','.join(sent)}",
+    )
+    return {"sent": len(sent), "conversations": sent}
 
 
 @router.get("/{conv_id}/search", response_class=HTMLResponse)
@@ -934,6 +1094,47 @@ def call_cancel(
     return JSONResponse({"ok": True})
 
 
+def _after_new_message(conv_id, msg_id, sender: User, db: Session, preview: str, mention_text: str = "") -> None:
+    """Avisos de un mensaje ya guardado (enviado o reenviado): notificationservice,
+    menciones (solo grupos, sobre `mention_text`), fan-out en tiempo real y badges."""
+    # El mensaje va a notificationservice ANTES del fan-out en tiempo real: si el
+    # destinatario tiene el chat abierto, su refresco publica `read` y debe
+    # llegar después del `message`, o el contador queda en 1 para siempre.
+    recipient_ids = _other_participant_ids(conv_id, sender.id, db)
+    conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
+    notification_bus.publish_message(
+        conv_id,
+        (conv.name or "Grupo sin nombre") if conv.type == CONV_GROUP else None,
+        sender,
+        recipient_ids,
+        msg_id,
+        preview,
+        f"/messaging/{conv_id}",
+    )
+
+    # Menciones (solo grupos): a quien se mencionó le llega una notificación
+    # `chat_mention` en vez del simple refresco del badge.
+    mentioned: set = set()
+    if conv.type == CONV_GROUP and "@" in mention_text:
+        others = [u for u in _group_members(conv_id, db) if u.id != sender.id]
+        mentioned, everyone = mentions.find(mention_text, others)
+        group = conv.name or "Grupo sin nombre"
+        actor = mentions.display_name(sender)
+        url = f"/messaging/{conv_id}"
+        if everyone:
+            mentioned = {u.id for u in others}
+            realtime.notify_users(mentioned, f"{actor} mencionó a todos en «{group}»", preview, url, "chat_mention")
+        elif mentioned:
+            realtime.notify_users(mentioned, f"{actor} te mencionó en «{group}»", preview, url, "chat_mention")
+
+    # Real-time fan-out to every open client in this conversation.
+    vk.publish(realtime.channel(conv_id))
+    # Poke each recipient's Mensajes badge (SSE refresh trigger).
+    for uid in recipient_ids:
+        if uid not in mentioned:
+            realtime.notify_user(uid)
+
+
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
 def send_message(
     conv_id: str,
@@ -942,6 +1143,7 @@ def send_message(
     files: list[UploadFile] = File(default=[]),
     location: str = Form(default=""),
     sticker: str = Form(default=""),
+    reply_to: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -982,12 +1184,15 @@ def send_message(
         valid_files = []
     if not content and not valid_files:
         raise HTTPException(400)
+    # Respuesta: el original debe ser de este mismo chat.
+    reply_to_id = _message_in_conv(conv_id, reply_to, db).id if reply_to else None
 
     msg = Message(
         id=uuid.uuid4(),
         conversation_id=conv_id,
         sender_id=current_user.id,
         content=content,
+        reply_to_id=reply_to_id,
     )
     db.add(msg)
     db.flush()
@@ -1029,39 +1234,7 @@ def send_message(
         preview = "🎤 Nota de voz"
     else:
         preview = "Archivo adjunto"
-    recipient_ids = _other_participant_ids(conv_id, current_user.id, db)
-    conv = db.query(Conversation.type, Conversation.name).filter(Conversation.id == conv_id).first()
-    notification_bus.publish_message(
-        conv_id,
-        (conv.name or "Grupo sin nombre") if conv.type == CONV_GROUP else None,
-        current_user,
-        recipient_ids,
-        msg.id,
-        preview,
-        f"/messaging/{conv_id}",
-    )
-
-    # Menciones (solo grupos): a quien se mencionó le llega una notificación
-    # `chat_mention` en vez del simple refresco del badge.
-    mentioned: set = set()
-    if conv.type == CONV_GROUP and "@" in content:
-        others = [u for u in _group_members(conv_id, db) if u.id != current_user.id]
-        mentioned, everyone = mentions.find(content, others)
-        group = conv.name or "Grupo sin nombre"
-        actor = mentions.display_name(current_user)
-        url = f"/messaging/{conv_id}"
-        if everyone:
-            mentioned = {u.id for u in others}
-            realtime.notify_users(mentioned, f"{actor} mencionó a todos en «{group}»", preview, url, "chat_mention")
-        elif mentioned:
-            realtime.notify_users(mentioned, f"{actor} te mencionó en «{group}»", preview, url, "chat_mention")
-
-    # Real-time fan-out to every open client in this conversation.
-    vk.publish(realtime.channel(conv_id))
-    # Poke each recipient's Mensajes badge (SSE refresh trigger).
-    for uid in recipient_ids:
-        if uid not in mentioned:
-            realtime.notify_user(uid)
+    _after_new_message(conv_id, msg.id, current_user, db, preview, content)
 
     if valid_files:
         audit.log_action(

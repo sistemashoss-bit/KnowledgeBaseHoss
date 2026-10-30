@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, String, Text, Table, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, String, Text, Table, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -245,7 +245,7 @@ class User(Base):
 
     # Communication
     participations = relationship("ConversationParticipant", back_populates="user", passive_deletes=True)
-    sent_messages = relationship("Message", back_populates="sender", passive_deletes=True)
+    sent_messages = relationship("Message", back_populates="sender", passive_deletes=True, foreign_keys="Message.sender_id")
 
 
 class Document(Base):
@@ -860,6 +860,8 @@ class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+        Index("ix_messages_reply_to_id", "reply_to_id", postgresql_where=text("reply_to_id IS NOT NULL")),
+        Index("ix_messages_conversation_pinned", "conversation_id", postgresql_where=text("pinned_at IS NOT NULL")),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -871,9 +873,16 @@ class Message(Base):
     # Eliminado por su autor: queda como "Mensaje eliminado" (contenido vacío,
     # sin adjuntos ni reacciones) hasta que lo purgue la retención.
     deleted_at = Column(DateTime, nullable=True)
+    # Respuesta a otro mensaje del mismo chat (NULL si el original ya se purgó).
+    reply_to_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    # Fijado para todo el chat (máx. 3); la purga de retención no lo borra.
+    pinned_at = Column(DateTime, nullable=True)
+    pinned_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    forwarded = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     conversation = relationship("Conversation", back_populates="messages")
-    sender = relationship("User", back_populates="sent_messages")
+    sender = relationship("User", back_populates="sent_messages", foreign_keys=[sender_id])
+    reply_to = relationship("Message", remote_side=[id], foreign_keys=[reply_to_id])
     attachments = relationship(
         "MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at",
         passive_deletes=True,

@@ -18,6 +18,7 @@
   <script>window.REACTION_EMOJIS = {{ reaction_emojis | tojson }};</script>
   <link rel="stylesheet" href="{{ asset('reactions.css') }}" />
   <script defer src="{{ asset('reactions.js') }}"></script>
+  {% if stickers_enabled() %}<script defer src="{{ asset('stickers.js') }}"></script>{% endif %}
   <script>
     // CSRF (validado en app/auth/deps.py require_csrf): toda petición htmx y
     // todo fetch al mismo origen que modifica lleva el header X-CSRF-Token.

@@ -14,7 +14,7 @@ from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, rag, reactions, storage
 from app.documents.router import _preview_meta
-from app.messaging import realtime
+from app.messaging import realtime, stickers
 from app.permissions import (
     build_access_filter, can_access_document, granted_department_ids, has_oversight, is_manager,
     branch_user_ids as _branch_user_ids, manager_scope as _manager_scope, scope_user_condition,
@@ -1155,7 +1155,8 @@ def remove_task_share(
 def add_comment(
     task_id: str,
     request: Request,
-    content: str = Form(...),
+    content: str = Form(default=""),
+    sticker: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1168,11 +1169,15 @@ def add_comment(
     if not _can_comment(current_user, task_id, db):
         raise HTTPException(403)
 
+    # Un sticker se guarda como la URL de su APNG (igual que en el chat).
+    content = stickers.require_url(sticker) if sticker else content.strip()
+    if not content:
+        raise HTTPException(400, "El comentario no puede quedar vacío")
     comment = TaskComment(
         id=uuid.uuid4(),
         task_id=task.id,
         user_id=current_user.id,
-        content=content.strip(),
+        content=content,
     )
     db.add(comment)
     db.commit()
@@ -1186,7 +1191,7 @@ def add_comment(
             realtime.notify_user(
                 uid,
                 title=f"{actor} comentó",
-                body=comment.content[:120],
+                body="Sticker" if sticker else comment.content[:120],
                 url=f"/tasks/{task.id}",
                 kind="task_comment",
             )
@@ -1194,7 +1199,7 @@ def add_comment(
     audit.log_action(
         "task_comment", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details=(comment.content or "")[:80],
+        details="sticker" if sticker else (comment.content or "")[:80],
     )
 
     return templates.TemplateResponse(
@@ -1228,6 +1233,8 @@ def edit_comment(
     # Solo el autor puede editar su comentario.
     if str(comment.user_id) != str(current_user.id):
         raise HTTPException(403)
+    if stickers.is_sticker(comment.content):
+        raise HTTPException(400, "Un sticker no se puede editar")
 
     new_content = content.strip()
     if not new_content:

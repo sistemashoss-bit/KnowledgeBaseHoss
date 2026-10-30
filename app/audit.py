@@ -24,6 +24,7 @@ ACTION_LABELS: dict[str, str] = {
     # Mensajería
     "chat_attachment": "Adjunto en chat",
     "chat_message_delete": "Mensaje de chat eliminado",
+    "chat_message_forward": "Mensaje de chat reenviado",
     "group_create": "Creación de grupo",
     "group_edit": "Edición de grupo",
     "group_member_add": "Persona agregada al grupo",

@@ -446,6 +446,10 @@
       {% endif %}
     </div>
 
+    <!-- Fijados (máx. 3; _pins.html). Se refresca con cada `msgupdate` del chat. -->
+    <div id="pins-bar" class="shrink-0 bg-amber-50 border-b border-amber-200 empty:hidden"
+         hx-get="/messaging/{{ active_conv.id }}/pins" hx-trigger="load, pinsChanged from:body"></div>
+
     <!-- Message feed (real-time via SSE; 30s poll as fallback). El poll es
          incremental: pide solo lo posterior al último mensaje y lo agrega al final. -->
     {# sse-connect va en el contenedor y no en el feed: htmx 1.9 registra los
@@ -660,8 +664,22 @@
               btn.setAttribute('aria-expanded', list.classList.contains('hidden') ? 'false' : 'true');
               return;
             }
+            var jump = e.target.closest('[data-jump]');
+            if (jump) { feedJumpTo(jump.dataset.jump); return; }
             var row = e.target.closest('[data-msg-id]');
-            if (e.target.closest('[data-msg-edit]')) {
+            if (e.target.closest('[data-msg-reply]')) {
+              closeMenus();
+              startReply(row);
+            } else if (e.target.closest('[data-msg-pin], [data-msg-unpin]')) {
+              closeMenus();
+              var action = e.target.closest('[data-msg-pin]') ? 'pin' : 'unpin';
+              post(row.dataset.msgId, action)
+                .then(function () { htmx.trigger(document.body, 'pinsChanged'); })
+                .catch(function (err) { alert('No se pudo ' + (action === 'pin' ? 'fijar' : 'desfijar') + ': ' + err.message); });
+            } else if (e.target.closest('[data-msg-forward]')) {
+              closeMenus();
+              openForward(row.dataset.msgId);
+            } else if (e.target.closest('[data-msg-edit]')) {
               closeMenus();
               startEdit(row);
             } else if (e.target.closest('[data-msg-delete]')) {
@@ -677,7 +695,90 @@
 
           // Editado/eliminado en otro cliente: solo se vuelve a pedir esa fila.
           document.getElementById('feed-sse').addEventListener('htmx:sseMessage', function (e) {
-            if (e.detail && e.detail.type === 'msgupdate') refreshRow(e.detail.data);
+            if (!e.detail || e.detail.type !== 'msgupdate') return;
+            refreshRow(e.detail.data);
+            htmx.trigger(document.body, 'pinsChanged');
+          });
+
+          // ── Responder ──────────────────────────────────────────────────────
+          // Este script corre antes de parsear el composer y el modal de reenviar:
+          // se buscan al usarlos y sus listeners se enganchan en DOMContentLoaded.
+          function $id(id) { return document.getElementById(id); }
+          function startReply(row) {
+            $id('reply-to-input').value = row.dataset.msgId;
+            $id('reply-who').textContent = row.dataset.sender;
+            $id('reply-text').textContent = row.dataset.preview;
+            $id('reply-bar').classList.remove('hidden');
+            $id('reply-bar').classList.add('flex');
+            $id('msg-input').focus();
+          }
+          window.clearReply = function () {
+            $id('reply-to-input').value = '';
+            $id('reply-bar').classList.add('hidden');
+            $id('reply-bar').classList.remove('flex');
+          };
+
+          // ── Reenviar (modal #modal-forward) ────────────────────────────────
+          var fwdMsg = null;
+          function openForward(id) {
+            var modal = $id('modal-forward');
+            fwdMsg = id;
+            modal.querySelectorAll('input[name=targets]').forEach(function (c) { c.checked = false; });
+            $id('fwd-search').value = '';
+            fwdFilter();
+            modal.classList.remove('hidden');
+            $id('fwd-search').focus();
+          }
+          window.fwdFilter = function () {
+            var q = $id('fwd-search').value.toLowerCase().trim();
+            var visible = 0;
+            $id('modal-forward').querySelectorAll('[data-fwd-row]').forEach(function (r) {
+              var match = !q || r.dataset.search.indexOf(q) !== -1;
+              r.style.display = match ? '' : 'none';
+              if (match) visible++;
+            });
+            $id('fwd-empty').classList.toggle('hidden', visible > 0);
+            // Encabezado ("Chats"/"Contactos") oculto si su sección quedó vacía.
+            $id('modal-forward').querySelectorAll('[data-fwd-head]').forEach(function (h) {
+              var any = false;
+              for (var el = h.nextElementSibling; el && !el.hasAttribute('data-fwd-head'); el = el.nextElementSibling) {
+                if (el.hasAttribute('data-fwd-row') && el.style.display !== 'none') { any = true; break; }
+              }
+              h.style.display = any ? '' : 'none';
+            });
+            fwdCount();
+          };
+          window.fwdCount = function () {
+            var n = $id('modal-forward').querySelectorAll('input[name=targets]:checked').length;
+            var btn = $id('fwd-send');
+            btn.disabled = n === 0 || n > 10;  // MAX_FORWARD_TARGETS
+            btn.textContent = n ? 'Reenviar (' + n + ')' : 'Reenviar';
+          };
+
+          document.addEventListener('DOMContentLoaded', function () {
+            $id('msg-input').addEventListener('keydown', function (e) {
+              if (e.key === 'Escape' && $id('reply-to-input').value) clearReply();
+            });
+            $id('fwd-form').addEventListener('submit', function (e) {
+              e.preventDefault();
+              var modal = $id('modal-forward');
+              var toNew = !!modal.querySelector('input[name=targets][value^="u:"]:checked');
+              var btn = $id('fwd-send');
+              btn.disabled = true;
+              fetch(convUrl + '/messages/' + fwdMsg + '/forward', { method: 'POST', body: new FormData(this), credentials: 'same-origin' })
+                .then(function (r) {
+                  if (r.ok) return r.json();
+                  return r.json().then(function (d) { return d.detail; }, function () { return null; })
+                    .then(function (t) { throw new Error(t || ('error ' + r.status)); });
+                })
+                .then(function (d) {
+                  modal.classList.add('hidden');
+                  // Un chat nuevo (persona sin chat previo) solo aparece en la lista al recargar.
+                  if (toNew) location.reload();
+                  else if (d.conversations.indexOf('{{ active_conv.id }}') !== -1) htmx.trigger(document.body, 'refreshFeed');
+                })
+                .catch(function (err) { alert('No se pudo reenviar: ' + err.message); fwdCount(); });
+            });
           });
 
           // ── Búsqueda en el chat ────────────────────────────────────────────
@@ -727,8 +828,19 @@
             hx-target="#send-form"
             hx-swap="none"
             hx-encoding="multipart/form-data"
-            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); } document.getElementById('msg-input').focus()"
+            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); clearReply(); } document.getElementById('msg-input').focus()"
             class="flex flex-col gap-2">
+
+        <!-- Respondiendo a… (lo llena "Responder" del menú del mensaje) -->
+        <input type="hidden" id="reply-to-input" name="reply_to" value="" />
+        <div id="reply-bar" class="hidden items-center gap-2 px-3 py-1.5 rounded-lg border-l-4 border-blue-400 bg-gray-50 text-xs">
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-blue-600">Respondiendo a <span id="reply-who"></span></p>
+            <p id="reply-text" class="text-gray-500 truncate"></p>
+          </div>
+          <button type="button" onclick="clearReply()" title="Cancelar respuesta" aria-label="Cancelar respuesta"
+                  class="shrink-0 w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200">✕</button>
+        </div>
 
         <!-- File preview bar -->
         <div id="file-preview-bar"
@@ -805,8 +917,8 @@
           </button>
 
           {% if stickers_enabled() %}
-          <!-- Stickers (mssgs-stickers.com; panel y script al final del composer) -->
-          <button type="button" id="sticker-btn" title="Stickers" aria-haspopup="dialog" aria-expanded="false"
+          <!-- Stickers (app/assets/stickers.js; el envío está al final del composer) -->
+          <button type="button" id="sticker-btn" data-sticker-picker title="Stickers" aria-haspopup="dialog" aria-expanded="false"
                   class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 transition-colors shrink-0 disabled:opacity-50">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -877,10 +989,12 @@
               }
               var fd = new FormData();
               fd.append('location', lat + ',' + lng);
+              fd.append('reply_to', document.getElementById('reply-to-input').value);
               fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(function (r) {
                   if (!r.ok) throw new Error('HTTP ' + r.status);
                   htmx.trigger(document.body, 'refreshFeed');
+                  clearReply();
                 })
                 .catch(function (e) { alert('No se pudo enviar la ubicación (' + e.message + ').'); })
                 .finally(function () { attachBtn.disabled = false; });
@@ -933,12 +1047,14 @@
             var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
             var fd = new FormData();
             fd.append('content', '');
+            fd.append('reply_to', document.getElementById('reply-to-input').value);
             fd.append('files', new File([blob], 'nota-de-voz-' + stamp + '.' + ext, { type: blob.type }));
             btn.disabled = true;
             fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
               .then(function (r) {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 htmx.trigger(document.body, 'refreshFeed');
+                clearReply();
               })
               .catch(function (e) { alert('No se pudo enviar la nota de voz (' + e.message + ').'); })
               .finally(function () { btn.disabled = false; });
@@ -997,137 +1113,24 @@
         })();
       </script>
       {% if stickers_enabled() %}
-      <div id="sticker-panel" role="dialog" aria-label="Stickers"
-           class="hidden absolute bottom-full left-2 right-2 sm:left-4 sm:right-auto sm:w-96 mb-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 flex-col overflow-hidden">
-        <div class="p-2 border-b border-gray-100">
-          <input id="sticker-q" type="search" placeholder="Buscar stickers..." autocomplete="off"
-                 class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" />
-        </div>
-        <div id="sticker-packs" class="flex gap-1 px-2 py-1.5 overflow-x-auto border-b border-gray-100 shrink-0"></div>
-        <div id="sticker-grid" class="grid grid-cols-4 gap-1 p-2 h-64 overflow-y-auto content-start"></div>
-        <a href="https://mssgs-stickers.com" target="_blank" rel="noopener noreferrer"
-           class="block px-3 py-1 text-[10px] text-gray-400 border-t border-gray-100 hover:text-gray-600">Stickers by mssgs-stickers.com</a>
-      </div>
       <script>
-        // Selector de stickers: packs y búsqueda pasan por /messaging/stickers/*
-        // (la key y la caché viven en el servidor, app/messaging/stickers.py); al
-        // elegir uno se manda solo su id y el servidor guarda la URL del APNG.
-        (function () {
-          var form = document.getElementById('send-form');
-          var btn = document.getElementById('sticker-btn');
-          var panel = document.getElementById('sticker-panel');
-          var q = document.getElementById('sticker-q');
-          var packsEl = document.getElementById('sticker-packs');
-          var grid = document.getElementById('sticker-grid');
-          var loaded = false, current = { q: '', pack: '' }, nextOffset = null, loading = false, seq = 0, debounce = null;
-
-          function open(on) {
-            panel.classList.toggle('hidden', !on);
-            panel.classList.toggle('flex', on);
-            btn.setAttribute('aria-expanded', on ? 'true' : 'false');
-            if (on && !loaded) { loaded = true; loadPacks(); }
-            if (on) q.focus();
-          }
-          function msg(text) {
-            grid.innerHTML = '';
-            var p = document.createElement('p');
-            p.className = 'col-span-4 text-center text-sm text-gray-400 py-8';
-            p.textContent = text;
-            grid.appendChild(p);
-          }
-          function selectPack(slug) {
-            packsEl.querySelectorAll('button').forEach(function (b) {
-              var on = b.dataset.slug === slug;
-              b.classList.toggle('bg-blue-50', on);
-              b.classList.toggle('ring-1', on);
-              b.classList.toggle('ring-blue-300', on);
-            });
-          }
-          function loadPacks() {
-            msg('Cargando...');
-            fetch('/messaging/stickers/packs').then(function (r) {
-              if (!r.ok) throw new Error(r.status);
-              return r.json();
-            }).then(function (d) {
-              d.packs.forEach(function (p) {
-                var b = document.createElement('button');
-                b.type = 'button';
-                b.dataset.slug = p.slug;
-                b.title = p.name;
-                b.className = 'w-10 h-10 shrink-0 rounded-lg p-1 hover:bg-gray-100';
-                var img = document.createElement('img');
-                img.src = p.cover; img.alt = p.name; img.loading = 'lazy';
-                img.className = 'w-full h-full object-contain';
-                b.appendChild(img);
-                b.addEventListener('click', function () { q.value = ''; load({ q: '', pack: p.slug }); });
-                packsEl.appendChild(b);
-              });
-              if (d.packs.length) load({ q: '', pack: d.packs[0].slug });
-              else msg('No hay stickers disponibles.');
-            }).catch(function () { msg('No se pudieron cargar los stickers.'); });
-          }
-          function load(params, append) {
-            if (!append) { current = params; nextOffset = 0; grid.scrollTop = 0; msg('Cargando...'); }
-            if (nextOffset === null || loading && append) return;
-            selectPack(current.pack);
-            var mine = ++seq;
-            loading = true;
-            var url = '/messaging/stickers/search?' + new URLSearchParams({ q: current.q, pack: current.pack, offset: nextOffset });
-            fetch(url).then(function (r) {
-              if (!r.ok) throw new Error(r.status);
-              return r.json();
-            }).then(function (d) {
-              if (mine !== seq) return;
-              if (!append) grid.innerHTML = '';
-              d.stickers.forEach(function (s) {
-                var b = document.createElement('button');
-                b.type = 'button';
-                b.title = s.name + ' · ' + s.credit;
-                b.className = 'aspect-square rounded-lg p-1 hover:bg-gray-100';
-                var img = document.createElement('img');
-                img.src = s.thumb; img.alt = s.name; img.loading = 'lazy';
-                img.className = 'w-full h-full object-contain';
-                b.appendChild(img);
-                b.addEventListener('click', function () { send(s.id); });
-                grid.appendChild(b);
-              });
-              nextOffset = d.next_offset;
-              if (!grid.children.length) msg('Sin resultados.');
-            }).catch(function () {
-              if (mine === seq) msg('No se pudieron cargar los stickers.');
-            }).finally(function () { if (mine === seq) loading = false; });
-          }
-          function send(id) {
-            open(false);
-            btn.disabled = true;
-            var fd = new FormData();
-            fd.append('sticker', id);
-            fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
-              .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                htmx.trigger(document.body, 'refreshFeed');
-              })
-              .catch(function (e) { alert('No se pudo enviar el sticker (' + e.message + ').'); })
-              .finally(function () { btn.disabled = false; });
-          }
-
-          btn.addEventListener('click', function () { open(panel.classList.contains('hidden')); });
-          document.addEventListener('click', function (e) {
-            if (!panel.contains(e.target) && !btn.contains(e.target)) open(false);
-          });
-          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') open(false); });
-          q.addEventListener('input', function () {
-            clearTimeout(debounce);
-            debounce = setTimeout(function () {
-              var term = q.value.trim();
-              if (term) load({ q: term, pack: '' });
-              else if (packsEl.firstChild) load({ q: '', pack: packsEl.firstChild.dataset.slug });
-            }, 350);
-          });
-          grid.addEventListener('scroll', function () {
-            if (grid.scrollTop + grid.clientHeight > grid.scrollHeight - 120) load(current, true);
-          });
-        })();
+        // Sticker elegido en el selector (app/assets/stickers.js): se manda solo su
+        // id y el servidor guarda la URL del APNG.
+        document.getElementById('sticker-btn').addEventListener('sticker-pick', function (e) {
+          var btn = this;
+          var fd = new FormData();
+          fd.append('sticker', e.detail.id);
+          fd.append('reply_to', document.getElementById('reply-to-input').value);
+          btn.disabled = true;
+          fetch(document.getElementById('send-form').getAttribute('hx-post'), { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function (r) {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              htmx.trigger(document.body, 'refreshFeed');
+              clearReply();
+            })
+            .catch(function (err) { alert('No se pudo enviar el sticker (' + err.message + ').'); })
+            .finally(function () { btn.disabled = false; });
+        });
       </script>
       {% endif %}
       <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea{% if mention_people %} · @ para mencionar{% endif %}</p>
@@ -1307,6 +1310,57 @@
     {% endif %}
   </div>
 </div>
+
+{% if active_conv %}
+<!-- ── Modal: Reenviar mensaje (tus chats y, como en WhatsApp, contactos sin
+     chat todavía: el servidor abre el directo con la misma regla que start_direct) -->
+{% set fwd = namespace(dm_ids=[]) %}
+{% for item in conv_list if item.conv.type == 'direct' %}
+  {% for p in item.conv.participants if p.user_id != current_user.id %}{% set fwd.dm_ids = fwd.dm_ids + [p.user_id|string] %}{% endfor %}
+{% endfor %}
+<div id="modal-forward" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <form id="fwd-form" class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-4 sm:p-6 responsive-modal flex flex-col">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold text-gray-900">Reenviar mensaje</h2>
+      <button type="button" onclick="document.getElementById('modal-forward').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600" aria-label="Cerrar">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <input id="fwd-search" type="text" placeholder="Buscar chat o persona…" oninput="fwdFilter()" autocomplete="off"
+           class="w-full mb-3 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400" />
+    <div class="space-y-0.5 max-h-72 overflow-y-auto" onchange="fwdCount()">
+      {% if conv_list %}<p data-fwd-head class="px-1 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Chats</p>{% endif %}
+      {% for item in conv_list %}
+      <label data-fwd-row data-search="{{ item.display_name | lower }}"
+             class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-blue-50 cursor-pointer">
+        <input type="checkbox" name="targets" value="c:{{ item.conv.id }}" class="w-4 h-4 accent-blue-500" />
+        <span class="text-sm text-gray-800 truncate">{{ item.display_name }}{% if item.conv.id == active_conv.id %} <span class="text-gray-400">(este chat)</span>{% endif %}</span>
+      </label>
+      {% endfor %}
+      {% set others = contacts | rejectattr('id', 'equalto', current_user.id) | list %}
+      {% set new_contacts = [] %}
+      {% for c in others if c.id|string not in fwd.dm_ids %}{% set _ = new_contacts.append(c) %}{% endfor %}
+      {% if new_contacts %}<p data-fwd-head class="px-1 pt-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Contactos</p>{% endif %}
+      {% for c in new_contacts %}
+      <label data-fwd-row data-search="{{ ((c.name or '') + ' ' + c.email) | lower }}"
+             class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-blue-50 cursor-pointer">
+        <input type="checkbox" name="targets" value="u:{{ c.id }}" class="w-4 h-4 accent-blue-500" />
+        <span class="min-w-0">
+          <span class="block text-sm text-gray-800 truncate">{{ c.name or c.email }}</span>
+          {% if c.name %}<span class="block text-xs text-gray-400 truncate">{{ c.email }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+      <p id="fwd-empty" class="hidden text-sm text-gray-400 text-center py-4">Sin resultados.</p>
+    </div>
+    <button id="fwd-send" type="submit" disabled
+            class="mt-4 w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium">Reenviar</button>
+  </form>
+</div>
+{% endif %}
 
 <!-- ── Modal: Nuevo grupo ────────────────────────────────────────────────── -->
 <div id="modal-group" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">

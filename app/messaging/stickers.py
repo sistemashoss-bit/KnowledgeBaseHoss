@@ -94,3 +94,15 @@ def animation_url(sticker_id: str) -> str | None:
     data = _api(f"/stickers/{sticker_id}")
     url = (((data or {}).get("sticker") or {}).get("animation") or {}).get("url", "")
     return url if STICKER_URL_RE.fullmatch(url) else None
+
+
+def require_url(sticker_id: str) -> str:
+    """animation_url o 400: para guardar un sticker como contenido (chat/comentarios)."""
+    url = animation_url(sticker_id)
+    if not url:
+        raise HTTPException(400, "Sticker no válido.")
+    return url
+
+
+def is_sticker(content: str | None) -> bool:
+    return bool(STICKER_URL_RE.fullmatch((content or "").strip()))
