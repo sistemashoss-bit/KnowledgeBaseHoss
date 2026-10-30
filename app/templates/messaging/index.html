@@ -1513,8 +1513,8 @@
 
 <!-- Shared files panel -->
 <div id="modal-files" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] flex flex-col">
-    <div class="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-100 shrink-0">
+<div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 h-[90vh] max-h-[900px] flex flex-col">
+     <div class="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-100 shrink-0">
       <h2 class="text-lg font-semibold text-gray-900">Archivos compartidos</h2>
       <button onclick="document.getElementById('modal-files').classList.add('hidden')"
               class="text-gray-400 hover:text-gray-600">
@@ -1523,7 +1523,7 @@
         </svg>
       </button>
     </div>
-    <div id="files-body" class="px-4 sm:px-6 py-4 overflow-y-auto flex-1"></div>
+    <div id="files-body" class="px-4 sm:px-6 py-4 overflow-y-auto flex-1 min-h-0"></div>
   </div>
 </div>
 
