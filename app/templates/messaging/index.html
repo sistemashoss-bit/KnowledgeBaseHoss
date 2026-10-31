@@ -321,8 +321,75 @@
             </svg>
           </button>
           {% endif %}
+                 <!-- Selector de temas -->
+        <div class="relative shrink-0">
+          <button
+            type="button"
+            id="chat-theme-button"
+            onclick="toggleChatThemes()"
+            title="Personalizar apariencia del chat"
+            aria-label="Elegir tema del chat"
+            aria-expanded="false"
+            aria-controls="chat-theme-menu"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 transition-colors">
+
+            <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M12 3a9 9 0 100 18h1.5a2.5 2.5 0 002.5-2.5c0-.9-.5-1.4-.5-2.1a1.4 1.4 0 011.4-1.4H18a3 3 0 003-3c0-5-4-9-9-9z"/>
+              <circle cx="7.5" cy="11" r="1" fill="currentColor"/>
+              <circle cx="11" cy="7" r="1" fill="currentColor"/>
+              <circle cx="16" cy="9" r="1" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <div id="chat-theme-menu"
+              class="hidden absolute right-0 top-full mt-2 w-52 rounded-xl bg-white border border-gray-200 shadow-xl z-50 p-2"
+                style="width: 220px; min-width: 220px; max-width: 220px;">
+
+            <p class="text-xs font-semibold text-gray-500 px-2 py-2">
+              Apariencia del chat
+            </p>
+
+            <button type="button" data-chat-theme-option="default"
+                    onclick="setChatTheme('default')"
+                    class="chat-theme-option">
+              <span class="theme-dot" style="background:#3B82F6"></span>
+              Predeterminado
+            </button>
+
+            <button type="button" data-chat-theme-option="dark"
+                    onclick="setChatTheme('dark')"
+                    class="chat-theme-option">
+              <span class="theme-dot" style="background:#252D3D"></span>
+              Oscuro
+            </button>
+
+            <button type="button" data-chat-theme-option="gray"
+                    onclick="setChatTheme('gray')"
+                    class="chat-theme-option">
+              <span class="theme-dot" style="background:#8793A2"></span>
+              Gris
+            </button>
+
+            <button type="button" data-chat-theme-option="autumn"
+                    onclick="setChatTheme('autumn')"
+                    class="chat-theme-option">
+              <span class="theme-dot" style="background:#B76B43"></span>
+              Otoñal
+            </button>
+
+            <button type="button" data-chat-theme-option="christmas"
+                    onclick="setChatTheme('christmas')"
+                    class="chat-theme-option">
+              <span class="theme-dot" style="background:#A93F44"></span>
+              Navideño
+            </button>
+          </div>
         </div>
       </div>
+    </div>
       <!-- Buscador de conversaciones -->
       <div class="relative">
         <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -473,73 +540,6 @@
             {% endif %}
           </p>
         </div>
-        <!-- Selector de temas -->
-<div class="relative shrink-0">
-  <button
-    type="button"
-    id="chat-theme-button"
-    onclick="toggleChatThemes()"
-    title="Personalizar apariencia del chat"
-    aria-label="Elegir tema del chat"
-    aria-expanded="false"
-    aria-controls="chat-theme-menu"
-    class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 transition-colors">
-
-    <svg class="w-4 h-4" fill="none" stroke="currentColor"
-         viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round"
-            stroke-width="1.8"
-            d="M12 3a9 9 0 100 18h1.5a2.5 2.5 0 002.5-2.5c0-.9-.5-1.4-.5-2.1a1.4 1.4 0 011.4-1.4H18a3 3 0 003-3c0-5-4-9-9-9z"/>
-      <circle cx="7.5" cy="11" r="1" fill="currentColor"/>
-      <circle cx="11" cy="7" r="1" fill="currentColor"/>
-      <circle cx="16" cy="9" r="1" fill="currentColor"/>
-    </svg>
-  </button>
-
-  <div id="chat-theme-menu"
-       class="hidden absolute right-0 top-full mt-2 w-52 rounded-xl bg-white border border-gray-200 shadow-xl z-50 p-2"
-        style="width: 220px; min-width: 220px; max-width: 220px;">
-
-    <p class="text-xs font-semibold text-gray-500 px-2 py-2">
-      Apariencia del chat
-    </p>
-
-    <button type="button" data-chat-theme-option="default"
-            onclick="setChatTheme('default')"
-            class="chat-theme-option">
-      <span class="theme-dot" style="background:#3B82F6"></span>
-      Predeterminado
-    </button>
-
-    <button type="button" data-chat-theme-option="dark"
-            onclick="setChatTheme('dark')"
-            class="chat-theme-option">
-      <span class="theme-dot" style="background:#252D3D"></span>
-      Oscuro
-    </button>
-
-    <button type="button" data-chat-theme-option="gray"
-            onclick="setChatTheme('gray')"
-            class="chat-theme-option">
-      <span class="theme-dot" style="background:#8793A2"></span>
-      Gris
-    </button>
-
-    <button type="button" data-chat-theme-option="autumn"
-            onclick="setChatTheme('autumn')"
-            class="chat-theme-option">
-      <span class="theme-dot" style="background:#B76B43"></span>
-      Otoñal
-    </button>
-
-    <button type="button" data-chat-theme-option="christmas"
-            onclick="setChatTheme('christmas')"
-            class="chat-theme-option">
-      <span class="theme-dot" style="background:#A93F44"></span>
-      Navideño
-    </button>
-  </div>
-</div>
         
         <!-- Audio call -->
         <button onclick="var m=document.getElementById('conv-meta'); initiateCall(m.dataset.convId, m.dataset.convName, false)"
