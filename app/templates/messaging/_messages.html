@@ -115,8 +115,8 @@
       <audio controls preload="metadata" src="{{ file_url }}?inline=1"
              class="w-64 max-w-full h-10 {% if is_mine %}ml-auto{% endif %}"></audio>
       {% else %}
-      <a href="{{ file_url }}"
-         class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs
+      <a <a href="{{ file_url }}"
+       class="chat-file-attachment flex items-center gap-2 px-3 py-2 rounded-xl text-xs
            {% if is_mine %}bg-blue-400 text-white hover:bg-blue-300{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm{% endif %}
            transition-colors">
         {% if 'pdf' in att.content_type %}

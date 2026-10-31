@@ -16,6 +16,281 @@
 {%- endmacro %}
 
 {% block content %}
+
+<style>
+/* Opciones del menú de apariencia */
+.chat-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+  color: #374151;
+  white-space: nowrap;
+  word-break: normal;
+  transition: background .2s;
+}
+
+.chat-theme-option:hover {
+  background: #f3f4f6;
+}
+
+.chat-theme-option[aria-pressed="true"] {
+  background: #eff6ff;
+  font-weight: 600;
+}
+
+.theme-dot {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid #00000015;
+}
+
+/* Paletas de colores */
+#chat-theme-root[data-chat-theme="dark"] {
+  --chat-bg: #191e2a;
+  --chat-header: #252d3d;
+  --chat-composer: #252d3d;
+  --chat-received: #303849;
+  --chat-sent: #526bb9;
+  --chat-text: #f0f2fa;
+  --chat-received-text: #f0f2fa;
+  --chat-sent-text: #ffffff;
+  --chat-border: #414b60;
+  --chat-input: #303849;
+  --chat-accent: #9db4f4;
+}
+
+#chat-theme-root[data-chat-theme="gray"] {
+  --chat-bg: #dde0e4;
+  --chat-header: #f1f2f4;
+  --chat-composer: #f1f2f4;
+  --chat-received: #f7f7f8;
+  --chat-sent: #778594;
+  --chat-text: #414854;
+  --chat-received-text: #414854;
+  --chat-sent-text: #ffffff;
+  --chat-border: #c7cdd5;
+  --chat-input: #ffffff;
+  --chat-accent: #536b82;
+}
+
+#chat-theme-root[data-chat-theme="autumn"] {
+  --chat-bg: #f2e1cb;
+  --chat-header: #fff7ed;
+  --chat-composer: #fff7ed;
+  --chat-received: #fffaf3;
+  --chat-sent: #b76b43;
+  --chat-text: #664636;
+  --chat-received-text: #664636;
+  --chat-sent-text: #ffffff;
+  --chat-border: #e4c5a8;
+  --chat-input: #ffffff;
+  --chat-accent: #a9552f;
+}
+
+#chat-theme-root[data-chat-theme="christmas"] {
+  --chat-bg: #e5eee8;
+  --chat-header: #f5faf6;
+  --chat-composer: #f5faf6;
+  --chat-received: #fffdfc;
+  --chat-sent: #a93f44;
+  --chat-text: #244c3f;
+  --chat-received-text: #244c3f;
+  --chat-sent-text: #ffffff;
+  --chat-border: #c5d8ca;
+  --chat-input: #ffffff;
+  --chat-accent: #a93f44;
+}
+
+/* Aplicación de las paletas */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"]) {
+  background-color: var(--chat-bg);
+  color: var(--chat-text);
+}
+
+/* Encabezado */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  > div:has(> .chat-header) {
+  background-color: var(--chat-header);
+  border-color: var(--chat-border);
+}
+
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  .chat-header-title p {
+  color: var(--chat-text);
+}
+
+/* Fondo de la conversación */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #message-feed {
+  background-color: var(--chat-bg);
+}
+
+/* Mensajes recibidos */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id]:not([data-mine]) [data-msg-text] {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+/* Mensajes enviados */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id][data-mine] [data-msg-text] {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+    border-color: var(--chat-border);
+}
+
+/* Enlaces dentro de mensajes enviados */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id][data-mine] [data-msg-text] a {
+    color: var(--chat-sent-text);
+}
+
+/* Respuestas a mensajes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] {
+    background-color: var(--chat-received);
+    border-left-color: var(--chat-accent);
+    color: var(--chat-received-text);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] span {
+    color: var(--chat-received-text);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] span:first-child {
+    color: var(--chat-accent);
+}
+
+/* Archivos adjuntos: añadiremos una clase específica */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .chat-file-attachment {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-mine] .chat-file-attachment {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+}
+
+/* Bordes de imágenes adjuntas */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed img[data-lightbox] {
+    border-color: var(--chat-border);
+}
+
+/* Horarios y nombres de remitentes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id] > div > p.text-gray-400 {
+    color: var(--chat-accent);
+}
+/* Barra de escritura */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  .chat-composer {
+  background-color: var(--chat-composer);
+  border-color: var(--chat-border);
+}
+
+/* Campo de escritura */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #msg-input {
+  background-color: var(--chat-input);
+  border-color: var(--chat-border);
+  color: var(--chat-text);
+}
+
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #msg-input::placeholder {
+  color: var(--chat-accent);
+  opacity: .75;
+}
+
+/* Botones del encabezado y de escritura */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  .chat-header button,
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  .chat-composer #composer-row button {
+  border-color: var(--chat-border);
+  color: var(--chat-accent);
+}
+
+/* Botón enviar */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #composer-row button[type="submit"] {
+  background-color: var(--chat-sent);
+  color: #fff;
+}
+
+/* Mantener legible el texto del menú */
+#chat-theme-menu {
+  color: #374151;
+}
+
+
+/* ==========================================
+   REACCIONES ADAPTADAS A LOS TEMAS DEL CHAT
+   ========================================== */
+
+/* Reacciones existentes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-chip {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border: 1px solid var(--chat-border);
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+/* Reacciones seleccionadas por el usuario */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-mine {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+    border-color: var(--chat-accent);
+}
+
+/* Hover de las reacciones */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed button.rx-chip:hover {
+    filter: brightness(1.08);
+}
+
+/* Botón para agregar reacción */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-add {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+
+/* Hover del botón de agregar */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-add:hover {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+}
+
+/* Contenedor de reacciones vacías */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-empty {
+    border-color: var(--chat-border);
+}
+
+</style>
+
 <div class="flex-1 min-h-0 min-w-0 flex overflow-hidden">
 
   <!-- ── Conversation list ──────────────────────────────────────────── -->
@@ -138,12 +413,16 @@
   </aside>
 
   <!-- ── Message area ───────────────────────────────────────────────── -->
-  <div class="flex-1 min-w-0 min-h-0 {% if active_conv %}flex{% else %}hidden md:flex{% endif %} flex-col overflow-hidden bg-gray-50">
+ <div id="chat-theme-root"
+     data-chat-theme="default"
+     class="flex-1 min-w-0 min-h-0 {% if active_conv %}flex{% else %}hidden md:flex{% endif %} flex-col overflow-hidden bg-gray-50">
 
     {% if active_conv %}
     <a href="/messaging/" class="md:hidden shrink-0 flex items-center gap-2 px-4 py-3 bg-white text-blue-700 text-sm font-medium border-b border-gray-100">← Conversaciones</a>
     <!-- Chat header -->
-    <div x-data="{ showMembers: false }" class="bg-white border-b border-gray-200 shrink-0">
+   <div x-data="{ showMembers: false }"
+     class="bg-white border-b border-gray-200 shrink-0"
+     style="border-bottom: none;">
       <div class="chat-header px-4 sm:px-6 py-3.5 flex items-center gap-3">
         {% if active_conv.type == 'group' %}
           {% if active_conv.avatar_key %}
@@ -189,6 +468,73 @@
             {% endif %}
           </p>
         </div>
+        <!-- Selector de temas -->
+<div class="relative shrink-0">
+  <button
+    type="button"
+    id="chat-theme-button"
+    onclick="toggleChatThemes()"
+    title="Personalizar apariencia del chat"
+    aria-label="Elegir tema del chat"
+    aria-expanded="false"
+    aria-controls="chat-theme-menu"
+    class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 transition-colors">
+
+    <svg class="w-4 h-4" fill="none" stroke="currentColor"
+         viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            stroke-width="1.8"
+            d="M12 3a9 9 0 100 18h1.5a2.5 2.5 0 002.5-2.5c0-.9-.5-1.4-.5-2.1a1.4 1.4 0 011.4-1.4H18a3 3 0 003-3c0-5-4-9-9-9z"/>
+      <circle cx="7.5" cy="11" r="1" fill="currentColor"/>
+      <circle cx="11" cy="7" r="1" fill="currentColor"/>
+      <circle cx="16" cy="9" r="1" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <div id="chat-theme-menu"
+       class="hidden absolute right-0 top-full mt-2 w-52 rounded-xl bg-white border border-gray-200 shadow-xl z-50 p-2"
+        style="width: 220px; min-width: 220px; max-width: 220px;">
+
+    <p class="text-xs font-semibold text-gray-500 px-2 py-2">
+      Apariencia del chat
+    </p>
+
+    <button type="button" data-chat-theme-option="default"
+            onclick="setChatTheme('default')"
+            class="chat-theme-option">
+      <span class="theme-dot" style="background:#3B82F6"></span>
+      Predeterminado
+    </button>
+
+    <button type="button" data-chat-theme-option="dark"
+            onclick="setChatTheme('dark')"
+            class="chat-theme-option">
+      <span class="theme-dot" style="background:#252D3D"></span>
+      Oscuro
+    </button>
+
+    <button type="button" data-chat-theme-option="gray"
+            onclick="setChatTheme('gray')"
+            class="chat-theme-option">
+      <span class="theme-dot" style="background:#8793A2"></span>
+      Gris
+    </button>
+
+    <button type="button" data-chat-theme-option="autumn"
+            onclick="setChatTheme('autumn')"
+            class="chat-theme-option">
+      <span class="theme-dot" style="background:#B76B43"></span>
+      Otoñal
+    </button>
+
+    <button type="button" data-chat-theme-option="christmas"
+            onclick="setChatTheme('christmas')"
+            class="chat-theme-option">
+      <span class="theme-dot" style="background:#A93F44"></span>
+      Navideño
+    </button>
+  </div>
+</div>
         <!-- Buscar en el chat -->
         <button type="button" onclick="toggleMsgSearch()" title="Buscar en el chat"
                 class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors">
@@ -447,7 +793,7 @@
     </div>
 
     <!-- Fijados (máx. 3; _pins.html). Se refresca con cada `msgupdate` del chat. -->
-    <div id="pins-bar" class="shrink-0 bg-amber-50 border-b border-amber-200 empty:hidden"
+    <div id="pins-bar" class="shrink-0 bg-amber-50 empty:hidden"
          hx-get="/messaging/{{ active_conv.id }}/pins" hx-trigger="load, pinsChanged from:body"></div>
 
     <!-- Message feed (real-time via SSE; 30s poll as fallback). El poll es
@@ -2100,5 +2446,106 @@ async function addSelectedMembers(event) {
   })();
 })();
 </script>
+
+
+<script>
+(function () {
+  const STORAGE_KEY = 'hoss.chat.theme';
+
+  const THEMES = [
+    'default',
+    'dark',
+    'gray',
+    'autumn',
+    'christmas'
+  ];
+
+  const root = document.getElementById('chat-theme-root');
+  const menu = document.getElementById('chat-theme-menu');
+  const button = document.getElementById('chat-theme-button');
+
+  if (!root) return;
+
+  function validTheme(theme) {
+    return THEMES.includes(theme) ? theme : 'default';
+  }
+
+  function applyTheme(theme) {
+    theme = validTheme(theme);
+
+    // Cambiar los colores de la conversación
+    root.dataset.chatTheme = theme;
+
+    // Indicar visualmente el tema seleccionado
+    document.querySelectorAll('[data-chat-theme-option]')
+      .forEach(option => {
+        const selected =
+          option.dataset.chatThemeOption === theme;
+
+        option.setAttribute('aria-pressed', String(selected));
+      });
+  }
+
+  // Al abrir la página, recuperar el tema anterior
+  let savedTheme = 'default';
+
+  try {
+    savedTheme = localStorage.getItem(STORAGE_KEY) || 'default';
+  } catch (error) {
+    console.warn('No se pudo leer la preferencia de tema', error);
+  }
+
+  applyTheme(savedTheme);
+
+  // Seleccionar y guardar un nuevo tema
+  window.setChatTheme = function (theme) {
+    theme = validTheme(theme);
+    applyTheme(theme);
+
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch (error) {
+      console.warn('No se pudo guardar el tema', error);
+    }
+
+    closeChatThemes();
+  };
+
+  function closeChatThemes() {
+    if (!menu) return;
+    menu.classList.add('hidden');
+    if (button) button.setAttribute('aria-expanded', 'false');
+  }
+
+  window.toggleChatThemes = function () {
+    if (!menu) return;
+
+    const opening = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !opening);
+
+    if (button) {
+      button.setAttribute('aria-expanded', String(opening));
+    }
+  };
+
+  // Cerrar al hacer clic fuera
+  document.addEventListener('click', function (event) {
+    if (!menu || !button) return;
+
+    if (!menu.contains(event.target) &&
+        !button.contains(event.target)) {
+      closeChatThemes();
+    }
+  });
+
+  // Cerrar con Escape
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      closeChatThemes();
+    }
+  });
+})();
+</script>
+
 
 {% endblock %}
