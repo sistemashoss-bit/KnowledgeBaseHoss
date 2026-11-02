@@ -45,3 +45,35 @@
   });
   desktop.addEventListener('change', () => { if (desktop.matches) closeMenu(); });
 })();
+
+// Contraer/expandir el menú lateral en escritorio (solo iconos). Se recuerda por navegador.
+(() => {
+  const btn = document.getElementById('sidebar-collapse-toggle');
+  const sidebar = document.getElementById('app-sidebar');
+  if (!btn || !sidebar) return;
+  const root = document.documentElement;
+  // Clave que eligió el script del <head> de base.html (Mensajes tiene la suya).
+  const KEY = root.dataset.sidebarKey || 'hoss.sidebar.collapsed';
+  const links = [...sidebar.querySelectorAll('nav > a, #logout-link')];
+
+  function apply(collapsed) {
+    root.classList.toggle('sidebar-collapsed', collapsed);
+    const label = collapsed ? 'Expandir menú' : 'Contraer menú';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    btn.querySelector('.nav-label').textContent = label;
+    // Con solo iconos, el nombre de la sección aparece como tooltip.
+    links.forEach(a => {
+      const text = a.querySelector('.nav-label')?.textContent.trim();
+      if (collapsed && text) a.title = text; else if (a.id !== 'logout-link') a.removeAttribute('title');
+    });
+  }
+
+  apply(root.classList.contains('sidebar-collapsed'));
+  btn.addEventListener('click', () => {
+    const collapsed = !root.classList.contains('sidebar-collapsed');
+    apply(collapsed);
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch (e) {}
+  });
+})();

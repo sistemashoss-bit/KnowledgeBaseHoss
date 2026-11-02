@@ -13,6 +13,19 @@
   <script defer src="{{ asset('navigation.js') }}"></script>
   <script defer src="{{ asset('emoji.js') }}"></script>
   <style>[x-cloak] { display: none !important; }</style>
+  <script>
+    // Menú lateral contraído (solo escritorio): se aplica antes de pintar para que no parpadee.
+    // En Mensajes arranca contraído (preferencia propia); en el resto, expandido.
+    (function () {
+      var root = document.documentElement;
+      var messaging = /^\/messaging(\/|$)/.test(location.pathname);
+      var key = messaging ? 'hoss.sidebar.collapsed.messaging' : 'hoss.sidebar.collapsed';
+      root.dataset.sidebarKey = key;
+      var saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) {}
+      if (saved === '1' || (messaging && saved === null)) root.classList.add('sidebar-collapsed');
+    })();
+  </script>
   {% if current_user %}
   <meta name="csrf-token" content="{{ csrf_for(current_user.id) }}" />
   <script>window.REACTION_EMOJIS = {{ reaction_emojis | tojson }};</script>
@@ -59,11 +72,22 @@
   <aside id="app-sidebar" aria-label="Menú de navegación" {% if current_user %}x-data="navBadges()"{% endif %}
          class="app-sidebar w-64 bg-slate-900 flex flex-col shrink-0">
     <button type="button" data-menu-close class="lg:hidden self-end px-4 py-2 text-slate-200" aria-label="Cerrar menú de navegación">Cerrar ✕</button>
-    <div class="px-6 py-5 border-b border-slate-700">
+    <div class="sidebar-brand px-6 py-5 border-b border-slate-700">
       <a href="/" class="flex items-center justify-center">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
-             alt="HOSS" class="h-8 w-auto object-contain brightness-0 invert" />
+             alt="HOSS" class="sidebar-logo h-8 w-auto object-contain brightness-0 invert" />
+        <img src="{{ asset('favicon.png') }}" alt="HOSS" class="sidebar-logo-mini h-8 w-8 object-contain brightness-0 invert" />
       </a>
+    </div>
+    <div class="sidebar-toggle-row px-4 pt-3">
+      <button type="button" id="sidebar-collapse-toggle" aria-controls="app-sidebar" aria-expanded="true"
+              aria-label="Contraer menú" title="Contraer menú"
+              class="sidebar-toggle">
+        <svg class="sidebar-toggle-icon w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        </svg>
+        <span class="nav-label">Contraer menú</span>
+      </button>
     </div>
 
     {% set current_path = request.url.path.rstrip('/') %}
@@ -75,89 +99,89 @@
     <nav class="flex-1 px-4 py-4 space-y-1">
       <a href="/documents/" {{ nav_current('/documents') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
-        Documentos
+        <span class="nav-label">Documentos</span>
       </a>
 
       {% if current_user %}
       <a href="/documents/mine" {{ nav_current('/documents/mine') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M20.25 14.15v4.25a2 2 0 01-1.872 1.996 47.9 47.9 0 01-12.756 0A2 2 0 013.75 18.4v-4.25m16.5 0a2.18 2.18 0 00.75-1.66V8.7a2.18 2.18 0 00-1.837-2.15 48 48 0 00-3.413-.386m4.5 7.986a2 2 0 01-.673.38A24 24 0 0112 15.75c-2.648 0-5.195-.43-7.577-1.22a2 2 0 01-.673-.38m0 0A2.18 2.18 0 013 12.49V8.7a2.18 2.18 0 011.837-2.15 48 48 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.913m7.5 0a49 49 0 00-7.5 0" />
         </svg>
-        Mis documentos
+        <span class="nav-label">Mis documentos</span>
       </a>
       {% endif %}
 
       {% if current_user and current_user.role in ("superadmin", "admin") %}
       <a href="/users/" {{ nav_current('/users') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
-        Usuarios
+        <span class="nav-label">Usuarios</span>
       </a>
       {% endif %}
 
       {% if current_user and current_user.role == "superadmin" %}
       <a href="/logs/audit" {{ nav_current('/logs/audit') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
-        Auditorias
+        <span class="nav-label">Auditorias</span>
       </a>
       <a href="/logs/searches" {{ nav_current('/logs/searches') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
-        Búsquedas
+        <span class="nav-label">Búsquedas</span>
       </a>
       {% endif %}
 
       {% if current_user %}
       <a href="/tasks/" {{ nav_current('/tasks') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
         </svg>
-        Tareas
+        <span class="nav-label">Tareas</span>
       </a>
       <a href="/projects/" {{ nav_current('/projects') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
         </svg>
-        Proyectos
+        <span class="nav-label">Proyectos</span>
       </a>
       <a href="/calendar/" {{ nav_current('/calendar') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
-        Calendario
+        <span class="nav-label">Calendario</span>
       </a>
       <a href="/messaging/" {{ nav_current('/messaging') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-1-3z" />
         </svg>
-        <span class="flex-1">Mensajes</span>
+        <span class="nav-label flex-1">Mensajes</span>
         <span x-show="messageCount > 0" x-cloak
               role="status" aria-live="polite" aria-atomic="true"
-              class="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
+              class="nav-badge bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
           <span aria-hidden="true" x-text="messageCount > 99 ? '99+' : messageCount"></span>
           <span class="sr-only" x-text="messageCount + ' conversaciones con mensajes sin leer'"></span>
         </span>
@@ -167,55 +191,55 @@
       {% if current_user and (current_user.role in ("superadmin", "admin", "auditor") or current_user.department_access) %}
       <a href="/reports/" {{ nav_current('/reports') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
         </svg>
-        Reportería
+        <span class="nav-label">Reportería</span>
       </a>
       {% endif %}
 
       {% if current_user and current_user.role == "superadmin" %}
       <a href="/departments/" {{ nav_current('/departments') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
         </svg>
-        Departamentos
+        <span class="nav-label">Departamentos</span>
       </a>
       <a href="/org/zones/" {{ nav_current('/org/zones') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
         </svg>
-        Zonas y Sucursales
+        <span class="nav-label">Zonas y Sucursales</span>
       </a>
       <a href="/tasks/tags/" {{ nav_current('/tasks/tags') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5.586 5.586a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z" />
         </svg>
-        Etiquetas
+        <span class="nav-label">Etiquetas</span>
       </a>
       {% endif %}
 
       {% if current_user %}
       <a href="/auth/profile" {{ nav_current('/auth/profile') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
-        Mi perfil
+        <span class="nav-label">Mi perfil</span>
       </a>
       {% endif %}
     </nav>
 
     <!-- User info -->
-    <div class="px-4 py-4 border-t border-slate-700">
+    <div class="sidebar-user px-4 py-4 border-t border-slate-700">
       {% if current_user %}
       {% set sidebar_name = (current_user.name or '')|trim or 'Usuario' %}
       <div class="flex items-center gap-3">
@@ -227,7 +251,7 @@
           {{ sidebar_name[0].upper() }}
         </div>
         {% endif %}
-        <div class="min-w-0 flex-1 overflow-hidden">
+        <div class="nav-label min-w-0 flex-1 overflow-hidden">
           <p class="text-white text-xs font-medium leading-4 line-clamp-2 [overflow-wrap:anywhere]" title="{{ sidebar_name }}">{{ sidebar_name }}</p>
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>
         </div>
@@ -239,7 +263,7 @@
           <path d="M12 3v9" />
           <path d="M6.34 5.34a8 8 0 1 0 11.32 0" />
         </svg>
-        <span>Cerrar sesión</span>
+        <span class="nav-label">Cerrar sesión</span>
       </a>
       <script>
         // El historial del chat es por navegador: que no lo vea quien entre después.
