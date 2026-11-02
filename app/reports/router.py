@@ -4,16 +4,16 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import granted_department_ids, has_oversight
 from app.models import (
-    AuditLog, Branch, Department, Project, SearchLog,
-    Task, TaskStatusHistory, User, Zone,
+    AuditLog, Department, Project, SearchLog,
+    Task, TaskComment, TaskFollowUp, TaskStatusHistory, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
-    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, PROJECT_STATUSES,
+    TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
 )
 from app.tasks.business_hours import business_hours_label, business_seconds
 from app.templating import templates
@@ -23,25 +23,15 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 # ── Scope helpers ─────────────────────────────────────────────────────────────
 
-def _dept_ids_for_zone(zone_id: str, db: Session) -> list:
-    branch_ids = [b.id for b in db.query(Branch).filter(Branch.zone_id == zone_id).all()]
-    if not branch_ids:
-        return []
-    return [d.id for d in db.query(Department).filter(Department.branch_id.in_(branch_ids)).all()]
-
-
-def _resolve_scope(current_user, zone_id: str, department_id: str, db: Session):
+def _resolve_scope(current_user, department_id: str):
     """
-    Returns (allowed_dept_ids, forced_zone_id, forced_dept_id).
+    Returns (allowed_dept_ids, forced_dept_id).
     allowed_dept_ids=None means no restriction (superadmin/auditor, all).
     """
     if current_user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
-        if zone_id:
-            ids = _dept_ids_for_zone(zone_id, db)
-            return ids, zone_id, ""
         if department_id:
-            return [department_id], "", department_id
-        return None, "", ""
+            return [department_id], department_id
+        return None, ""
 
     # Su departamento más los de acceso extra (view o manage).
     ids = {str(d) for d in granted_department_ids(current_user)}
@@ -49,16 +39,18 @@ def _resolve_scope(current_user, zone_id: str, department_id: str, db: Session):
     if own:
         ids.add(own)
     if department_id and department_id in ids:
-        return [department_id], "", department_id
-    return sorted(ids), "", own if len(ids) == 1 else ""
+        return [department_id], department_id
+    return sorted(ids), own if len(ids) == 1 else ""
 
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
-def _task_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> dict:
+def _task_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, user_id: str = "") -> dict:
     q = db.query(Task).filter(Task.created_at >= dt_from, Task.created_at < dt_to)
     if dept_ids is not None:
         q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
+    if user_id:
+        q = q.filter(Task.assigned_to == user_id)
     tasks = q.all()
 
     today_str = date.today().isoformat()
@@ -74,6 +66,8 @@ def _task_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> di
     )
     if dept_ids is not None:
         overdue = overdue.filter(Task.department_id.in_(dept_ids)) if dept_ids else overdue.filter(Task.id == None)
+    if user_id:
+        overdue = overdue.filter(Task.assigned_to == user_id)
     overdue_count = overdue.scalar() or 0
 
     return {
@@ -88,11 +82,13 @@ def _task_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> di
     }
 
 
-def _tasks_over_time(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> list[dict]:
+def _tasks_over_time(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, user_id: str = "") -> list[dict]:
     """Returns list of {date, created, completed} for each day in range."""
     q = db.query(Task).filter(Task.created_at >= dt_from, Task.created_at < dt_to)
     if dept_ids is not None:
         q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
+    if user_id:
+        q = q.filter(Task.assigned_to == user_id)
     tasks = q.all()
 
     created_by_day: dict[str, int] = defaultdict(int)
@@ -112,7 +108,7 @@ def _tasks_over_time(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
     return days
 
 
-def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> list[dict]:
+def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, user_id: str = "") -> list[dict]:
     """Horas acumuladas por departamento en el período: para cada tarea que llegó
     a 'done' (mismo universo que _task_stats, filtrado por fecha de creación),
     suma sus horas laborales del primer estado al paso a "Listo", según el
@@ -123,6 +119,8 @@ def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
     )
     if dept_ids is not None:
         q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
+    if user_id:
+        q = q.filter(Task.assigned_to == user_id)
     tasks = q.all()
 
     # Inicio y fin por tarea en UNA consulta (no el historial completo de cada una).
@@ -163,6 +161,69 @@ def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) 
         })
     result.sort(key=lambda d: d["hours"], reverse=True)
     return result
+
+
+def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
+    """Tareas pendientes y en progreso (no archivadas) agrupadas por
+    departamento, con sus seguimientos y su último comentario. Es el estado
+    actual: no se acota por el rango de fechas."""
+    q = (
+        db.query(Task)
+        .options(joinedload(Task.assignee), joinedload(Task.department))
+        .filter(Task.status.in_([TASK_PENDING, TASK_IN_PROGRESS]), Task.archived_at.is_(None))
+    )
+    if dept_ids is not None:
+        q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
+    if user_id:
+        q = q.filter(Task.assigned_to == user_id)
+    tasks = q.order_by(Task.due_date.asc().nullslast(), Task.created_at).all()
+    if not tasks:
+        return []
+    task_ids = [t.id for t in tasks]
+
+    follow_ups = {
+        r.task_id: (r.total, r.pending)
+        for r in db.query(
+            TaskFollowUp.task_id,
+            func.count(TaskFollowUp.id).label("total"),
+            func.count(TaskFollowUp.id).filter(TaskFollowUp.done_at.is_(None)).label("pending"),
+        ).filter(TaskFollowUp.task_id.in_(task_ids)).group_by(TaskFollowUp.task_id)
+    }
+
+    # Último comentario por tarea (DISTINCT ON de Postgres).
+    last_comments = {
+        c.task_id: c
+        for c in db.query(TaskComment)
+        .options(joinedload(TaskComment.user))
+        .filter(TaskComment.task_id.in_(task_ids))
+        .order_by(TaskComment.task_id, TaskComment.created_at.desc())
+        .distinct(TaskComment.task_id)
+    }
+
+    groups: dict[str, dict] = {}
+    for t in tasks:
+        key = str(t.department_id) if t.department_id else ""
+        g = groups.setdefault(key, {
+            "department": t.department.name if t.department else "Sin departamento",
+            "tasks": [], "pending": 0, "in_progress": 0,
+        })
+        g["pending" if t.status == TASK_PENDING else "in_progress"] += 1
+        total, pending = follow_ups.get(t.id, (0, 0))
+        c = last_comments.get(t.id)
+        g["tasks"].append({
+            "id": t.id,
+            "title": t.title,
+            "status": t.status,
+            "assignee": (t.assignee.name or t.assignee.email) if t.assignee else "",
+            "due_date": t.due_date,
+            "overdue": bool(t.due_date and t.due_date < date.today()),
+            "follow_ups": total,
+            "follow_ups_pending": pending,
+            "last_comment": c.content if c else "",
+            "last_comment_by": ((c.user.name or c.user.email) if c.user else "") if c else "",
+            "last_comment_at": c.created_at if c else None,
+        })
+    return sorted(groups.values(), key=lambda g: g["department"].lower())
 
 
 def _project_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session) -> dict:
@@ -220,8 +281,8 @@ def _top_searches(dt_from: datetime, dt_to: datetime, db: Session, limit: int = 
 @router.get("/", response_class=HTMLResponse)
 def reports_dashboard(
     request: Request,
-    zone_id: str = "",
     department_id: str = "",
+    user_id: str = "",
     date_from: str = "",
     date_to: str = "",
     db: Session = Depends(get_db),
@@ -242,12 +303,24 @@ def reports_dashboard(
     except ValueError:
         dt_to = datetime.utcnow() + timedelta(days=1)
 
-    dept_ids, active_zone, active_dept = _resolve_scope(current_user, zone_id, department_id, db)
+    dept_ids, active_dept = _resolve_scope(current_user, department_id)
+
+    # Filtro de usuario (asignado): solo con un departamento elegido y entre
+    # los usuarios activos de ese departamento.
+    dept_users = (
+        db.query(User)
+        .filter(User.department_id == active_dept, User.is_active.is_(True))
+        .order_by(User.name, User.email)
+        .all()
+        if active_dept else []
+    )
+    active_user = user_id if any(str(u.id) == user_id for u in dept_users) else ""
 
     # Aggregate
-    task_stats = _task_stats(dept_ids, dt_from, dt_to, db)
-    dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db)
-    tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db)
+    task_stats = _task_stats(dept_ids, dt_from, dt_to, db, active_user)
+    dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db, active_user)
+    tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db, active_user)
+    open_tasks = _open_tasks(dept_ids, db, active_user)
 
     # Proyectos: superadmin y auditor. Usuarios más activos y búsquedas
     # frecuentes: solo superadmin (salen del audit log, son globales sin acotar
@@ -278,7 +351,6 @@ def reports_dashboard(
     priority_data = [task_stats["by_priority"].get(k, 0) for k in priority_keys]
 
     # Filter options for superadmin/auditor
-    zones = db.query(Zone).order_by(Zone.name).all() if is_org_wide else []
     if is_org_wide:
         departments = db.query(Department).order_by(Department.name).all()
     else:
@@ -297,15 +369,16 @@ def reports_dashboard(
             "current_user": current_user,
             "is_org_wide": is_org_wide,
             # filters
-            "zones": zones,
             "departments": departments,
-            "active_zone": active_zone,
             "active_dept": active_dept,
+            "dept_users": dept_users,
+            "active_user": active_user,
             "date_from": date_from or (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d"),
             "date_to": date_to or date.today().isoformat(),
             # KPIs
             "task_stats": task_stats,
             "dept_time_stats": dept_time_stats,
+            "open_tasks": open_tasks,
             "business_hours_label": business_hours_label(),
             "project_stats": project_stats,
             # tables

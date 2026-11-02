@@ -62,7 +62,6 @@
     btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     btn.setAttribute('aria-label', label);
     btn.title = label;
-    btn.querySelector('.nav-label').textContent = label;
     // Con solo iconos, el nombre de la sección aparece como tooltip.
     links.forEach(a => {
       const text = a.querySelector('.nav-label')?.textContent.trim();

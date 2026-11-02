@@ -72,21 +72,18 @@
   <aside id="app-sidebar" aria-label="Menú de navegación" {% if current_user %}x-data="navBadges()"{% endif %}
          class="app-sidebar w-64 bg-slate-900 flex flex-col shrink-0">
     <button type="button" data-menu-close class="lg:hidden self-end px-4 py-2 text-slate-200" aria-label="Cerrar menú de navegación">Cerrar ✕</button>
-    <div class="sidebar-brand px-6 py-5 border-b border-slate-700">
+    <div class="sidebar-brand relative px-6 py-5 border-b border-slate-700">
       <a href="/" class="flex items-center justify-center">
         <img src="https://hoss.com.mx/cdn/shop/files/LOGO_FINAL_VARIANTES_Mesa_de_trabajo_1-04_260x.png?v=1674512695"
              alt="HOSS" class="sidebar-logo h-8 w-auto object-contain brightness-0 invert" />
         <img src="{{ asset('favicon.png') }}" alt="HOSS" class="sidebar-logo-mini h-8 w-8 object-contain brightness-0 invert" />
       </a>
-    </div>
-    <div class="sidebar-toggle-row px-4 pt-3">
       <button type="button" id="sidebar-collapse-toggle" aria-controls="app-sidebar" aria-expanded="true"
               aria-label="Contraer menú" title="Contraer menú"
               class="sidebar-toggle">
         <svg class="sidebar-toggle-icon w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
         </svg>
-        <span class="nav-label">Contraer menú</span>
       </button>
     </div>
 
