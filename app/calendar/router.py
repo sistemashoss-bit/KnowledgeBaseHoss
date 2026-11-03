@@ -17,11 +17,12 @@ Fechas: se guardan en UTC; hacia y desde el navegador viajan en hora local del
 negocio sin offset (FullCalendar corre con timeZone 'UTC' para mostrarlas tal
 cual, igual que el resto de la app muestra todo fijo en hora de Monterrey).
 """
+import os
 import re
 import uuid
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, contains_eager, joinedload
@@ -32,7 +33,10 @@ from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
 from app.calendar.reminders import STALE_AFTER, iter_occurrences, next_remind_at, to_local, to_utc
 from app.database import get_db
+from livekit.api import AccessToken, VideoGrants
+
 from app.models import (
+    MEETING_JOIN_EARLY_MINUTES, MEETING_RESPONSES,
     CalendarCommentReaction, CalendarEvent, CalendarEventAttachment, CalendarEventComment, CalendarEventShare,
     CalendarSubscription, Department, Project, Task, TaskFollowUp,
     TaskTagAssignment, User,
@@ -207,6 +211,14 @@ def _visible_event(event_id: str, user: User, db: Session) -> CalendarEvent:
     return ev
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _is_shared_with(ev: CalendarEvent, user: User, db: Session) -> bool:
     return db.query(CalendarEventShare).filter(
         CalendarEventShare.event_id == ev.id, CalendarEventShare.user_id == user.id,
@@ -252,8 +264,22 @@ def _notify_shared(ev: CalendarEvent, user_ids, actor: User, title: str) -> None
     for uid in user_ids:
         realtime.notify_user(
             uid, title=title, body=f"{ev.title} · {_when(ev)}",
-            url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}&event={ev.id}", kind="calendar_shared",
+            url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}&event={ev.id}",
+            kind="calendar_meeting" if ev.is_meeting else "calendar_shared",
         )
+
+
+def _invite_title(ev: CalendarEvent, actor: User) -> str:
+    who = _display_name(actor)
+    return f"{who} te invitó a una reunión" if ev.is_meeting else f"{who} compartió un evento contigo"
+
+
+def _schedule_key(ev: CalendarEvent) -> tuple:
+    """Lo que, si cambia, obliga a los invitados a confirmar de nuevo."""
+    return (
+        ev.start_at, ev.end_at, ev.all_day, ev.frequency, ev.day_of_week, ev.day_of_month,
+        ev.days_of_week, ev.repeat_until,
+    )
 
 
 def _subscriptions(user: User, db: Session) -> list[CalendarSubscription]:
@@ -331,8 +357,14 @@ def _event_json(
             "reminder_minutes": ev.reminder_minutes,
             "owner_name": _display_name(owner),
             "owner_initials": "" if mine else _initials(owner),
-            "shared_with": [{"id": str(sh.user_id), "name": _display_name(sh.user)} for sh in ev.shares],
+            "shared_with": [
+                {"id": str(sh.user_id), "name": _display_name(sh.user), "response": sh.response or ""}
+                for sh in ev.shares
+            ],
             "shared_to_me": any(sh.user_id == user.id for sh in ev.shares),
+            "is_meeting": ev.is_meeting,
+            "my_response": next((sh.response or "" for sh in ev.shares if sh.user_id == user.id), ""),
+            "meeting_url": f"/calendar/meet/{ev.id}" if ev.is_meeting else "",
         },
     }
 
@@ -420,6 +452,9 @@ def calendar_page(
     request: Request,
     date: str = "",
     event: str = "",
+    new_meeting: bool = False,
+    title: str = "",
+    invite: list[str] = Query(default=[]),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -486,6 +521,11 @@ def calendar_page(
             "initial_date": initial_date,
             # Evento a abrir al cargar (desde una notificación).
             "initial_event": initial_event,
+            # "Programar reunión" desde un chat: formulario de reunión prellenado.
+            "initial_meeting": {
+                "title": title.strip()[:255],
+                "invite": [uid for uid in invite if _is_uuid(uid) and uid != str(current_user.id)],
+            } if new_meeting else None,
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },
     )
@@ -671,6 +711,7 @@ def create_event(
     days_of_week: list[str] = Form([]),
     repeat_until: str = Form(""),
     shared_with: list[str] = Form([]),
+    is_meeting: bool = Form(False),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -679,8 +720,11 @@ def create_event(
     title = title.strip()[:255]
     if not title:
         raise HTTPException(422, "El título es obligatorio")
+    if is_meeting and all_day:
+        raise HTTPException(422, "Una reunión necesita hora de inicio y fin")
 
     ev = CalendarEvent(
+        is_meeting=is_meeting,
         owner_id=current_user.id,
         title=title,
         color=_clean_color(color),
@@ -694,9 +738,9 @@ def create_event(
     added = _set_shares(ev, shared_with, db)
     db.add(ev)
     db.commit()
-    _notify_shared(ev, added, current_user, f"{_display_name(current_user)} compartió un evento contigo")
+    _notify_shared(ev, added, current_user, _invite_title(ev, current_user))
     audit.log_action(
-        "calendar_event_create", user=current_user, request=request,
+        "calendar_meeting_create" if ev.is_meeting else "calendar_event_create", user=current_user, request=request,
         resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
     )
     return {"ok": True, "id": str(ev.id)}
@@ -721,6 +765,7 @@ def edit_event(
     days_of_week: list[str] = Form([]),
     repeat_until: str = Form(""),
     shared_with: list[str] = Form([]),
+    is_meeting: bool = Form(False),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -730,7 +775,12 @@ def edit_event(
     title = title.strip()[:255]
     if not title:
         raise HTTPException(422, "El título es obligatorio")
+    if is_meeting and all_day:
+        raise HTTPException(422, "Una reunión necesita hora de inicio y fin")
 
+    was_meeting, before = ev.is_meeting, _schedule_key(ev)
+    before_shares = {sh.user_id for sh in ev.shares}
+    ev.is_meeting = is_meeting
     ev.title = title
     ev.color = _clean_color(color)
     ev.location = location.strip()[:255] or None
@@ -745,10 +795,26 @@ def edit_event(
     if reminder_changed or recurrence_changed:
         _refresh_reminder(ev)
     added = _set_shares(ev, shared_with, db)
+    removed = before_shares - {sh.user_id for sh in ev.shares}
+    kept = [sh.user_id for sh in ev.shares if sh.user_id not in added]
+    rescheduled = ev.is_meeting and was_meeting and _schedule_key(ev) != before
+    if rescheduled:
+        for sh in ev.shares:
+            sh.response, sh.responded_at = None, None
     db.commit()
-    _notify_shared(ev, added, current_user, f"{_display_name(current_user)} compartió un evento contigo")
+
+    actor = _display_name(current_user)
+    if ev.is_meeting and not was_meeting:
+        # Un evento que se vuelve reunión: todos sus compartidos quedan invitados.
+        _notify_shared(ev, list(added) + kept, current_user, _invite_title(ev, current_user))
+    else:
+        _notify_shared(ev, added, current_user, _invite_title(ev, current_user))
+        if rescheduled:
+            _notify_shared(ev, kept, current_user, f"{actor} cambió el horario de la reunión: confirma de nuevo")
+    if ev.is_meeting and removed:
+        _notify_shared(ev, removed, current_user, f"{actor} te quitó de la reunión")
     audit.log_action(
-        "calendar_event_update", user=current_user, request=request,
+        "calendar_meeting_update" if ev.is_meeting else "calendar_event_update", user=current_user, request=request,
         resource_type="calendar_event", resource_id=ev.id, resource_name=ev.title,
     )
     return {"ok": True}
@@ -769,8 +835,20 @@ def move_event(
     ev = _own_event(event_id, current_user, db)
     if ev.frequency:
         raise HTTPException(422, "Un evento que se repite se cambia desde Editar")
+    if ev.is_meeting and all_day:
+        raise HTTPException(422, "Una reunión necesita hora de inicio y fin")
+    before = _schedule_key(ev)
     _apply_schedule(ev, start, end, all_day)
+    rescheduled = ev.is_meeting and _schedule_key(ev) != before
+    if rescheduled:
+        for sh in ev.shares:
+            sh.response, sh.responded_at = None, None
     db.commit()
+    if rescheduled:
+        _notify_shared(
+            ev, [sh.user_id for sh in ev.shares], current_user,
+            f"{_display_name(current_user)} cambió el horario de la reunión: confirma de nuevo",
+        )
     return {"ok": True}
 
 
@@ -787,7 +865,10 @@ def delete_event(
     title = ev.title
     shared = [sh.user_id for sh in ev.shares]
     file_keys = [a.file_key for a in ev.attachments]
-    _notify_shared(ev, shared, current_user, f"{_display_name(current_user)} canceló un evento")
+    _notify_shared(
+        ev, shared, current_user,
+        f"{_display_name(current_user)} canceló {'la reunión' if ev.is_meeting else 'un evento'}",
+    )
     db.delete(ev)
     db.commit()
     for key in file_keys:
@@ -812,11 +893,158 @@ def leave_event(
     if not current_user:
         raise HTTPException(401)
     ev = _visible_event(event_id, current_user, db)
-    db.query(CalendarEventShare).filter(
+    deleted = db.query(CalendarEventShare).filter(
         CalendarEventShare.event_id == ev.id, CalendarEventShare.user_id == current_user.id,
     ).delete()
     db.commit()
+    if deleted and ev.is_meeting:
+        _notify_meeting_owner(ev, current_user, "salió de la reunión")
     return {"ok": True}
+
+
+# ── Reuniones (videollamada + confirmación de asistencia) ─────────────────────
+
+def _notify_meeting_owner(ev: CalendarEvent, actor: User, what: str) -> None:
+    realtime.notify_user(
+        ev.owner_id, title=f"{_display_name(actor)} {what}", body=f"{ev.title} · {_when(ev)}",
+        url=f"/calendar/?date={to_local(ev.start_at).date().isoformat()}&event={ev.id}", kind="calendar_rsvp",
+    )
+
+
+def _meeting_for(event_id: str, user: User, db: Session) -> tuple[CalendarEvent, CalendarEventShare | None]:
+    """Reunión de la que `user` es organizador o invitado (no basta con ver su
+    calendario: la sala es solo para los convocados)."""
+    try:
+        uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(404)
+    ev = (
+        db.query(CalendarEvent)
+        .options(joinedload(CalendarEvent.owner), joinedload(CalendarEvent.shares).joinedload(CalendarEventShare.user))
+        .filter(CalendarEvent.id == event_id, CalendarEvent.is_meeting.is_(True))
+        .first()
+    )
+    if not ev:
+        raise HTTPException(404)
+    share = next((sh for sh in ev.shares if sh.user_id == user.id), None)
+    if ev.owner_id != user.id and not share:
+        raise HTTPException(403)
+    return ev, share
+
+
+def _meeting_occurrence(ev: CalendarEvent, now: datetime) -> tuple[datetime, datetime] | None:
+    """(inicio, fin) UTC de la ocurrencia en curso o la próxima; None si ya no
+    queda ninguna. En una serie, la de hoy mientras no termine."""
+    duration = ev.end_at - ev.start_at
+    for start in iter_occurrences(ev, to_local(now - duration).date()):
+        if start + duration > now:
+            return start, start + duration
+    return None
+
+
+def _join_window(occ: tuple[datetime, datetime] | None, now: datetime) -> str:
+    """'open' (se puede entrar), 'early' (aún no) o 'ended'."""
+    if not occ:
+        return "ended"
+    return "open" if now >= occ[0] - timedelta(minutes=MEETING_JOIN_EARLY_MINUTES) else "early"
+
+
+@router.post("/events/{event_id}/rsvp")
+def meeting_rsvp(
+    event_id: str,
+    response: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    if response not in MEETING_RESPONSES:
+        raise HTTPException(422, "Respuesta inválida")
+    ev, share = _meeting_for(event_id, current_user, db)
+    if not share:
+        raise HTTPException(422, "El organizador no confirma asistencia")
+    changed = share.response != response
+    share.response, share.responded_at = response, datetime.utcnow()
+    db.commit()
+    if changed:
+        what = {"yes": "asistirá a la reunión", "maybe": "tal vez asista a la reunión", "no": "no asistirá a la reunión"}
+        _notify_meeting_owner(ev, current_user, what[response])
+    return {"ok": True, "response": response}
+
+
+@router.get("/events/{event_id}/meeting/token")
+def meeting_token(
+    event_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Token de LiveKit para la sala de la reunión, solo dentro de su horario
+    (desde MEETING_JOIN_EARLY_MINUTES antes del inicio hasta que termina)."""
+    if not current_user:
+        raise HTTPException(401)
+    ev, _ = _meeting_for(event_id, current_user, db)
+    now = datetime.utcnow()
+    window = _join_window(_meeting_occurrence(ev, now), now)
+    if window != "open":
+        raise HTTPException(
+            403, "La reunión ya terminó" if window == "ended"
+            else f"La sala abre {MEETING_JOIN_EARLY_MINUTES} minutos antes del inicio",
+        )
+    room = f"meet-{ev.id}"
+    token = (
+        AccessToken(os.getenv("LIVEKIT_API_KEY", ""), os.getenv("LIVEKIT_API_SECRET", ""))
+        .with_identity(str(current_user.id))
+        .with_name(_display_name(current_user))
+        .with_grants(VideoGrants(room_join=True, room=room))
+        .to_jwt()
+    )
+    return JSONResponse({"token": token, "url": os.getenv("LIVEKIT_URL", ""), "room": room})
+
+
+@router.get("/meet/{event_id}", response_class=HTMLResponse)
+def meeting_page(
+    event_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    ev, share = _meeting_for(event_id, current_user, db)
+    now = datetime.utcnow()
+    occ = _meeting_occurrence(ev, now)
+    start_local = to_local(occ[0]) if occ else to_local(ev.start_at)
+    end_local = to_local(occ[1]) if occ else to_local(ev.end_at)
+    counts = {k: 0 for k in MEETING_RESPONSES}
+    for sh in ev.shares:
+        if sh.response in counts:
+            counts[sh.response] += 1
+    return templates.TemplateResponse(
+        request,
+        "calendar/meeting.html",
+        {
+            "current_user": current_user,
+            "ev": ev,
+            "is_owner": ev.owner_id == current_user.id,
+            "my_response": share.response if share else "",
+            "invitees": [
+                {"name": _display_name(sh.user), "response": sh.response or ""}
+                for sh in sorted(ev.shares, key=lambda sh: _display_name(sh.user).lower())
+            ],
+            "counts": counts,
+            "responses": MEETING_RESPONSES,
+            "window": _join_window(occ, now),
+            "join_early": MEETING_JOIN_EARLY_MINUTES,
+            "start_local": start_local,
+            "end_local": end_local,
+            # Para que el navegador habilite "Unirse" a tiempo sin recargar.
+            "opens_at_ms": int(((occ[0] if occ else ev.start_at) - timedelta(minutes=MEETING_JOIN_EARLY_MINUTES)
+                                - datetime(1970, 1, 1)).total_seconds() * 1000),
+            "repeat_label": _repeat_label(ev) if ev.frequency else "",
+            "calendar_url": f"/calendar/?date={start_local.date().isoformat()}&event={ev.id}",
+            "csrf_token": generate_csrf_token(str(current_user.id)),
+        },
+    )
 
 
 # ── Comentarios (dueño, compartidos y quien ve su calendario) ─────────────────

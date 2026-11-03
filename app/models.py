@@ -56,6 +56,10 @@ TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo",
 # día cuenta en días completos (0 = ese día, 1440 = el día anterior) y llega a
 # CALENDAR_ALL_DAY_REMINDER_HOUR hora local, no a medianoche.
 CALENDAR_REMINDER_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 1440]
+# Confirmación de asistencia a una reunión (CalendarEventShare.response).
+MEETING_RESPONSES = {"yes": "Asistirá", "maybe": "Tal vez", "no": "No asistirá"}
+# Desde cuántos minutos antes del inicio se puede entrar a la sala.
+MEETING_JOIN_EARLY_MINUTES = 15
 CALENDAR_ALL_DAY_REMINDER_HOUR = 8
 # Tope de calendarios ajenos (personas + departamentos) que alguien agrega a su vista.
 CALENDAR_MAX_SUBSCRIPTIONS = 50
@@ -705,6 +709,10 @@ class CalendarEvent(Base):
     days_of_week = Column(String(20), nullable=True)  # CSV 0=Lun..6=Dom, sólo custom
     repeat_until = Column(Date, nullable=True)
 
+    # Reunión con videollamada (sala LiveKit "meet-<id>"): los invitados son los
+    # compartidos (CalendarEventShare), que confirman asistencia.
+    is_meeting = Column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -751,6 +759,10 @@ class CalendarEventShare(Base):
 
     event_id = Column(UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    # Solo en reuniones: MEETING_RESPONSES o NULL (sin responder). Se limpia si
+    # la reunión cambia de horario, para que confirmen de nuevo.
+    response = Column(String(10), nullable=True)
+    responded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     event = relationship("CalendarEvent", back_populates="shares")

@@ -141,8 +141,11 @@ def send_event_reminders(now: datetime | None = None) -> int:
             for ev in db.query(CalendarEvent).filter(CalendarEvent.id.in_(list(sent_remind))).all():
                 remind_at = sent_remind[ev.id]
                 start_at = _occurrence_for(ev, remind_at) if ev.frequency else ev.start_at
-                recipients = [ev.owner_id] + [sh.user_id for sh in ev.shares]
-                rows.append((recipients, ev.id, ev.title, start_at, ev.all_day, ev.location))
+                # En una reunión, quien respondió "No asistiré" ya no recibe el aviso.
+                recipients = [ev.owner_id] + [
+                    sh.user_id for sh in ev.shares if not (ev.is_meeting and sh.response == "no")
+                ]
+                rows.append((recipients, ev.id, ev.title, start_at, ev.all_day, ev.location, ev.is_meeting))
                 if ev.frequency:
                     ev.remind_at = next_remind_at(ev, remind_at)
                     ev.reminded_at = None
@@ -166,7 +169,7 @@ def send_event_reminders(now: datetime | None = None) -> int:
         db.close()
 
     today = to_local(now).date()
-    for recipients, event_id, title, start_at, all_day, location in rows:
+    for recipients, event_id, title, start_at, all_day, location, is_meeting in rows:
         start_local = to_local(start_at)
         body = _when_label(start_local, all_day, today)
         if location:
@@ -174,9 +177,10 @@ def send_event_reminders(now: datetime | None = None) -> int:
         for user_id in recipients:
             realtime.notify_user(
                 user_id,
-                title=f"Recordatorio: {title}",
-                body=body,
-                url=f"/calendar/?date={start_local.date().isoformat()}&event={event_id}",
+                title=f"Reunión por empezar: {title}" if is_meeting else f"Recordatorio: {title}",
+                body=body + (" · Toca para unirte" if is_meeting else ""),
+                url=f"/calendar/meet/{event_id}" if is_meeting
+                else f"/calendar/?date={start_local.date().isoformat()}&event={event_id}",
                 kind="calendar_reminder",
             )
     return len(rows)
