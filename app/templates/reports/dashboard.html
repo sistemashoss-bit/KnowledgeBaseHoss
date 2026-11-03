@@ -210,9 +210,20 @@
     </div>
     {% endmacro %}
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
-        <h2 class="text-sm font-semibold text-gray-700">Tareas pendientes y en progreso</h2>
-        <p class="text-xs text-gray-400 mt-0.5">Estado actual (no depende del rango de fechas), con seguimientos y último comentario</p>
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-700">Tareas pendientes y en progreso</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Estado actual (no depende del rango de fechas), con seguimientos y último comentario</p>
+        </div>
+        {% if open_tasks %}
+        {% set export_qs = '?department_id=' ~ (active_dept|urlencode) ~ '&user_id=' ~ (active_user|urlencode) %}
+        <div class="flex gap-2 shrink-0">
+          <a href="/reports/open-tasks.xlsx{{ export_qs }}" download
+             class="px-4 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Exportar XLSX</a>
+          <a href="/reports/open-tasks.pdf{{ export_qs }}" download
+             class="px-4 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Exportar PDF</a>
+        </div>
+        {% endif %}
       </div>
       {% if open_tasks %}
         {% if active_dept %}

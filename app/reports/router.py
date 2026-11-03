@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -15,6 +15,7 @@ from app.models import (
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
 )
+from app.reports.export import open_tasks_pdf, open_tasks_xlsx
 from app.tasks.business_hours import business_hours_label, business_seconds
 from app.templating import templates
 
@@ -41,6 +42,22 @@ def _resolve_scope(current_user, department_id: str):
     if department_id and department_id in ids:
         return [department_id], department_id
     return sorted(ids), own if len(ids) == 1 else ""
+
+
+def _resolve_filters(current_user, department_id: str, user_id: str, db: Session):
+    """(dept_ids, active_dept, dept_users, active_user). Filtro de usuario
+    (asignado): solo con un departamento elegido y entre los usuarios activos
+    de ese departamento."""
+    dept_ids, active_dept = _resolve_scope(current_user, department_id)
+    dept_users = (
+        db.query(User)
+        .filter(User.department_id == active_dept, User.is_active.is_(True))
+        .order_by(User.name, User.email)
+        .all()
+        if active_dept else []
+    )
+    active_user = user_id if any(str(u.id) == user_id for u in dept_users) else ""
+    return dept_ids, active_dept, dept_users, active_user
 
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
@@ -303,18 +320,7 @@ def reports_dashboard(
     except ValueError:
         dt_to = datetime.utcnow() + timedelta(days=1)
 
-    dept_ids, active_dept = _resolve_scope(current_user, department_id)
-
-    # Filtro de usuario (asignado): solo con un departamento elegido y entre
-    # los usuarios activos de ese departamento.
-    dept_users = (
-        db.query(User)
-        .filter(User.department_id == active_dept, User.is_active.is_(True))
-        .order_by(User.name, User.email)
-        .all()
-        if active_dept else []
-    )
-    active_user = user_id if any(str(u.id) == user_id for u in dept_users) else ""
+    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
 
     # Aggregate
     task_stats = _task_stats(dept_ids, dt_from, dt_to, db, active_user)
@@ -393,4 +399,48 @@ def reports_dashboard(
             "priority_labels": priority_labels,
             "priority_data": priority_data,
         },
+    )
+
+
+@router.get("/open-tasks.{fmt}")
+def export_open_tasks(
+    fmt: str,
+    department_id: str = "",
+    user_id: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Exporta la tabla "Tareas pendientes y en progreso" con los mismos
+    filtros de departamento/usuario del dashboard."""
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    if not current_user.department_id and not has_oversight(current_user) and current_user.role != ROLE_AUDITOR:
+        raise HTTPException(403)
+    if fmt not in ("xlsx", "pdf"):
+        raise HTTPException(404)
+
+    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    groups = _open_tasks(dept_ids, db, active_user)
+
+    subtitle = []
+    if active_dept:
+        dept = db.get(Department, active_dept)
+        if dept:
+            subtitle.append(f"Departamento: {dept.name}")
+    for u in dept_users:
+        if str(u.id) == active_user:
+            subtitle.append(f"Usuario: {u.name or u.email}")
+    generated = datetime.now()
+    subtitle.append(f"Generado: {generated.strftime('%d/%m/%Y %H:%M')}")
+
+    filename = f"tareas-abiertas-{generated.strftime('%Y%m%d-%H%M')}.{fmt}"
+    if fmt == "xlsx":
+        content = open_tasks_xlsx(groups, " · ".join(subtitle))
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        content = open_tasks_pdf(groups, " · ".join(subtitle))
+        media = "application/pdf"
+    return Response(
+        content, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
