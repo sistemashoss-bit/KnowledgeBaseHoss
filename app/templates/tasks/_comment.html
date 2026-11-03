@@ -22,8 +22,12 @@
       {% if comment.edited %}
       <span class="text-xs text-gray-400 italic" title="Comentario editado">· editado</span>
       {% endif %}
-      {% if can_manage %}
       <span class="ml-auto flex items-center gap-2 shrink-0">
+        {% if can_comment|default(true) %}
+        <button type="button" @click="$dispatch('reply')"
+                class="text-xs text-gray-400 hover:text-blue-600 transition-colors">Responder</button>
+        {% endif %}
+        {% if can_manage %}
         {% if is_author and not sticker %}
         <button type="button" @click="editing = true" x-show="!editing"
                 class="text-xs text-gray-400 hover:text-gray-700 transition-colors">Editar</button>
@@ -35,8 +39,8 @@
                 hx-swap="outerHTML"
                 hx-confirm="¿Eliminar este comentario?"
                 class="text-xs text-red-400 hover:text-red-600 transition-colors">Eliminar</button>
+        {% endif %}
       </span>
-      {% endif %}
     </div>
 
     <!-- Vista -->

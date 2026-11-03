@@ -24,6 +24,7 @@ from app.permissions import (
 )
 from app import folders as folders_lib
 from app import rag, storage, audit
+from app import images
 from app.templating import templates
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -448,17 +449,18 @@ def upload_document(
         content_type_for_index = "drive"
         text = ""  # sin archivo: indexable solo por título/descripción
     else:
-        content = file.file.read()
-        file_key = f"{dept.slug}/{doc_id}/{file.filename}"
-        storage.upload_file(file_key, content, file.content_type or "application/octet-stream")
-        text = rag.extract_text(content, file.filename or "file")
+        original = file.file.read()
+        text = rag.extract_text(original, file.filename or "file")
+        content, filename, ctype = images.optimize_image(original, file.filename or "file", file.content_type)
+        file_key = f"{dept.slug}/{doc_id}/{filename}"
+        storage.upload_file(file_key, content, ctype or "application/octet-stream")
         doc = Document(
             id=doc_id,
             title=title,
             description=description,
-            filename=file.filename or "file",
+            filename=filename,
             file_key=file_key,
-            content_type=file.content_type,
+            content_type=ctype,
             file_size=len(content),
             department_id=department_id,
             status=status,
@@ -466,7 +468,7 @@ def upload_document(
             uploaded_by=str(user.id),
             folder_id=folder.id if folder else None,
         )
-        content_type_for_index = file.content_type or ""
+        content_type_for_index = ctype or ""
 
     db.add(doc)
     for uid in allowed_user_ids:
@@ -630,17 +632,18 @@ def edit_document(
                 raise HTTPException(400, "El link no parece de Google Drive/Docs.")
             doc.drive_url = drive_url
     elif file and file.filename:
-        content = file.file.read()
-        if content:
-            new_file_key = f"{dept.slug if dept else 'misc'}/{doc_id}/{file.filename}"
+        original = file.file.read()
+        if original:
+            new_text = rag.extract_text(original, file.filename)
+            content, filename, ctype = images.optimize_image(original, file.filename, file.content_type)
+            new_file_key = f"{dept.slug if dept else 'misc'}/{doc_id}/{filename}"
             if doc.file_key:
                 storage.delete_file(doc.file_key)
-            storage.upload_file(new_file_key, content, file.content_type or "application/octet-stream")
+            storage.upload_file(new_file_key, content, ctype or "application/octet-stream")
             doc.file_key = new_file_key
-            doc.filename = file.filename
-            doc.content_type = file.content_type
+            doc.filename = filename
+            doc.content_type = ctype
             doc.file_size = len(content)
-            new_text = rag.extract_text(content, file.filename)
 
     db.commit()
 

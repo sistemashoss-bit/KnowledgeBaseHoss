@@ -22,6 +22,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import audit, storage
+from app import images
+from starlette.concurrency import run_in_threadpool
 from app import valkey_client as vk
 from app.auth import hoss
 from app.auth.deps import get_current_user
@@ -177,7 +179,10 @@ async def create_issue_report(
         kind = _SCREENSHOT_TYPES.get(screenshot.content_type or "")
         if not kind or not content.startswith(kind[0]):
             raise HTTPException(400, "La captura debe ser WebP, PNG o JPEG")
-        shot = (content, screenshot.content_type, kind[1])
+        content, _, content_type = await run_in_threadpool(
+            images.optimize_image, content, f"captura.{kind[1]}", screenshot.content_type,
+        )
+        shot = (content, content_type, "webp" if content_type == "image/webp" else kind[1])
 
     # Clasificación. Si Jev falla, tarda o no está seguro: triage + prioridad media.
     # Si el usuario eligió departamento, a Jev no se le pregunta: solo decide la prioridad.

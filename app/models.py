@@ -578,11 +578,14 @@ class TaskComment(Base):
     __tablename__ = "task_comments"
     __table_args__ = (
         Index("ix_task_comments_task_created", "task_id", "created_at"),
+        Index("ix_task_comments_parent_id", "parent_id", postgresql_where=text("parent_id IS NOT NULL")),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Respuesta en hilo: apunta al comentario raíz (un solo nivel). NULL = raíz.
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("task_comments.id", ondelete="SET NULL"), nullable=True)
     content = Column(Text, nullable=False)
     # True si el autor editó el comentario tras crearlo (para mostrar "editado").
     edited = Column(Boolean, default=False, nullable=False)

@@ -27,6 +27,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from app import audit, reactions, storage
+from app import images
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
 from app.calendar.reminders import STALE_AFTER, iter_occurrences, next_remind_at, to_local, to_utc
@@ -1057,12 +1058,12 @@ def upload_attachments(
 
     added = []
     for f in files:
-        content = f.file.read()
-        key = f"calendar/{ev.id}/{uuid.uuid4()}_{_safe_filename(f.filename)}"
-        content_type = (f.content_type or "application/octet-stream")[:100]
+        content, filename, content_type = images.optimize_image(f.file.read(), f.filename, f.content_type)
+        key = f"calendar/{ev.id}/{uuid.uuid4()}_{_safe_filename(filename)}"
+        content_type = (content_type or "application/octet-stream")[:100]
         storage.upload_evidence(key, content, content_type)
         a = CalendarEventAttachment(
-            event_id=ev.id, uploaded_by=current_user.id, filename=f.filename[:255],
+            event_id=ev.id, uploaded_by=current_user.id, filename=filename[:255],
             file_key=key, content_type=content_type, file_size=len(content),
         )
         db.add(a)

@@ -13,6 +13,7 @@ from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, rag, reactions, storage
+from app import images
 from app.documents.router import _preview_meta
 from app.messaging import realtime, stickers
 from app.permissions import (
@@ -515,17 +516,19 @@ def create_task(
     for f in evidences:
         if not f.filename:
             continue
-        content = f.file.read()
-        safe = _safe_filename(f.filename)
+        content, filename, ctype = images.optimize_image(
+            f.file.read(), f.filename, f.content_type or "application/octet-stream",
+        )
+        safe = _safe_filename(filename)
         key = f"tasks/{task.id}/{uuid.uuid4()}_{safe}"
-        storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
+        storage.upload_evidence(key, content, ctype)
         db.add(TaskEvidence(
             id=uuid.uuid4(),
             task_id=task.id,
             uploaded_by=current_user.id,
-            filename=f.filename,
+            filename=filename,
             file_key=key,
-            content_type=f.content_type or "application/octet-stream",
+            content_type=ctype,
             file_size=len(content),
         ))
 
@@ -635,6 +638,7 @@ def task_detail(
             "can_approve": _can_approve_task(current_user, task),
             "can_participate": can_participate,
             "can_comment": _can_comment(current_user, task_id, db),
+            "comment_threads": _comment_threads(task.comments),
             # Consulta agrupada aparte: otro joinedload multiplicaría las filas de la de arriba.
             "comment_reactions": reactions.summarize(
                 db, TaskCommentReaction, [c.id for c in task.comments], current_user.id,
@@ -711,17 +715,19 @@ def upload_evidences(
     for f in files:
         if not f.filename:
             continue
-        content = f.file.read()
-        safe = _safe_filename(f.filename)
+        content, filename, ctype = images.optimize_image(
+            f.file.read(), f.filename, f.content_type or "application/octet-stream",
+        )
+        safe = _safe_filename(filename)
         key = f"tasks/{task_id}/{uuid.uuid4()}_{safe}"
-        storage.upload_evidence(key, content, f.content_type or "application/octet-stream")
+        storage.upload_evidence(key, content, ctype)
         db.add(TaskEvidence(
             id=uuid.uuid4(),
             task_id=task.id,
             uploaded_by=current_user.id,
-            filename=f.filename,
+            filename=filename,
             file_key=key,
-            content_type=f.content_type or "application/octet-stream",
+            content_type=ctype,
             file_size=len(content),
         ))
     db.commit()
@@ -1151,12 +1157,24 @@ def remove_task_share(
 
 # ── Comments (HTMX append) ───────────────────────────────────────────────────
 
+def _comment_threads(comments: list[TaskComment]) -> list[tuple[TaskComment, list[TaskComment]]]:
+    """[(raíz, respuestas)] en orden cronológico. Una respuesta cuyo raíz ya no
+    está (borrado → SET NULL, o fuera de la lista) se muestra como raíz."""
+    ids = {c.id for c in comments}
+    replies: dict = {}
+    for c in comments:
+        if c.parent_id and c.parent_id in ids:
+            replies.setdefault(c.parent_id, []).append(c)
+    return [(c, replies.get(c.id, [])) for c in comments if not (c.parent_id and c.parent_id in ids)]
+
+
 @router.post("/{task_id}/comments", response_class=HTMLResponse)
 def add_comment(
     task_id: str,
     request: Request,
     content: str = Form(default=""),
     sticker: str = Form(default=""),
+    parent_id: str = Form(default=""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1168,6 +1186,10 @@ def add_comment(
     # Comenta quien participa por su alcance o a quien se la compartieron
     if not _can_comment(current_user, task_id, db):
         raise HTTPException(403)
+    # Respuesta: siempre cuelga del comentario raíz (hilos de un solo nivel).
+    parent = _task_comment(task_id, parent_id, db) if parent_id else None
+    if parent and parent.parent_id:
+        parent = db.get(TaskComment, parent.parent_id) or parent
 
     # Un sticker se guarda como la URL de su APNG (igual que en el chat).
     content = stickers.require_url(sticker) if sticker else content.strip()
@@ -1177,6 +1199,7 @@ def add_comment(
         id=uuid.uuid4(),
         task_id=task.id,
         user_id=current_user.id,
+        parent_id=parent.id if parent else None,
         content=content,
     )
     db.add(comment)
@@ -1184,29 +1207,45 @@ def add_comment(
     db.refresh(comment)
     comment.user = current_user  # for template rendering
 
-    # Notifica al asignado, al creador y a con quienes se compartió (menos a quien comenta).
+    # Notifica al asignado, al creador y a con quienes se compartió (menos a quien
+    # comenta). En una respuesta, el autor del comentario raíz recibe "respondió a
+    # tu comentario" en lugar del aviso genérico.
     actor = current_user.name or current_user.email
+    body = "Sticker" if sticker else comment.content[:120]
+    replied_to = parent.user_id if parent and parent.user_id != current_user.id else None
+    if replied_to:
+        realtime.notify_user(
+            replied_to,
+            title=f"{actor} respondió a tu comentario",
+            body=body,
+            url=f"/tasks/{task.id}#comment-{comment.id}",
+            kind="task_comment",
+        )
     for uid in _followers(task):
-        if uid and str(uid) != str(current_user.id):
+        if uid and str(uid) != str(current_user.id) and uid != replied_to:
             realtime.notify_user(
                 uid,
-                title=f"{actor} comentó",
-                body="Sticker" if sticker else comment.content[:120],
-                url=f"/tasks/{task.id}",
+                title=f"{actor} respondió un comentario" if parent else f"{actor} comentó",
+                body=body,
+                url=f"/tasks/{task.id}#comment-{comment.id}",
                 kind="task_comment",
             )
     realtime.notify_task(task.id)
     audit.log_action(
         "task_comment", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details="sticker" if sticker else (comment.content or "")[:80],
+        details=("respuesta: " if parent else "") + ("sticker" if sticker else (comment.content or "")[:80]),
     )
 
+    # Una respuesta se agrega al hilo; un comentario raíz llega como hilo nuevo.
     return templates.TemplateResponse(
         request,
-        "tasks/_comment.html",
+        "tasks/_comment.html" if parent else "tasks/_comment_thread.html",
         {
             "comment": comment,
+            "replies": [],
+            "task_id": task.id,
+            "can_comment": True,
             "current_user": current_user,
             "csrf_token": generate_csrf_token(str(current_user.id)),
         },

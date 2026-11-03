@@ -878,9 +878,9 @@
       </div>
 
       <div class="divide-y divide-gray-100" id="comments-list">
-        {% if task.comments %}
-          {% for comment in task.comments %}
-          {% include "tasks/_comment.html" %}
+        {% if comment_threads %}
+          {% for comment, replies in comment_threads %}
+          {% include "tasks/_comment_thread.html" %}
           {% endfor %}
         {% else %}
         <div class="px-4 sm:px-6 py-6 text-center text-sm text-gray-400 italic" id="no-comments">

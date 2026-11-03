@@ -17,6 +17,7 @@ from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
 from app import audit, mentions, notification_bus, reactions, storage, valkey_client as vk
+from app import images
 from app.messaging import realtime, stickers
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
@@ -1199,20 +1200,20 @@ def send_message(
 
     content_types = []
     for f in valid_files:
-        data = f.file.read()
-        safe = _safe_filename(f.filename)
-        key = f"chats/{conv_id}/{msg.id}/{uuid.uuid4()}_{safe}"
         # Algunos navegadores mandan .m4a/.opus sin tipo: se deduce por extensión.
         ctype = f.content_type
         if not ctype or ctype == "application/octet-stream":
             ctype = mimetypes.guess_type(f.filename)[0] or "application/octet-stream"
+        data, filename, ctype = images.optimize_image(f.file.read(), f.filename, ctype)
+        safe = _safe_filename(filename)
+        key = f"chats/{conv_id}/{msg.id}/{uuid.uuid4()}_{safe}"
         content_types.append(ctype)
         storage.upload_chat_file(key, data, ctype)
         db.add(MessageAttachment(
             id=uuid.uuid4(),
             message_id=msg.id,
             uploaded_by=current_user.id,
-            filename=f.filename,
+            filename=filename,
             file_key=key,
             content_type=ctype,
             file_size=len(data),
@@ -1420,11 +1421,11 @@ def edit_group(
     if photo is not None and photo.filename:
         if not (photo.content_type or "").startswith("image/"):
             raise HTTPException(400, "La foto debe ser una imagen")
-        content = photo.file.read()
+        content, filename, ctype = images.optimize_image(photo.file.read(), photo.filename, photo.content_type)
         old_key = conv.avatar_key
-        ext = os.path.splitext(_safe_filename(photo.filename))[1] or ".jpg"
+        ext = os.path.splitext(_safe_filename(filename))[1] or ".jpg"
         new_key = f"group-avatars/{conv.id}/{uuid.uuid4()}{ext}"
-        storage.upload_chat_file(new_key, content, photo.content_type)
+        storage.upload_chat_file(new_key, content, ctype)
         conv.avatar_key = new_key
         if old_key:
             try:
