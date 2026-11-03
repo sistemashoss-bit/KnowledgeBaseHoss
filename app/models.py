@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, String, Text, Table, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, LargeBinary, String, Text, Table, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -927,3 +927,42 @@ class MessageAttachment(Base):
 
     message = relationship("Message", back_populates="attachments")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+# ── Pizarras (Excalidraw + Yjs) ───────────────────────────────────────────────
+
+class Whiteboard(Base):
+    """Pizarra colaborativa. El contenido es el estado del documento Yjs
+    (`ydoc`, una actualización completa) que mantiene app/whiteboards/sync.py.
+    Acceso: dueño (todo), compartidas (WhiteboardShare: ver o editar) y, si
+    tiene `department_id`, todas las personas de ese departamento (editar)."""
+    __tablename__ = "whiteboards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    ydoc = Column(LargeBinary, nullable=True)
+    last_edited_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    owner = relationship("User", foreign_keys=[owner_id])
+    department = relationship("Department")
+    last_editor = relationship("User", foreign_keys=[last_edited_by])
+    shares = relationship(
+        "WhiteboardShare", back_populates="board", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="WhiteboardShare.created_at",
+    )
+
+
+class WhiteboardShare(Base):
+    __tablename__ = "whiteboard_shares"
+
+    board_id = Column(UUID(as_uuid=True), ForeignKey("whiteboards.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    can_edit = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    board = relationship("Whiteboard", back_populates="shares")
+    user = relationship("User", foreign_keys=[user_id])

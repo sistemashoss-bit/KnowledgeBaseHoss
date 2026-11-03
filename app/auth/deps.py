@@ -1,4 +1,5 @@
 from fastapi import Depends, HTTPException, Request
+from starlette.requests import HTTPConnection
 from jose import JWTError
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,7 @@ _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _CSRF_EXEMPT_PATHS = {"/auth/login", "/auth/sso"}
 
 
-async def require_csrf(request: Request) -> None:
+async def require_csrf(request: HTTPConnection) -> None:
     """Dependencia global (ver main.py): valida CSRF en todo request que modifica.
 
     El token viene del header X-CSRF-Token (htmx y fetch, puesto en base.html)
@@ -23,6 +24,10 @@ async def require_csrf(request: Request) -> None:
     endpoint ya rechaza por su cuenta si requiere usuario. Decodifica el JWT sin
     tocar la DB para no abrir una sesión por request.
     """
+    # Dependencia global: también corre en WebSockets, que no tienen método ni
+    # formulario (las pizarras validan Origin por su cuenta, ver whiteboards).
+    if request.scope["type"] != "http":
+        return
     if request.method in _CSRF_SAFE_METHODS or request.url.path in _CSRF_EXEMPT_PATHS:
         return
     cookie = request.cookies.get(AUTH_COOKIE)

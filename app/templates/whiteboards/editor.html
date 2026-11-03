@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% import "tasks/_share_picker.html" as sharing %}
+{% block title %}{{ board.title }} — Pizarras{% endblock %}
+
+{# Sin el botón flotante del asistente: tapa los controles del lienzo. #}
+{% block ai_widget %}{% endblock %}
+
+{% block content %}
+<div class="flex-1 min-h-0 flex flex-col bg-white"
+     x-data="whiteboardPage({{ shares | tojson | forceescape }}, {{ board.title | tojson | forceescape }})"
+     @wb-status.window="status = $event.detail.status; peers = $event.detail.peers">
+
+  <!-- Encabezado -->
+  <div class="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-gray-200">
+    <a href="/whiteboards/" title="Volver a Pizarras" aria-label="Volver a Pizarras"
+       class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    </a>
+
+    <div class="min-w-0 flex-1">
+      {% if is_owner %}
+      <input type="text" x-model="title" @change="rename()" @keydown.enter="$el.blur()" maxlength="255" aria-label="Título de la pizarra"
+             class="w-full max-w-md px-2 py-1 -ml-2 rounded-md text-base font-semibold text-gray-900 border border-transparent hover:border-gray-200 focus:border-blue-400 focus:outline-none" />
+      {% else %}
+      <h1 class="text-base font-semibold text-gray-900 truncate">{{ board.title }}</h1>
+      {% endif %}
+      <p class="text-xs text-gray-400 truncate">
+        {% if is_owner %}Tuya{% else %}De {{ board.owner.name or board.owner.email }}{% endif %}
+        {% if board.department %} · {{ board.department.name }} (la edita todo el departamento){% endif %}
+      </p>
+    </div>
+
+    {% if not can_edit %}
+    <span class="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Solo lectura</span>
+    {% endif %}
+
+    <span id="wb-status" class="inline-flex items-center gap-1.5 text-xs text-gray-500" role="status" aria-live="polite">
+      <span class="w-2 h-2 rounded-full"
+            :class="status === 'connected' ? 'bg-green-500' : (status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-red-500')"></span>
+      <span x-text="status === 'connected' ? (peers > 1 ? `${peers} conectados` : 'Conectado') : (status === 'connecting' ? 'Conectando…' : 'Sin conexión')"></span>
+    </span>
+
+    {% if is_owner %}
+    <button type="button" @click="sharing = true"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+      Compartir <span x-show="shares.length" x-text="`(${shares.length})`"></span>
+    </button>
+    <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+      <button type="button" @click="open = !open" :aria-expanded="open" title="Más opciones" aria-label="Más opciones"
+              class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+      <div x-show="open" x-cloak class="absolute right-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-30 p-3 space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+          <select @change="setDepartment($event.target.value)"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+            <option value="">Ninguno (solo tú y con quien compartas)</option>
+            {% for d in departments %}
+            <option value="{{ d.id }}" {{ 'selected' if board.department_id == d.id }}>{{ d.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-[11px] text-gray-400 mt-1">Con departamento, toda la gente del área la ve y la edita.</p>
+        </div>
+        <form method="post" action="/whiteboards/{{ board.id }}/delete"
+              onsubmit="return confirm('¿Eliminar esta pizarra? Se borra para todos y no se puede deshacer.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="w-full text-left text-sm text-red-600 hover:text-red-700">Eliminar pizarra</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Lienzo -->
+  <div class="relative flex-1 min-h-0">
+    <div id="wb-root" class="absolute inset-0"
+         data-board-id="{{ board.id }}" data-can-edit="{{ 'true' if can_edit else 'false' }}"
+         data-user-id="{{ current_user.id }}" data-user-name="{{ user_name }}" data-title="{{ board.title }}">
+      <div class="h-full flex items-center justify-center text-sm text-gray-400">Cargando pizarra…</div>
+    </div>
+  </div>
+
+  {% if is_owner %}
+  <!-- Compartir -->
+  <div x-show="sharing" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+       @click.self="sharing = false" @keydown.escape.window="sharing = false">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+         role="dialog" aria-modal="true" aria-labelledby="wb-share-title">
+      <h2 id="wb-share-title" class="text-lg font-semibold text-gray-900">Compartir pizarra</h2>
+
+      <form @submit.prevent="addShares($el)" class="space-y-3">
+        {{ sharing.share_picker(share_candidates, all_departments) }}
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <select x-model="newLevel" class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white" aria-label="Permiso">
+            <option value="true">Pueden editar</option>
+            <option value="false">Solo pueden ver</option>
+          </select>
+          <button type="submit" :disabled="saving"
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-sm font-medium">Compartir</button>
+        </div>
+      </form>
+
+      <div>
+        <h3 class="text-xs font-semibold text-gray-600 mb-2">Con acceso</h3>
+        <p x-show="!shares.length" class="text-sm text-gray-400">Todavía no la compartes con nadie.</p>
+        <ul class="divide-y divide-gray-100" x-show="shares.length">
+          <template x-for="s in shares" :key="s.id">
+            <li class="flex items-center justify-between gap-2 py-2">
+              <span class="text-sm text-gray-800 truncate" x-text="s.name"></span>
+              <span class="flex items-center gap-2 shrink-0">
+                <select @change="changeLevel(s, $event.target.value)" class="px-2 py-1 border border-gray-300 rounded-lg text-xs bg-white"
+                        :aria-label="`Permiso de ${s.name}`">
+                  <option value="true" :selected="s.can_edit">Puede editar</option>
+                  <option value="false" :selected="!s.can_edit">Solo ver</option>
+                </select>
+                <button type="button" @click="removeShare(s)" class="text-gray-400 hover:text-red-600 text-sm px-1"
+                        :aria-label="`Quitar a ${s.name}`" title="Quitar acceso">✕</button>
+              </span>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <p x-show="error" x-text="error" class="text-sm text-red-600"></p>
+      <div class="flex justify-end">
+        <button type="button" @click="sharing = false"
+                class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Listo</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+  function whiteboardPage(initialShares, initialTitle) {
+    const id = {{ board.id | string | tojson }};
+    return {
+      status: 'connecting', peers: 1,
+      title: initialTitle, sharing: false, shares: initialShares, newLevel: 'true', saving: false, error: '',
+      async post(url, body) {
+        const r = await fetch(url, { method: 'POST', body });
+        if (!r.ok) {
+          let msg = 'No se pudo guardar';
+          try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (e) {}
+          throw new Error(msg);
+        }
+        return r.json();
+      },
+      async rename() {
+        if (!this.title.trim()) { this.title = initialTitle; return; }
+        try { const j = await this.post(`/whiteboards/${id}/rename`, new URLSearchParams({ title: this.title })); initialTitle = j.title; document.title = `${j.title} — Pizarras`; }
+        catch (e) { alert(e.message); this.title = initialTitle; }
+      },
+      async setDepartment(value) {
+        try { await this.post(`/whiteboards/${id}/department`, new URLSearchParams({ department_id: value })); location.reload(); }
+        catch (e) { alert(e.message); }
+      },
+      async addShares(form) {
+        const body = new URLSearchParams({ can_edit: this.newLevel });
+        form.querySelectorAll('input[name="shared_with"]').forEach(i => body.append('shared_with', i.value));
+        if (!body.getAll('shared_with').length) { this.error = 'Elige al menos una persona'; return; }
+        this.saving = true; this.error = '';
+        try {
+          this.shares = await this.post(`/whiteboards/${id}/shares`, body);
+          window.dispatchEvent(new CustomEvent('share-picker-set', { detail: { name: 'shared_with', ids: [] } }));
+        } catch (e) { this.error = e.message; } finally { this.saving = false; }
+      },
+      async changeLevel(s, value) {
+        const body = new URLSearchParams({ can_edit: value });
+        body.append('shared_with', s.id);
+        try { this.shares = await this.post(`/whiteboards/${id}/shares`, body); } catch (e) { this.error = e.message; }
+      },
+      async removeShare(s) {
+        try { this.shares = await this.post(`/whiteboards/${id}/shares/${s.id}/remove`, new URLSearchParams()); }
+        catch (e) { this.error = e.message; }
+      },
+    };
+  }
+  window.EXCALIDRAW_ASSET_PATH = '/assets/whiteboard/';
+</script>
+<script defer src="{{ asset('whiteboard/editor.js') }}"></script>
+{% endblock %}

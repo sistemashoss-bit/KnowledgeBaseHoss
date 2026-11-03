@@ -1,0 +1,20 @@
+{
+  "name": "hoss-whiteboard",
+  "private": true,
+  "description": "Editor de pizarras (Excalidraw + Yjs). Se compila a app/assets/whiteboard/ (ver Dockerfile).",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.17.6",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "y-excalidraw": "2.0.12",
+    "y-protocols": "1.0.6",
+    "y-websocket": "2.1.0",
+    "yjs": "13.6.33"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

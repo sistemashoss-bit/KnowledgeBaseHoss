@@ -7,6 +7,15 @@ COPY tailwind ./tailwind
 COPY app ./app
 RUN npx tailwindcss -c tailwind/tailwind.config.js -i tailwind/input.css -o /out/tailwind.css --minify
 
+# Pizarras: Excalidraw + Yjs empaquetados con esbuild (whiteboard/).
+FROM node:22-slim AS whiteboard
+WORKDIR /src/whiteboard
+COPY whiteboard/package.json whiteboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY whiteboard/build.mjs ./
+COPY whiteboard/src ./src
+RUN npm run build
+
 FROM python:3.11-slim
 
 # Install uv
@@ -21,6 +30,7 @@ RUN uv sync --frozen --no-dev --no-editable
 # Copy application source
 COPY . .
 COPY --from=css /out/tailwind.css app/assets/tailwind.css
+COPY --from=whiteboard /src/app/assets/whiteboard app/assets/whiteboard
 
 EXPOSE 8080
 

@@ -19,3 +19,6 @@ wheels/
 # CSS generado por Tailwind CLI (se construye en el Dockerfile; en local, ver README)
 app/assets/tailwind.css
 node_modules/
+
+# Bundle de pizarras (se construye en el Dockerfile; en local: cd whiteboard && npm ci && npm run build)
+app/assets/whiteboard/

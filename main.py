@@ -165,6 +165,7 @@ from app.tasks.router import router as tasks_router, recurring_router, tags_rout
 from app.projects.router import router as projects_router
 from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
+from app.whiteboards.router import router as whiteboards_router
 from app.notifications.router import router as notifications_router
 from app.issue_reports.router import router as issue_reports_router
 from app.calendar.router import router as calendar_router
@@ -191,6 +192,7 @@ app.include_router(reports_router)
 app.include_router(notifications_router)
 app.include_router(issue_reports_router)
 app.include_router(calendar_router)
+app.include_router(whiteboards_router)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)

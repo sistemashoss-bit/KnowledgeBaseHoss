@@ -9,3 +9,4 @@ __pycache__/
 *.pyd
 node_modules/
 app/assets/tailwind.css
+app/assets/whiteboard/

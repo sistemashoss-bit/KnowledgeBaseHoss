@@ -32,4 +32,5 @@ dependencies = [
     "pika>=1.4.4",
     "openpyxl>=3.1.5",
     "fpdf2>=2.9.0",
+    "pycrdt>=0.14.13",
 ]
