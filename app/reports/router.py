@@ -16,6 +16,7 @@ from app.models import (
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
 )
 from app.reports.export import open_tasks_pdf, open_tasks_xlsx
+from app.calendar.reminders import to_local
 from app.tasks.business_hours import business_hours_label, business_seconds
 from app.templating import templates
 
@@ -180,6 +181,19 @@ def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, 
     return result
 
 
+FOLLOW_UPS_SHOWN = 6
+
+
+def _follow_up_window(items: list[dict], limit: int = FOLLOW_UPS_SHOWN) -> list[dict]:
+    """Los seguimientos más cercanos a hoy (una serie diaria puede tener 60): los
+    últimos ya ocurridos y los próximos, en orden de fecha."""
+    if len(items) <= limit:
+        return items
+    first_upcoming = next((i for i, f in enumerate(items) if f["state"] == "upcoming"), len(items))
+    start = max(0, min(first_upcoming - limit // 2, len(items) - limit))
+    return items[start:start + limit]
+
+
 def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
     """Tareas pendientes y en progreso (no archivadas) agrupadas por
     departamento, con sus seguimientos y su último comentario. Es el estado
@@ -198,14 +212,19 @@ def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
         return []
     task_ids = [t.id for t in tasks]
 
-    follow_ups = {
-        r.task_id: (r.total, r.pending)
-        for r in db.query(
-            TaskFollowUp.task_id,
-            func.count(TaskFollowUp.id).label("total"),
-            func.count(TaskFollowUp.id).filter(TaskFollowUp.done_at.is_(None)).label("pending"),
-        ).filter(TaskFollowUp.task_id.in_(task_ids)).group_by(TaskFollowUp.task_id)
-    }
+    # Cada seguimiento con su fecha (hora local) y estado: hecho, no hecho (ya
+    # pasó su hora sin marcarse) o próximo.
+    now = datetime.utcnow()
+    follow_ups: dict = defaultdict(list)
+    for f in (
+        db.query(TaskFollowUp.task_id, TaskFollowUp.start_at, TaskFollowUp.end_at, TaskFollowUp.done_at)
+        .filter(TaskFollowUp.task_id.in_(task_ids))
+        .order_by(TaskFollowUp.start_at)
+    ):
+        follow_ups[f.task_id].append({
+            "date": to_local(f.start_at).date(),
+            "state": "done" if f.done_at else ("missed" if f.end_at < now else "upcoming"),
+        })
 
     # Último comentario por tarea (DISTINCT ON de Postgres).
     last_comments = {
@@ -225,7 +244,8 @@ def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
             "tasks": [], "pending": 0, "in_progress": 0,
         })
         g["pending" if t.status == TASK_PENDING else "in_progress"] += 1
-        total, pending = follow_ups.get(t.id, (0, 0))
+        fus = follow_ups.get(t.id, [])
+        shown = _follow_up_window(fus)
         c = last_comments.get(t.id)
         g["tasks"].append({
             "id": t.id,
@@ -234,8 +254,9 @@ def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
             "assignee": (t.assignee.name or t.assignee.email) if t.assignee else "",
             "due_date": t.due_date,
             "overdue": bool(t.due_date and t.due_date < date.today()),
-            "follow_ups": total,
-            "follow_ups_pending": pending,
+            "follow_ups": fus,
+            "follow_ups_shown": shown,
+            "follow_ups_hidden": len(fus) - len(shown),
             "last_comment": c.content if c else "",
             "last_comment_by": ((c.user.name or c.user.email) if c.user else "") if c else "",
             "last_comment_at": c.created_at if c else None,

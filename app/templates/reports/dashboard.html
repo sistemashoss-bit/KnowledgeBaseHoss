@@ -189,8 +189,23 @@
             <td class="px-3 py-3 text-gray-700 whitespace-nowrap">{{ t.assignee or '—' }}</td>
             <td class="px-3 py-3 whitespace-nowrap">
               {% if t.follow_ups %}
-              <span class="text-gray-800 font-medium">Sí · {{ t.follow_ups }}</span>
-              <p class="text-xs text-gray-400">{{ t.follow_ups_pending }} pendiente{{ 's' if t.follow_ups_pending != 1 else '' }}</p>
+              <ul class="space-y-0.5">
+                {% for f in t.follow_ups_shown %}
+                <li class="flex items-center gap-1.5 text-xs">
+                  {% if f.state == 'done' %}
+                  <svg class="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" role="img" aria-label="Completado"><title>Completado</title><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                  {% elif f.state == 'missed' %}
+                  <svg class="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" role="img" aria-label="No completado"><title>No completado</title><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                  {% else %}
+                  <svg class="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" role="img" aria-label="Próximo"><title>Próximo</title><circle cx="12" cy="12" r="7" stroke-width="2.5"/></svg>
+                  {% endif %}
+                  <span class="{{ 'text-gray-400' if f.state == 'upcoming' else 'text-gray-700' }}">{{ f.date.strftime('%d/%m/%Y') }}</span>
+                </li>
+                {% endfor %}
+              </ul>
+              {% if t.follow_ups_hidden %}
+              <a href="/tasks/{{ t.id }}" class="text-xs text-gray-400 hover:text-blue-600">+{{ t.follow_ups_hidden }} más</a>
+              {% endif %}
               {% else %}
               <span class="text-gray-400">No</span>
               {% endif %}

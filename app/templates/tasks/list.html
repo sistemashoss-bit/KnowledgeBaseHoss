@@ -656,7 +656,7 @@ initDragAndDrop();
         <label class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer transition-colors">
           Archivos
           <input type="file" name="evidences" multiple x-ref="ntEvidences" class="hidden"
-                 @change="add($event.target.files); $event.target.value = ''" />
+                 @change="add($event.target.files)" />
         </label>
 
         <ul x-show="items.length" x-cloak class="mt-2 space-y-1">
