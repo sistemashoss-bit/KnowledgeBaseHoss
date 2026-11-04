@@ -174,6 +174,62 @@ def can_manage_document(user: "User | None", doc: "Document") -> bool:
     return False
 
 
+# ── Capacitación: mismo alcance que los documentos (sin carpetas) ────────────
+
+def can_access_training(user: "User | None", training) -> bool:
+    from app.models import ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, STATUS_PUBLIC
+
+    if training.status == STATUS_PUBLIC:
+        return True
+    if user is None:
+        return False
+    if user.role == ROLE_SUPERADMIN or training.status == STATUS_EMPLOYEE:
+        return True
+    if training.status == STATUS_CUSTOM:
+        if training.department_id in overseen_department_ids(user):
+            return True
+        if training.uploaded_by and str(training.uploaded_by) == str(user.id):
+            return True
+        return any(str(au.user_id) == str(user.id) for au in training.allowed_users)
+    return False
+
+
+def can_manage_training(user: "User | None", training) -> bool:
+    from app.models import ROLE_SUPERADMIN
+
+    if user is None:
+        return False
+    if user.role == ROLE_SUPERADMIN or training.department_id in managed_department_ids(user):
+        return True
+    return bool(training.uploaded_by) and str(training.uploaded_by) == str(user.id)
+
+
+def visible_trainings_filter(user: "User | None"):
+    """Condición SQL equivalente a can_access_training, o None (superadmin)."""
+    from sqlalchemy import and_, or_
+    from app.models import ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, STATUS_PUBLIC, Training, TrainingAllowedUser
+
+    if user is None:
+        return Training.status == STATUS_PUBLIC
+    if user.role == ROLE_SUPERADMIN:
+        return None
+    custom = [
+        Training.uploaded_by == user.id,
+        Training.id.in_(
+            TrainingAllowedUser.__table__.select()
+            .with_only_columns(TrainingAllowedUser.training_id)
+            .where(TrainingAllowedUser.user_id == user.id)
+        ),
+    ]
+    dept_ids = overseen_department_ids(user)
+    if dept_ids:
+        custom.append(Training.department_id.in_(dept_ids))
+    return or_(
+        Training.status.in_((STATUS_PUBLIC, STATUS_EMPLOYEE)),
+        and_(Training.status == STATUS_CUSTOM, or_(*custom)),
+    )
+
+
 def can_manage_folder(user: "User | None", folder: "Folder") -> bool:
     """Solo el dueño (siempre admin, únicos que crean carpetas) o superadmin."""
     from app.models import ROLE_SUPERADMIN

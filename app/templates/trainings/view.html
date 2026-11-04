@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}{{ t.title }} — Capacitación{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-6">
+  <div class="max-w-5xl mx-auto">
+    <a href="/trainings/" class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Capacitación
+    </a>
+
+    <div class="rounded-xl overflow-hidden bg-slate-900 aspect-video">
+      {% if t.video_status == "ready" %}
+      <mux-player
+        class="block w-full h-full"
+        playback-id="{{ t.mux_playback_id }}"
+        {% if tokens %}
+        playback-token="{{ tokens.playback }}"
+        thumbnail-token="{{ tokens.thumbnail }}"
+        storyboard-token="{{ tokens.storyboard }}"
+        {% endif %}
+        metadata-video-id="{{ t.id }}"
+        metadata-video-title="{{ t.title }}"
+        {% if current_user %}metadata-viewer-user-id="{{ current_user.id }}"{% endif %}
+        accent-color="#2563eb"
+        style="--controls-backdrop-color: rgb(0 0 0 / 40%); aspect-ratio: 16 / 9;"
+      ></mux-player>
+      {% else %}
+      <div class="w-full h-full flex flex-col items-center justify-center gap-2 text-sm text-slate-300 p-6 text-center"
+           {% if t.video_status in ("uploading", "processing") %}x-data x-init="
+             const tick = async () => {
+               try {
+                 const r = await fetch('/trainings/{{ t.id }}/status');
+                 if (r.ok) { const j = await r.json(); if (j.status !== '{{ t.video_status }}') return location.reload(); }
+               } catch (e) {}
+               setTimeout(tick, 5000);
+             };
+             setTimeout(tick, 5000);"{% endif %}>
+        {% if t.video_status == "errored" %}
+        <span class="text-red-300 font-medium">Mux no pudo procesar este video.</span>
+        <span class="text-xs text-slate-400">Elimínalo y vuelve a subirlo (revisa que el archivo sea un video válido).</span>
+        {% elif t.video_status == "uploading" %}
+        <span>La subida no terminó o sigue en curso.</span>
+        <span class="text-xs text-slate-400">Si la ventana de subida se cerró antes de terminar, elimina esta capacitación y súbela de nuevo.</span>
+        {% else %}
+        <svg class="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span>Mux está procesando el video…</span>
+        <span class="text-xs text-slate-400">Suele tardar unos minutos. Esta página se actualiza sola.</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <h1 class="text-xl font-bold text-gray-900 break-words">{{ t.title }}</h1>
+        <div class="flex flex-wrap items-center gap-1 mt-2">
+          {% include "trainings/_status_badge.html" %}
+          {% if t.department %}
+          <span class="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600 text-[11px]">{{ t.department.name }}</span>
+          {% endif %}
+          {% if duration %}<span class="text-xs text-gray-400 tabular-nums ml-1">{{ duration }}</span>{% endif %}
+          <span class="text-xs text-gray-400 ml-1">
+            · {{ t.created_at.strftime('%d/%m/%Y') }}{% if t.uploaded_by_user %} · {{ t.uploaded_by_user.name or t.uploaded_by_user.email }}{% endif %}
+          </span>
+        </div>
+      </div>
+      {% if can_manage %}
+      <div class="flex items-center gap-2 shrink-0">
+        <a href="/trainings/{{ t.id }}/edit"
+           class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Editar</a>
+        <form method="post" action="/trainings/{{ t.id }}/delete"
+              onsubmit="return confirm('¿Eliminar esta capacitación? El video se borra de Mux y no se puede deshacer.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50">Eliminar</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if t.description %}
+    <p class="mt-4 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ t.description }}</p>
+    {% endif %}
+
+    {% if t.video_status == "ready" %}
+    <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Capítulos (Mux Robots) -->
+      <section class="bg-white rounded-xl border border-gray-200 p-4 lg:col-span-1">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Capítulos</h2>
+        {% if chapters %}
+        <ol class="space-y-1">
+          {% for c in chapters %}
+          <li>
+            <button type="button" data-seek="{{ c.start_time }}"
+                    class="w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left text-sm text-gray-700 hover:bg-gray-50">
+              <span class="shrink-0 text-xs text-blue-600 tabular-nums pt-0.5 w-12">{{ c.label }}</span>
+              <span class="min-w-0">{{ c.title }}</span>
+            </button>
+          </li>
+          {% endfor %}
+        </ol>
+        {% elif t.chapters_status == "errored" or t.captions_status == "errored" %}
+        <p class="text-xs text-gray-400">No se pudieron generar capítulos para este video.</p>
+        {% else %}
+        <p class="text-xs text-gray-400">Generando capítulos… aparecen unos minutos después de que el video está listo.</p>
+        {% endif %}
+      </section>
+
+      <!-- Transcripción (subtítulos automáticos de Mux) -->
+      <section class="bg-white rounded-xl border border-gray-200 p-4 lg:col-span-2" x-data="{ open: false }">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="text-sm font-semibold text-gray-900">Transcripción</h2>
+          {% if t.transcript %}
+          <button type="button" @click="open = !open" class="text-xs text-blue-600 hover:text-blue-500"
+                  x-text="open ? 'Ver menos' : 'Ver completa'"></button>
+          {% endif %}
+        </div>
+        {% if t.transcript %}
+        <div class="relative">
+          <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap overflow-hidden"
+             :class="open ? '' : 'max-h-40'">{{ t.transcript }}</p>
+          <div x-show="!open" class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-2">Generada automáticamente; puede tener errores.</p>
+        {% elif t.captions_status == "errored" %}
+        <p class="text-xs text-gray-400">No se pudo generar la transcripción (¿el video tiene audio?).</p>
+        {% else %}
+        <p class="text-xs text-gray-400">Generando transcripción… tarda aproximadamente una décima parte de la duración del video.</p>
+        {% endif %}
+      </section>
+    </div>
+    {% endif %}
+
+    {% if can_manage and t.status == "custom" %}
+    <div class="mt-5 text-xs text-gray-500">
+      <span class="font-medium text-gray-600">Con acceso:</span>
+      {% for au in t.allowed_users %}{{ au.user.name or au.user.email }}{{ ", " if not loop.last }}{% else %}nadie más{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% if t.video_status == "ready" %}
+<script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3" defer></script>
+<script>
+  // Capítulos en la barra del reproductor (addChapters, tras loadedmetadata) y
+  // saltos desde la lista.
+  (function () {
+    var chapters = {{ chapters | tojson }};
+    var player = document.querySelector('mux-player');
+    if (!player) return;
+    if (chapters.length) {
+      var add = function () {
+        player.addChapters(chapters.map(function (c) { return { startTime: c.start_time, value: c.title }; }));
+      };
+      if (player.readyState >= 1) add(); else player.addEventListener('loadedmetadata', add, { once: true });
+    }
+    document.querySelectorAll('[data-seek]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        player.currentTime = parseFloat(btn.dataset.seek);
+        player.play();
+        player.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

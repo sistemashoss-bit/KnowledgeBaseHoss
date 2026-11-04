@@ -983,3 +983,60 @@ class WhiteboardFile(Base):
     size = Column(Integer, nullable=False)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# ── Capacitación (videos en Mux) ─────────────────────────────────────────────
+TRAINING_UPLOADING = "uploading"    # creada, esperando que el navegador suba a Mux
+TRAINING_PROCESSING = "processing"  # Mux ya tiene el archivo y lo está codificando
+TRAINING_READY = "ready"
+TRAINING_ERRORED = "errored"
+
+
+class Training(Base):
+    """Video de capacitación. Mismo alcance que Document (status public /
+    employee / custom + TrainingAllowedUser, department_id, uploaded_by; ver
+    permissions.can_access_training). El video vive en Mux: el navegador lo
+    sube directo (direct upload) y aquí quedan los ids para reproducirlo."""
+    __tablename__ = "trainings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    mux_upload_id = Column(String(100), nullable=True, unique=True)
+    mux_asset_id = Column(String(100), nullable=True, unique=True)
+    mux_playback_id = Column(String(100), nullable=True)
+    playback_policy = Column(String(10), nullable=False, default="signed")
+    video_status = Column(String(20), nullable=False, default=TRAINING_UPLOADING)
+    duration = Column(Integer, nullable=True)  # segundos
+    # Subtítulos generados por Mux (Whisper) y su texto plano; capítulos de
+    # Mux Robots (generate-chapters) a partir de esos subtítulos. Estados:
+    # null (sin pedir) / requested|pending / ready / errored. Ver mux.sync_extras.
+    captions_status = Column(String(20), nullable=True)
+    captions_track_id = Column(String(100), nullable=True)
+    transcript = Column(Text, nullable=True)
+    chapters_status = Column(String(20), nullable=True)
+    chapters_job_id = Column(String(100), nullable=True, index=True)
+    chapters = Column(JSONB, nullable=True)  # [{"start_time": 0, "title": "..."}]
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    department = relationship("Department")
+    uploaded_by_user = relationship("User", foreign_keys=[uploaded_by])
+    allowed_users = relationship(
+        "TrainingAllowedUser", back_populates="training", cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class TrainingAllowedUser(Base):
+    """Personas con acceso cuando Training.status = 'custom' (como DocumentAllowedUser)."""
+    __tablename__ = "training_allowed_users"
+
+    training_id = Column(UUID(as_uuid=True), ForeignKey("trainings.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    training = relationship("Training", back_populates="allowed_users")
+    user = relationship("User")

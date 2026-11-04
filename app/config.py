@@ -92,6 +92,18 @@ class Settings(BaseSettings):
     rabbitmq_url: str = ""
     public_url: str = "https://comunicacion.hoss.com.mx"
 
+    # Mux (videos de Capacitación, app/trainings/mux.py). Token de acceso
+    # (Video: read/write), secreto del webhook y llave de firma para
+    # reproducción firmada (MUX_SIGNING_KEY_PRIVATE: el PEM en base64 tal como
+    # lo entrega Mux). Sin llave de firma los videos se crean con playback público.
+    mux_token_id: str = ""
+    mux_token_secret: str = ""
+    mux_webhook_secret: str = ""
+    mux_signing_key_id: str = ""
+    mux_signing_key_private: str = ""
+    # Idioma de los subtítulos automáticos (es, en, pt, fr, de, it o "auto").
+    mux_captions_language: str = "es"
+
 
     @property
     def report_widget_origin_list(self) -> list[str]:
