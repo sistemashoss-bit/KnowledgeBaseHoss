@@ -1379,6 +1379,13 @@
                 </svg>
                 Compartir ubicación
               </button>
+              <button type="button" role="menuitem" id="attach-whiteboard"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <svg class="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                </svg>
+                Nueva pizarra
+              </button>
             </div>
             <input id="file-input" type="file" name="files" multiple class="hidden"
                    onchange="document.getElementById('file-preview-bar').classList.toggle('hidden', this.files.length === 0)" />
@@ -1449,6 +1456,22 @@
           document.getElementById('attach-file').addEventListener('click', function () {
             menu(false);
             document.getElementById('file-input').click();
+          });
+          // Pizarra: el servidor la crea, la comparte con el chat y deja el mensaje.
+          document.getElementById('attach-whiteboard').addEventListener('click', function () {
+            menu(false);
+            var title = (prompt('Título de la pizarra (se comparte con quienes están en este chat):', 'Pizarra') || '').trim();
+            if (!title) return;
+            var fd = new FormData();
+            fd.append('title', title);
+            attachBtn.disabled = true;
+            fetch(form.getAttribute('hx-post').replace(/\/send$/, '/whiteboard'), { method: 'POST', body: fd, credentials: 'same-origin' })
+              .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                htmx.trigger(document.body, 'refreshFeed');
+              })
+              .catch(function (e) { alert('No se pudo crear la pizarra (' + e.message + ').'); })
+              .finally(function () { attachBtn.disabled = false; });
           });
           document.getElementById('attach-location').addEventListener('click', function () {
             menu(false);

@@ -2,7 +2,7 @@
 // /whiteboards/<id>/ws (servidor en app/whiteboards/sync.py).
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Excalidraw } from '@excalidraw/excalidraw';
+import { Excalidraw, useHandleLibrary } from '@excalidraw/excalidraw';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw';
@@ -149,12 +149,39 @@ function setupFiles(api, yAssets, cfg) {
   return () => { alive = false; yAssets.unobserve(onRemote); stopChange(); };
 }
 
+// Biblioteca de Excalidraw: por usuario y por navegador, en localStorage. No
+// pasa por Yjs ni por el servidor; es la misma en todas las pizarras.
+function libraryKey(cfg) {
+  return `wb-library-${cfg.userId}`;
+}
+
+function loadLibrary(cfg) {
+  try {
+    const items = JSON.parse(localStorage.getItem(libraryKey(cfg)) || '[]');
+    return Array.isArray(items) ? items : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLibrary(cfg, items) {
+  try {
+    localStorage.setItem(libraryKey(cfg), JSON.stringify(items));
+  } catch (e) {
+    emitError('No se pudo guardar la biblioteca en este navegador');
+  }
+}
+
 function Board({ cfg, doc, provider }) {
   const yElements = doc.getArray('elements');
   const yAssets = doc.getMap('assets');
   const [api, setApi] = useState(null);
   const [binding, setBinding] = useState(null);
   const ref = useRef(null);
+
+  // Carga la biblioteca guardada e importa las que llegan de
+  // libraries.excalidraw.com (#addLibrary=... en la URL de regreso).
+  useHandleLibrary({ excalidrawAPI: api, getInitialLibraryItems: () => loadLibrary(cfg) });
 
   useEffect(() => {
     if (!api) return undefined;
@@ -176,6 +203,7 @@ function Board({ cfg, doc, provider }) {
         }}
         excalidrawAPI={setApi}
         onPointerUpdate={binding ? binding.onPointerUpdate : undefined}
+        onLibraryChange={(items) => saveLibrary(cfg, items)}
         viewModeEnabled={!cfg.canEdit}
         langCode="es-ES"
         name={cfg.title}

@@ -6,9 +6,10 @@
 {% set is_mine = msg.sender_id == current_user.id %}
 {% set loc = msg.content | osm_location %}
 {% set sticker = msg.content | sticker_url %}
+{% set board = msg.content | whiteboard_link %}
 {#- Editable: texto propio dentro de los 15 min (EDIT_WINDOW en messaging/router.py,
     que es quien lo valida; el script del feed oculta "Editar" al vencer). -#}
-{% set editable = is_mine and not msg.deleted_at and not msg.forwarded and msg.content and not sticker and not loc
+{% set editable = is_mine and not msg.deleted_at and not msg.forwarded and msg.content and not sticker and not loc and not board
                   and edit_since is defined and msg.created_at > edit_since %}
 {#- data-sender/data-preview: los usa la barra "Respondiendo a…" del composer. -#}
 <div data-msg-id="{{ msg.id }}" {% if is_mine %}data-mine{% endif %}
@@ -87,6 +88,22 @@
       </a>
       <p class="px-3 pb-1.5 -mt-1 text-[10px] text-gray-400">© colaboradores de OpenStreetMap</p>
     </div>
+
+    {# Pizarra creada desde el chat: tarjeta con el acceso #}
+    {% elif board %}
+    <a href="{{ board.url }}" target="_blank" rel="noopener"
+       class="flex items-center gap-3 w-64 max-w-full px-3 py-2.5 rounded-2xl border bg-white hover:bg-gray-50 transition-colors {% if is_mine %}ml-auto border-blue-300 rounded-br-sm{% else %}border-gray-200 shadow-sm rounded-bl-sm{% endif %}">
+      <span class="shrink-0 w-9 h-9 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+        </svg>
+      </span>
+      <span class="min-w-0 text-xs">
+        <span class="block text-gray-400">Pizarra</span>
+        <span class="block font-medium text-sm text-gray-800 truncate">{{ board.title }}</span>
+      </span>
+      <span class="ml-auto shrink-0 text-xs text-blue-500">Abrir</span>
+    </a>
 
     {# Text bubble #}
     {% elif msg.content %}

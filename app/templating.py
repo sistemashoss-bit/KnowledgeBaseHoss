@@ -83,6 +83,29 @@ def _stickers_enabled() -> bool:
 templates.env.filters["sticker_url"] = _sticker_url
 
 
+# Mensaje de "nueva pizarra" del chat (app/messaging/router.py
+# create_chat_whiteboard): título + URL absoluta, para que se lea bien en
+# notificaciones y reenvíos. En el chat se dibuja como tarjeta con enlace relativo.
+_WHITEBOARD_MSG_RE = re.compile(
+    r"🎨 Pizarra: (?P<title>[^\n]+)\n(?P<url>https?://\S+/whiteboards/(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))"
+)
+
+
+def whiteboard_message(title: str, board_id) -> str:
+    from app.config import settings
+    return f"🎨 Pizarra: {title}\n{settings.public_url.rstrip('/')}/whiteboards/{board_id}"
+
+
+def _whiteboard_link(text: str | None) -> dict | None:
+    m = _WHITEBOARD_MSG_RE.fullmatch((text or "").strip())
+    if not m:
+        return None
+    return {"title": m.group("title"), "url": f"/whiteboards/{m.group('id')}"}
+
+
+templates.env.filters["whiteboard_link"] = _whiteboard_link
+
+
 def _msg_preview(msg) -> str:
     """Texto corto de un mensaje para la lista de chats (no la URL cruda de un
     sticker o una ubicación)."""
@@ -93,6 +116,9 @@ def _msg_preview(msg) -> str:
         return "Sticker"
     if _osm_location(content):
         return "📍 Ubicación"
+    board = _whiteboard_link(content)
+    if board:
+        return f"🎨 Pizarra: {board['title']}"
     return content or "📎 Archivo adjunto"
 
 

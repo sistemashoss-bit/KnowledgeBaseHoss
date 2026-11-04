@@ -22,10 +22,10 @@ from app.messaging import realtime, stickers
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
     Conversation, ConversationParticipant, Department,
-    Message, MessageAttachment, MessageReaction, User,
+    Message, MessageAttachment, MessageReaction, User, Whiteboard, WhiteboardShare,
     ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP,
 )
-from app.templating import _msg_preview, _osm_location, templates
+from app.templating import _msg_preview, _osm_location, templates, whiteboard_message
 
 _ONLINE_THRESHOLD = 180  # seconds — "En línea" if seen within 3 minutes
 EDIT_WINDOW = timedelta(minutes=15)  # editar el propio mensaje; eliminar no tiene límite
@@ -1244,6 +1244,49 @@ def send_message(
             details=f"files={len(valid_files)} names={','.join(f.filename for f in valid_files[:5])}",
         )
     return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
+
+
+@router.post("/{conv_id}/whiteboard")
+def create_chat_whiteboard(
+    conv_id: str,
+    request: Request,
+    title: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Crea una pizarra desde el chat: es de quien la crea, se comparte (con
+    edición) con los demás participantes y queda como mensaje con el acceso
+    (filtro whiteboard_link de templating.py la dibuja como tarjeta)."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    title = " ".join(title.split())[:200]
+    if not title:
+        raise HTTPException(422, "El título es obligatorio")
+
+    now = datetime.utcnow()
+    board = Whiteboard(id=uuid.uuid4(), title=title, owner_id=current_user.id, created_at=now, updated_at=now)
+    others = _other_participant_ids(conv_id, current_user.id, db)
+    active = {
+        row[0] for row in db.query(User.id).filter(User.id.in_(others), User.is_active.is_(True))
+    } if others else set()
+    board.shares = [WhiteboardShare(user_id=uid, can_edit=True, created_at=now) for uid in active]
+    db.add(board)
+
+    content = whiteboard_message(title, board.id)
+    msg = Message(id=uuid.uuid4(), conversation_id=conv_id, sender_id=current_user.id, content=content)
+    db.add(msg)
+    db.flush()
+    _mark_read(conv_id, current_user.id, db)
+    db.commit()
+
+    _after_new_message(conv_id, msg.id, current_user, db, f"🎨 Pizarra: {title}"[:120])
+    audit.log_action(
+        "whiteboard_create", user=current_user, request=request,
+        resource_type="whiteboard", resource_id=board.id, resource_name=board.title,
+        details=f"chat={conv_id} shares={len(active)}",
+    )
+    return {"ok": True, "url": f"/whiteboards/{board.id}"}
 
 
 @router.get("/{conv_id}/files", response_class=HTMLResponse)
