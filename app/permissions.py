@@ -174,21 +174,30 @@ def can_manage_document(user: "User | None", doc: "Document") -> bool:
     return False
 
 
-# ── Capacitación: mismo alcance que los documentos (sin carpetas) ────────────
+# ── Capacitación: empleados / departamento / personas específicas ───────────
+# Requiere sesión (no hay "público"). Con visibilidad "department" la ven los
+# miembros de ese departamento y quien tenga acceso extra a él.
+
+def _training_departments(user: "User") -> set:
+    ids = granted_department_ids(user)
+    if user.department_id:
+        ids.add(user.department_id)
+    return ids
+
 
 def can_access_training(user: "User | None", training) -> bool:
-    from app.models import ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, STATUS_PUBLIC
+    from app.models import ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, TRAINING_STATUS_DEPARTMENT
 
-    if training.status == STATUS_PUBLIC:
-        return True
     if user is None:
         return False
     if user.role == ROLE_SUPERADMIN or training.status == STATUS_EMPLOYEE:
         return True
+    if training.uploaded_by and str(training.uploaded_by) == str(user.id):
+        return True
+    if training.status == TRAINING_STATUS_DEPARTMENT:
+        return training.department_id is not None and training.department_id in _training_departments(user)
     if training.status == STATUS_CUSTOM:
-        if training.department_id in overseen_department_ids(user):
-            return True
-        if training.uploaded_by and str(training.uploaded_by) == str(user.id):
+        if training.department_id is not None and training.department_id in overseen_department_ids(user):
             return True
         return any(str(au.user_id) == str(user.id) for au in training.allowed_users)
     return False
@@ -199,35 +208,39 @@ def can_manage_training(user: "User | None", training) -> bool:
 
     if user is None:
         return False
-    if user.role == ROLE_SUPERADMIN or training.department_id in managed_department_ids(user):
+    if user.role == ROLE_SUPERADMIN or (training.department_id and training.department_id in managed_department_ids(user)):
         return True
     return bool(training.uploaded_by) and str(training.uploaded_by) == str(user.id)
 
 
 def visible_trainings_filter(user: "User | None"):
     """Condición SQL equivalente a can_access_training, o None (superadmin)."""
-    from sqlalchemy import and_, or_
-    from app.models import ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, STATUS_PUBLIC, Training, TrainingAllowedUser
+    from sqlalchemy import and_, false, or_
+    from app.models import (
+        ROLE_SUPERADMIN, STATUS_CUSTOM, STATUS_EMPLOYEE, TRAINING_STATUS_DEPARTMENT, Training, TrainingAllowedUser,
+    )
 
     if user is None:
-        return Training.status == STATUS_PUBLIC
+        return false()
     if user.role == ROLE_SUPERADMIN:
         return None
-    custom = [
+    conds = [
+        Training.status == STATUS_EMPLOYEE,
         Training.uploaded_by == user.id,
-        Training.id.in_(
-            TrainingAllowedUser.__table__.select()
-            .with_only_columns(TrainingAllowedUser.training_id)
-            .where(TrainingAllowedUser.user_id == user.id)
-        ),
     ]
-    dept_ids = overseen_department_ids(user)
-    if dept_ids:
-        custom.append(Training.department_id.in_(dept_ids))
-    return or_(
-        Training.status.in_((STATUS_PUBLIC, STATUS_EMPLOYEE)),
-        and_(Training.status == STATUS_CUSTOM, or_(*custom)),
-    )
+    depts = _training_departments(user)
+    if depts:
+        conds.append(and_(Training.status == TRAINING_STATUS_DEPARTMENT, Training.department_id.in_(depts)))
+    custom = [Training.id.in_(
+        TrainingAllowedUser.__table__.select()
+        .with_only_columns(TrainingAllowedUser.training_id)
+        .where(TrainingAllowedUser.user_id == user.id)
+    )]
+    overseen = overseen_department_ids(user)
+    if overseen:
+        custom.append(Training.department_id.in_(overseen))
+    conds.append(and_(Training.status == STATUS_CUSTOM, or_(*custom)))
+    return or_(*conds)
 
 
 def can_manage_folder(user: "User | None", folder: "Folder") -> bool:

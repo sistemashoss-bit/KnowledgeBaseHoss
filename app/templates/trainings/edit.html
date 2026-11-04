@@ -2,14 +2,16 @@
 {% block title %}Editar capacitación{% endblock %}
 
 {% block content %}
-<div class="flex-1 overflow-y-auto p-4 sm:p-6" x-data="{ visibility: '{{ t.status }}', filter: '' }">
+<div class="flex-1 overflow-y-auto p-4 sm:p-6" x-data="{ visibility: {{ (t.status if t.status in ('employee', 'department', 'custom') else '') | tojson | forceescape }}, deptId: {{ (t.department_id | string if t.department_id else '') | tojson | forceescape }}, filter: '', picked: {{ selected_ids | length }} }">
   <div class="max-w-2xl mx-auto">
     <div class="mb-6">
       <h1 class="text-xl font-bold text-gray-900">Editar capacitación</h1>
       <p class="text-sm text-gray-500 mt-1">{{ t.department.name if t.department else "" }}</p>
     </div>
 
-    <form method="post" action="/trainings/{{ t.id }}/edit" class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+    <form method="post" action="/trainings/{{ t.id }}/edit"
+          @submit="if (visibility === 'custom' && !picked) { $event.preventDefault(); alert('Selecciona al menos una persona.'); }"
+          class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
 
       <div>
@@ -24,38 +26,8 @@
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 resize-none">{{ t.description or "" }}</textarea>
       </div>
 
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Visibilidad <span class="text-red-500">*</span></label>
-        <select name="status" x-model="visibility"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
-          {% for s in statuses %}
-          <option value="{{ s }}" {{ 'selected' if s == t.status }}>
-            {% if s == "public" %}Público (sin login){% elif s == "employee" %}Empleados (toda la empresa){% else %}Personas específicas{% endif %}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div x-show="visibility === 'custom'" x-cloak>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Personas <span class="text-red-500">*</span></label>
-        <input type="search" x-model="filter" placeholder="Buscar persona…"
-               class="w-full mb-2 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
-        <div class="border border-gray-300 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100">
-          {% for m in members %}
-          {% set label = (m.name or m.email) ~ " " ~ m.email ~ " " ~ (m.department.name if m.department else "") %}
-          <label class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
-                 x-show="!filter || {{ label | lower | tojson | forceescape }}.includes(filter.toLowerCase())">
-            <input type="checkbox" name="allowed_user_ids" value="{{ m.id }}" {{ 'checked' if m.id | string in selected_ids }}
-                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-            <span class="text-gray-700">{{ m.name or m.email }}</span>
-            <span class="text-xs text-gray-400 truncate">{{ m.department.name if m.department else m.email }}</span>
-          </label>
-          {% endfor %}
-        </div>
-        <p class="text-xs text-gray-400 mt-1.5">
-          Además de estas personas, la ven quienes administran el departamento de la capacitación (o tienen acceso extra a él).
-        </p>
-      </div>
+      {% set edit_mode = true %}
+      {% include "trainings/_scope_fields.html" %}
 
       <div class="flex gap-3 pt-2">
         <button type="submit" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium">Guardar</button>

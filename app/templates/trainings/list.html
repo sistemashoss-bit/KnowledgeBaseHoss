@@ -74,7 +74,7 @@
           {% endif %}
           <div class="flex flex-wrap items-center gap-1 mt-auto">
             {% include "trainings/_status_badge.html" %}
-            {% if t.department %}
+            {% if t.department and t.status != "department" %}
             <span class="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600 text-[11px]">{{ t.department.name }}</span>
             {% endif %}
           </div>

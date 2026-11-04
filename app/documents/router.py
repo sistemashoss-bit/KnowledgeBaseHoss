@@ -164,6 +164,14 @@ def list_documents(
         })
 
     departments = db.query(Department).order_by(Department.name).all()
+    # Vista de carpetas por departamento: solo los que tienen documentos que
+    # esta persona puede ver (con la búsqueda actual). Si OpenSearch falla, todos.
+    dept_counts = rag.document_department_counts(q, access_filter)
+    folder_departments = [
+        {"dept": d, "count": dept_counts.get(str(d.id), 0) if dept_counts is not None else None}
+        for d in departments
+        if dept_counts is None or dept_counts.get(str(d.id))
+    ]
     selected_dept_name = ""
     if department_id:
         selected_dept_obj = db.query(Department).filter(Department.id == department_id).first()
@@ -178,6 +186,7 @@ def list_documents(
         {
             "documents": docs,
             "departments": departments,
+            "folder_departments": folder_departments,
             "current_user": user,
             "query": q,
             "selected_dept": department_id,

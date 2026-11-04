@@ -990,19 +990,24 @@ TRAINING_UPLOADING = "uploading"    # creada, esperando que el navegador suba a 
 TRAINING_PROCESSING = "processing"  # Mux ya tiene el archivo y lo está codificando
 TRAINING_READY = "ready"
 TRAINING_ERRORED = "errored"
+# Visibilidad de Capacitación (requiere sesión; no hay "público"): toda la
+# empresa, un departamento (sus miembros + accesos extra) o personas específicas.
+TRAINING_STATUS_DEPARTMENT = "department"
+TRAINING_STATUSES = [STATUS_EMPLOYEE, TRAINING_STATUS_DEPARTMENT, STATUS_CUSTOM]
 
 
 class Training(Base):
-    """Video de capacitación. Mismo alcance que Document (status public /
-    employee / custom + TrainingAllowedUser, department_id, uploaded_by; ver
-    permissions.can_access_training). El video vive en Mux: el navegador lo
+    """Video de capacitación. Visibilidad TRAINING_STATUSES (empleados /
+    departamento / personas específicas + TrainingAllowedUser); department_id
+    es el departamento al que pertenece (lo gestiona su admin) y, con
+    visibilidad "department", quien lo ve. Ver permissions.can_access_training. El video vive en Mux: el navegador lo
     sube directo (direct upload) y aquí quedan los ids para reproducirlo."""
     __tablename__ = "trainings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     mux_upload_id = Column(String(100), nullable=True, unique=True)

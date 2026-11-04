@@ -1,0 +1,72 @@
+{#- Visibilidad → departamento o personas. Lo usan new.html y edit.html dentro
+    de un x-data con `visibility`, `deptId` y `filter`.
+    Recibe: departments (los que puede elegir), members, selected_ids (set de str). -#}
+<fieldset>
+  <legend class="block text-sm font-medium text-gray-700 mb-2">1. ¿Quién podrá verla? <span class="text-red-500">*</span></legend>
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    {% for value, label, hint in [
+      ("employee", "Toda la empresa", "Cualquier persona con sesión."),
+      ("department", "Un departamento", "Solo su gente (y quien tenga acceso extra a él)."),
+      ("custom", "Personas específicas", "Solo las personas que elijas."),
+    ] %}
+    <label class="flex flex-col gap-0.5 p-3 rounded-lg border cursor-pointer transition-colors"
+           :class="visibility === '{{ value }}' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:border-gray-300'">
+      <span class="flex items-center gap-2 text-sm font-medium text-gray-800">
+        <input type="radio" name="status" value="{{ value }}" x-model="visibility" required
+               class="border-gray-300 text-blue-600 focus:ring-blue-500" />
+        {{ label }}
+      </span>
+      <span class="text-xs text-gray-500 pl-6">{{ hint }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</fieldset>
+
+<!-- 2a. Departamento -->
+<div x-show="visibility === 'department'" x-cloak>
+  <label class="block text-sm font-medium text-gray-700 mb-1">2. Departamento <span class="text-red-500">*</span></label>
+  {% if departments | length == 1 %}
+  <input type="hidden" name="department_id" value="{{ departments[0].id }}" :disabled="visibility !== 'department'" />
+  <div class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600">{{ departments[0].name }}</div>
+  {% elif departments %}
+  <select name="department_id" x-model="deptId" :required="visibility === 'department'" :disabled="visibility !== 'department'"
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+    <option value="">Seleccionar...</option>
+    {% for d in departments %}
+    <option value="{{ d.id }}">{{ d.name }}</option>
+    {% endfor %}
+  </select>
+  {% else %}
+  <p class="text-xs text-red-500">No tienes un departamento que puedas asignar.</p>
+  {% endif %}
+</div>
+
+<!-- 2b. Personas -->
+<div x-show="visibility === 'custom'" x-cloak>
+  <label class="block text-sm font-medium text-gray-700 mb-1">
+    2. Personas <span class="text-red-500">*</span>
+    <span class="font-normal text-gray-400" x-text="`(${picked} seleccionadas)`"></span>
+  </label>
+  <input type="search" x-model="filter" placeholder="Buscar por nombre, correo o departamento…"
+         class="w-full mb-2 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+  <div class="border border-gray-300 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100"
+       @change="picked = $el.querySelectorAll('input:checked').length">
+    {% for m in members %}
+    {% set label = (m.name or m.email) ~ " " ~ m.email ~ " " ~ (m.department.name if m.department else "") %}
+    <label class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
+           x-show="!filter || {{ label | lower | tojson | forceescape }}.includes(filter.toLowerCase())">
+      <input type="checkbox" name="allowed_user_ids" value="{{ m.id }}" {{ 'checked' if m.id | string in selected_ids }}
+             :disabled="visibility !== 'custom'"
+             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+      <span class="text-gray-700">{{ m.name or m.email }}</span>
+      <span class="text-xs text-gray-400 truncate">{{ m.department.name if m.department else m.email }}</span>
+    </label>
+    {% else %}
+    <p class="px-3 py-2 text-xs text-gray-400">No hay personas para elegir.</p>
+    {% endfor %}
+  </div>
+  <p class="text-xs text-gray-400 mt-1.5">
+    {% if current_user.role == "superadmin" or edit_mode %}Puedes elegir personas de cualquier departamento.
+    {% else %}Personas de tu departamento. Para sumar a alguien de otro departamento, edita la capacitación después de crearla.{% endif %}
+  </p>
+</div>

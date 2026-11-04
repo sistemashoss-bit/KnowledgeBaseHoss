@@ -1,8 +1,10 @@
 """Capacitación: videos subidos a Mux con el mismo alcance que los documentos.
 
-- Ver: permissions.can_access_training (público sin login, empleados, personas
-  específicas + admin/accesos del departamento + quien lo subió).
+- Ver (requiere sesión): permissions.can_access_training — toda la empresa,
+  un departamento (sus miembros + accesos extra) o personas específicas.
 - Subir: admin (solo su departamento) y superadmin, como /documents/upload.
+  El formulario pide primero la visibilidad y después el departamento o las
+  personas, según corresponda.
 - Gestionar (editar, eliminar): permissions.can_manage_training.
 
 El archivo va del navegador directo a Mux (direct upload, ver mux.py); el
@@ -23,10 +25,10 @@ from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app.models import (
     Department, Training, TrainingAllowedUser, User,
-    ROLE_ADMIN, ROLE_SUPERADMIN, STATUSES, STATUS_CUSTOM,
+    ROLE_ADMIN, ROLE_SUPERADMIN, STATUS_CUSTOM, TRAINING_STATUS_DEPARTMENT, TRAINING_STATUSES,
     TRAINING_ERRORED, TRAINING_PROCESSING, TRAINING_READY, TRAINING_UPLOADING,
 )
-from app.permissions import can_access_training, can_manage_training, visible_trainings_filter
+from app.permissions import can_access_training, can_manage_training, managed_department_ids, visible_trainings_filter
 from app.templating import templates
 from app.trainings import mux
 
@@ -89,8 +91,42 @@ def _members(user: User, department_id, db: Session, *, any_department: bool) ->
     return q.order_by(User.name, User.email).all()
 
 
+def _department_choices(user: User, db: Session, current=None) -> list[Department]:
+    """Departamentos que puede elegir para visibilidad "department": superadmin
+    todos; el resto, los que gestiona (admin: el suyo) más el que ya tiene."""
+    q = db.query(Department).order_by(Department.name)
+    if user.role == ROLE_SUPERADMIN:
+        return q.all()
+    ids = set(managed_department_ids(user))
+    if current:
+        ids.add(current)
+    return q.filter(Department.id.in_(ids)).all() if ids else []
+
+
+def _scope_department(status: str, department_id: str, choices: list[Department], fallback):
+    """Departamento de la capacitación: el elegido si la visibilidad es por
+    departamento (debe estar entre `choices`); si no, `fallback`."""
+    if status != TRAINING_STATUS_DEPARTMENT:
+        return fallback
+    if len(choices) == 1 and not department_id:
+        return choices[0].id
+    try:
+        wanted = uuid.UUID(department_id)
+    except ValueError:
+        raise HTTPException(422, "Elige el departamento que podrá ver la capacitación")
+    if wanted not in {d.id for d in choices}:
+        raise HTTPException(403, "No puedes asignar ese departamento")
+    return wanted
+
+
+def _check_status(status: str) -> None:
+    if status not in TRAINING_STATUSES:
+        raise HTTPException(422, "Elige la visibilidad")
+
+
 def _allowed_ids(status: str, ids: list[str], db: Session, department_id=None) -> list:
-    """Personas válidas para 'personas específicas' (activas; al crear, del departamento)."""
+    """Personas válidas para 'personas específicas' (activas; si se da
+    `department_id`, solo de ese departamento)."""
     if status != STATUS_CUSTOM:
         return []
     try:
@@ -126,6 +162,8 @@ def list_trainings(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if not user:
+        return RedirectResponse("/auth/login", status_code=302)
     query = db.query(Training).options(joinedload(Training.department), joinedload(Training.allowed_users))
     cond = visible_trainings_filter(user)
     if cond is not None:
@@ -176,16 +214,14 @@ def new_training_form(
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    if user.role == ROLE_SUPERADMIN:
-        departments = db.query(Department).order_by(Department.name).all()
-    else:
-        departments = [user.department] if user.department else []
+    # Admin: solo su departamento (como en documentos); superadmin: cualquiera.
+    departments = db.query(Department).order_by(Department.name).all() if user.role == ROLE_SUPERADMIN \
+        else ([user.department] if user.department else [])
     return templates.TemplateResponse(
         request, "trainings/new.html",
         {
             "current_user": user,
             "departments": departments,
-            "statuses": STATUSES,
             "members": _members(user, user.department_id, db, any_department=False),
             "mux_enabled": mux.enabled(),
             "csrf_token": generate_csrf_token(str(user.id)),
@@ -209,20 +245,19 @@ def create_training(
     title = title.strip()[:255]
     if not title:
         raise HTTPException(422, "El título es obligatorio")
-    if status not in STATUSES:
-        raise HTTPException(422, "Visibilidad inválida")
-    if user.role == ROLE_ADMIN:
-        department_id = str(user.department_id) if user.department_id else ""  # admin: solo el suyo
-    try:
-        dept = db.query(Department).filter(Department.id == uuid.UUID(department_id)).first()
-    except ValueError:
-        dept = None
-    if not dept:
-        raise HTTPException(422, "Elige un departamento")
-    allowed = _allowed_ids(status, allowed_user_ids, db, department_id=dept.id)
+    _check_status(status)
+    if user.role == ROLE_ADMIN and not user.department_id:
+        raise HTTPException(403, "No tienes un departamento asignado; no puedes subir capacitaciones.")
+    choices = db.query(Department).order_by(Department.name).all() if user.role == ROLE_SUPERADMIN \
+        else [user.department]
+    # Por departamento: el elegido. Si no, queda en el de quien la sube (lo gestiona su admin).
+    dept_id = _scope_department(status, department_id, choices, user.department_id)
+    # Personas: un admin elige de su departamento (como en documentos); el superadmin, de toda la empresa.
+    allowed = _allowed_ids(status, allowed_user_ids, db,
+                           department_id=None if user.role == ROLE_SUPERADMIN else user.department_id)
 
     t = Training(
-        id=uuid.uuid4(), title=title, description=description.strip() or None, department_id=dept.id,
+        id=uuid.uuid4(), title=title, description=description.strip() or None, department_id=dept_id,
         status=status, uploaded_by=user.id, video_status=TRAINING_UPLOADING,
         captions_status=mux.PENDING,  # se piden en el direct upload (mux.create_upload)
     )
@@ -260,6 +295,8 @@ def view_training(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if not user:
+        return RedirectResponse("/auth/login", status_code=302)
     t = _visible(training_id, user, db)
     _refresh(t, db)
     manage = can_manage_training(user, t)
@@ -312,7 +349,7 @@ def edit_training_form(
         {
             "current_user": user,
             "t": t,
-            "statuses": STATUSES,
+            "departments": _department_choices(user, db, t.department_id),
             # Editar = también compartir: cualquier persona activa, como en documentos.
             "members": _members(user, t.department_id, db, any_department=True),
             "selected_ids": {str(au.user_id) for au in t.allowed_users},
@@ -327,7 +364,8 @@ def edit_training(
     request: Request,
     title: str = Form(...),
     description: str = Form(""),
-    status: str = Form(...),
+    status: str = Form(""),
+    department_id: str = Form(""),
     allowed_user_ids: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
@@ -336,8 +374,9 @@ def edit_training(
     title = title.strip()[:255]
     if not title:
         raise HTTPException(422, "El título es obligatorio")
-    if status not in STATUSES:
-        raise HTTPException(422, "Visibilidad inválida")
+    _check_status(status)
+    t.department_id = _scope_department(status, department_id, _department_choices(user, db, t.department_id),
+                                        t.department_id)
     allowed = _allowed_ids(status, allowed_user_ids, db)
     t.title, t.description, t.status = title, description.strip() or None, status
     current = {au.user_id: au for au in t.allowed_users}

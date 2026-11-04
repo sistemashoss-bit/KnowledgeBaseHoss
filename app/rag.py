@@ -329,6 +329,30 @@ def search_documents(
         return []
 
 
+def document_department_counts(query: str, access_filter: dict) -> dict[str, int] | None:
+    """Documentos visibles por departamento ({department_id: n}), con la misma
+    búsqueda y permisos que search_documents (sin su límite de resultados).
+    None si OpenSearch falla."""
+    client = search_module.get_client()
+    must = (
+        [{"multi_match": {"query": query, "fields": ["title^3", "description^2"]}}]
+        if query
+        else [{"match_all": {}}]
+    )
+    try:
+        res = client.search(
+            index=search_module.DOCUMENTS_INDEX,
+            body={
+                "query": {"bool": {"must": must, "filter": [access_filter]}},
+                "size": 0,
+                "aggs": {"departments": {"terms": {"field": "department_id", "size": 1000}}},
+            },
+        )
+        return {b["key"]: b["doc_count"] for b in res["aggregations"]["departments"]["buckets"]}
+    except Exception:
+        return None
+
+
 # ── Q&A: hybrid search (BM25 + kNN) with RRF merge ───────────────────────────
 
 _RRF_K = 60  # standard RRF constant

@@ -56,7 +56,7 @@
         <h1 class="text-xl font-bold text-gray-900 break-words">{{ t.title }}</h1>
         <div class="flex flex-wrap items-center gap-1 mt-2">
           {% include "trainings/_status_badge.html" %}
-          {% if t.department %}
+          {% if t.department and t.status != "department" %}
           <span class="px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600 text-[11px]">{{ t.department.name }}</span>
           {% endif %}
           {% if duration %}<span class="text-xs text-gray-400 tabular-nums ml-1">{{ duration }}</span>{% endif %}
