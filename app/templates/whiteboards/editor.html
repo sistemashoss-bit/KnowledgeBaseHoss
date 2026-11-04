@@ -8,7 +8,8 @@
 {% block content %}
 <div class="flex-1 min-h-0 flex flex-col bg-white"
      x-data="whiteboardPage({{ shares | tojson | forceescape }}, {{ board.title | tojson | forceescape }})"
-     @wb-status.window="status = $event.detail.status; peers = $event.detail.peers">
+     @wb-status.window="status = $event.detail.status; peers = $event.detail.peers"
+     @wb-error.window="fileError = $event.detail.message; clearTimeout(fileErrorTimer); fileErrorTimer = setTimeout(() => fileError = '', 8000)">
 
   <!-- Encabezado -->
   <div class="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-gray-200">
@@ -29,6 +30,9 @@
         {% if board.department %} · {{ board.department.name }} (la edita todo el departamento){% endif %}
       </p>
     </div>
+
+    <span x-show="fileError" x-cloak x-text="fileError" role="alert"
+          class="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"></span>
 
     {% if not can_edit %}
     <span class="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Solo lectura</span>
@@ -136,7 +140,7 @@
   function whiteboardPage(initialShares, initialTitle) {
     const id = {{ board.id | string | tojson }};
     return {
-      status: 'connecting', peers: 1,
+      status: 'connecting', peers: 1, fileError: '', fileErrorTimer: null,
       title: initialTitle, sharing: false, shares: initialShares, newLevel: 'true', saving: false, error: '',
       async post(url, body) {
         const r = await fetch(url, { method: 'POST', body });

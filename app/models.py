@@ -954,6 +954,7 @@ class Whiteboard(Base):
         "WhiteboardShare", back_populates="board", cascade="all, delete-orphan", passive_deletes=True,
         order_by="WhiteboardShare.created_at",
     )
+    files = relationship("WhiteboardFile", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class WhiteboardShare(Base):
@@ -966,3 +967,19 @@ class WhiteboardShare(Base):
 
     board = relationship("Whiteboard", back_populates="shares")
     user = relationship("User", foreign_keys=[user_id])
+
+
+class WhiteboardFile(Base):
+    """Imagen de una pizarra, guardada en el bucket de pizarras. El documento
+    Yjs solo guarda {id, mimeType, created}; `file_id` es el id que Excalidraw
+    le da al archivo (hash del contenido), así que pegar la misma imagen dos
+    veces no la sube de nuevo."""
+    __tablename__ = "whiteboard_files"
+
+    board_id = Column(UUID(as_uuid=True), ForeignKey("whiteboards.id", ondelete="CASCADE"), primary_key=True)
+    file_id = Column(String(100), primary_key=True)
+    storage_key = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

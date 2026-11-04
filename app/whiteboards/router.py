@@ -7,25 +7,31 @@ Permisos (`_access`):
 - de departamento: cualquier persona de ese departamento (el suyo o los de
   acceso extra) la edita.
 """
+import logging
+import re
 import uuid
 from datetime import datetime
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from jose import JWTError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool
 
-from app import audit
+from app import audit, storage
 from app.auth.deps import get_current_user
 from app.auth.utils import AUTH_COOKIE, decode_token, generate_csrf_token
 from app.database import SessionLocal, get_db
 from app.messaging import realtime
-from app.models import Department, User, Whiteboard, WhiteboardShare
+from app.images import optimize_image
+from app.models import Department, User, Whiteboard, WhiteboardFile, WhiteboardShare
 from app.permissions import granted_department_ids
 from app.templating import templates
 from app.whiteboards import sync
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/whiteboards", tags=["whiteboards"])
 
@@ -364,15 +370,112 @@ async def delete_whiteboard(
         raise HTTPException(401)
     board = _own_board(board_id, current_user, db)
     title = board.title
+    keys = [f.storage_key for f in board.files]
     sync.discard_room(board.id)
     await sync.kick(board.id)
     db.delete(board)
     db.commit()
+    if keys:
+        try:
+            await run_in_threadpool(storage.delete_whiteboard_files, keys)
+        except Exception:
+            log.exception("No se pudieron borrar las imágenes de la pizarra %s", board_id)
     audit.log_action(
         "whiteboard_delete", user=current_user, request=request,
         resource_type="whiteboard", resource_id=board_id, resource_name=title,
     )
     return RedirectResponse("/whiteboards/", status_code=302)
+
+
+# ── Imágenes ──────────────────────────────────────────────────────────────────
+# El editor sube cada imagen pegada aquí y en el documento Yjs deja solo
+# {id, mimeType, created}; quien abre la pizarra las pide a GET .../files/{id}.
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+IMAGE_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+    "image/bmp", "image/avif", "image/x-icon",
+}
+_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+
+
+def _file_json(f: WhiteboardFile) -> dict:
+    return {"id": f.file_id, "mimeType": f.content_type}
+
+
+@router.post("/{board_id}/files")
+def upload_whiteboard_file(
+    board_id: str,
+    file_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    board, access = _visible_board(board_id, current_user, db)
+    if access not in (ACCESS_OWNER, ACCESS_EDIT):
+        raise HTTPException(403, "Solo puedes ver esta pizarra")
+    if not _FILE_ID.match(file_id):
+        raise HTTPException(422, "Archivo inválido")
+    existing = db.get(WhiteboardFile, (board.id, file_id))
+    if existing:
+        return _file_json(existing)
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in IMAGE_TYPES:
+        raise HTTPException(415, "Solo se pueden agregar imágenes")
+    content = file.file.read(MAX_IMAGE_BYTES + 1)
+    if not content:
+        raise HTTPException(422, "La imagen está vacía")
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, f"La imagen supera {MAX_IMAGE_BYTES // 1048576} MB")
+    content, _, content_type = optimize_image(content, file.filename or "imagen", content_type)
+    # La llave depende solo de pizarra + id: si dos personas suben la misma
+    # imagen a la vez, la segunda sobrescribe lo mismo y no queda basura.
+    key = f"{board.id}/{file_id}"
+    storage.upload_whiteboard_file(key, content, content_type)
+    row = WhiteboardFile(
+        board_id=board.id, file_id=file_id, storage_key=key, content_type=content_type,
+        size=len(content), uploaded_by=current_user.id, created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        row = db.get(WhiteboardFile, (board.id, file_id))
+    return _file_json(row)
+
+
+@router.get("/{board_id}/files/{file_id}")
+def get_whiteboard_file(
+    board_id: str,
+    file_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    board, _ = _visible_board(board_id, current_user, db)
+    row = db.get(WhiteboardFile, (board.id, file_id)) if _FILE_ID.match(file_id) else None
+    if not row:
+        raise HTTPException(404)
+    try:
+        content = storage.read_whiteboard_file(row.storage_key)
+    except Exception:
+        log.exception("No se pudo leer %s", row.storage_key)
+        raise HTTPException(502, "No se pudo leer la imagen")
+    return Response(
+        content,
+        media_type=row.content_type,
+        headers={
+            # El id es el hash del contenido: nunca cambia.
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+            # Un SVG abierto directo no debe ejecutar scripts en este origen.
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        },
+    )
 
 
 # ── WebSocket Yjs ─────────────────────────────────────────────────────────────

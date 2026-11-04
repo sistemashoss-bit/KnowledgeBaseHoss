@@ -160,3 +160,31 @@ def copy_chat_file(src_key: str, dst_key: str) -> None:
 
 def delete_chat_file(key: str) -> None:
     _client().delete_object(Bucket=settings.wasabi_chats_bucket_name, Key=key)
+
+
+# ── Whiteboards bucket ────────────────────────────────────────────────────────
+# Imágenes pegadas en las pizarras: `{board_id}/{file_id}`. No se entregan con
+# URL firmada sino a través de la app (whiteboards/router.py): el editor las
+# necesita como dataURL y leerlas con fetch desde Wasabi pediría CORS en el bucket.
+
+def upload_whiteboard_file(key: str, content: bytes, content_type: str) -> None:
+    _client().put_object(
+        Bucket=settings.wasabi_whiteboards_bucket_name,
+        Key=key,
+        Body=content,
+        ContentType=content_type,
+    )
+
+
+def read_whiteboard_file(key: str) -> bytes:
+    obj = _client().get_object(Bucket=settings.wasabi_whiteboards_bucket_name, Key=key)
+    return obj["Body"].read()
+
+
+def delete_whiteboard_files(keys: list[str]) -> None:
+    bucket = settings.wasabi_whiteboards_bucket_name
+    for i in range(0, len(keys), 1000):  # tope de delete_objects por llamada
+        _client().delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]], "Quiet": True},
+        )

@@ -49,6 +49,106 @@ function setupUndo(dom, yElements, binding) {
   };
 }
 
+// Imágenes: se suben a /whiteboards/<id>/files (bucket de pizarras, ya en
+// WebP) y en el documento Yjs queda solo {id, mimeType, created}. Cada
+// navegador las baja por HTTP (el navegador las guarda en caché) y se las
+// pasa a Excalidraw como dataURL. Las pizarras viejas traen la imagen
+// completa en el documento: se muestran igual y, si quien abre puede
+// editar, se suben al bucket y se reemplazan por la referencia.
+function dataURLToBlob(dataURL) {
+  const [head, data] = dataURL.split(',');
+  const mime = head.match(/^data:([^;,]+)/)?.[1] || 'application/octet-stream';
+  const bin = head.includes(';base64') ? atob(data) : decodeURIComponent(data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+function emitError(message) {
+  window.dispatchEvent(new CustomEvent('wb-error', { detail: { message } }));
+}
+
+function setupFiles(api, yAssets, cfg) {
+  const base = `/whiteboards/${cfg.boardId}/files`;
+  const shown = new Set();      // ya entregadas a Excalidraw
+  const uploading = new Set();
+  let alive = true;
+
+  async function upload(file) {
+    if (uploading.has(file.id)) return;
+    uploading.add(file.id);
+    try {
+      const body = new FormData();
+      body.append('file_id', file.id);
+      body.append('file', dataURLToBlob(file.dataURL), file.id);
+      const r = await fetch(base, { method: 'POST', body });
+      if (!r.ok) {
+        let msg = 'No se pudo guardar la imagen';
+        try { const j = await r.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (e) { /* sin cuerpo */ }
+        throw new Error(msg);
+      }
+      const meta = await r.json();
+      if (alive) {
+        yAssets.doc.transact(() => {
+          yAssets.set(file.id, { id: file.id, mimeType: meta.mimeType, created: file.created || Date.now() });
+        }, 'files');
+      }
+    } catch (e) {
+      emitError(e.message || 'No se pudo guardar la imagen');
+    } finally {
+      uploading.delete(file.id);
+    }
+  }
+
+  async function show(id, entry) {
+    if (!entry || shown.has(id)) return;
+    shown.add(id);
+    if (entry.dataURL) {             // pizarra de antes: la imagen viene adentro
+      api.addFiles([entry]);
+      if (cfg.canEdit) upload(entry);
+      return;
+    }
+    try {
+      const r = await fetch(`${base}/${encodeURIComponent(id)}`);
+      if (!r.ok) throw new Error(String(r.status));
+      const blob = await r.blob();
+      const dataURL = await blobToDataURL(blob);
+      if (alive) api.addFiles([{ id, mimeType: blob.type || entry.mimeType, dataURL, created: entry.created || Date.now() }]);
+    } catch (e) {
+      shown.delete(id);              // se reintenta en el siguiente cambio
+      console.warn('Imagen de la pizarra no disponible', id, e);
+    }
+  }
+
+  for (const [id, entry] of yAssets.entries()) show(id, entry);
+  const onRemote = (event) => {
+    for (const id of event.keysChanged) show(id, yAssets.get(id));
+  };
+  yAssets.observe(onRemote);
+
+  // Imágenes nuevas pegadas o soltadas aquí.
+  const stopChange = cfg.canEdit ? api.onChange((_els, _state, files) => {
+    for (const id in files) {
+      const f = files[id];
+      if (!shown.has(id) && !yAssets.has(id) && f.dataURL) {
+        shown.add(id);
+        upload(f);
+      }
+    }
+  }) : () => {};
+
+  return () => { alive = false; yAssets.unobserve(onRemote); stopChange(); };
+}
+
 function Board({ cfg, doc, provider }) {
   const yElements = doc.getArray('elements');
   const yAssets = doc.getMap('assets');
@@ -58,10 +158,13 @@ function Board({ cfg, doc, provider }) {
 
   useEffect(() => {
     if (!api) return undefined;
-    const b = new ExcalidrawBinding(yElements, yAssets, api, provider.awareness);
+    // Las imágenes no pasan por y-excalidraw (las metería enteras en el
+    // documento): se le da un mapa desechable y setupFiles las maneja.
+    const b = new ExcalidrawBinding(yElements, new Y.Doc().getMap('assets'), api, provider.awareness);
     setBinding(b);
     const stopUndo = cfg.canEdit ? setupUndo(ref.current, yElements, b) : () => {};
-    return () => { setBinding(null); stopUndo(); b.destroy(); };
+    const stopFiles = setupFiles(api, yAssets, cfg);
+    return () => { setBinding(null); stopUndo(); stopFiles(); b.destroy(); };
   }, [api]);
 
   return (
@@ -69,7 +172,6 @@ function Board({ cfg, doc, provider }) {
       <Excalidraw
         initialData={{
           elements: yjsToExcalidraw(yElements),
-          files: Object.fromEntries(yAssets.entries()),
           appState: { viewBackgroundColor: '#ffffff' },
         }}
         excalidrawAPI={setApi}
