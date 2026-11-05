@@ -137,10 +137,11 @@ templates.env.filters["highlight"] = _highlight
 templates.env.globals["stickers_enabled"] = _stickers_enabled
 
 
-def _mentionify(html, names=None, me: str = "") -> Markup:
-    # Después de linkify: resalta @Nombre/@todos de los participantes del grupo.
+def _mentionify(html, names=None, me: str = "", everyone: bool = True) -> Markup:
+    # Después de linkify: resalta @Nombre/@todos de los participantes del grupo
+    # (en directos, solo @MAX y la mención de vuelta; sin @todos).
     from app.mentions import highlight
-    return highlight(html, names or [], me)
+    return highlight(html, names or [], me, everyone)
 
 
 templates.env.filters["mentionify"] = _mentionify

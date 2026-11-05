@@ -13,10 +13,18 @@ Fases 1 a 4 implementadas y probadas contra un Postgres local, con el LLM, Valke
 - **Límites:** `app/assistant/limits.py`.
 
 Falta:
-- Probar con OpenRouter real: si `qwen3.7-flash` maneja bien las tools; si no, definir `ASSISTANT_MODEL`.
 - Correr la migración 053 en producción. Se aplica sola al desplegar.
-- Botón "Editar" en la tarjeta (hoy solo hay Confirmar y Descartar; se edita la tarea ya creada).
-- Opcionales sin hacer: indicador "MAX está escribiendo…" e invocación en chats directos.
+- Botón "Editar" en la tarjeta: pospuesto. Revisar en unas semanas cuántas propuestas se descartan o fallan (`assistant_proposals.status`).
+
+Hecho después:
+- **Chats directos:** `@MAX` funciona también entre dos personas. MAX no se vuelve participante; responde con lo que ven los dos y su mensaje lleva nombre y avatar. El autocompletado ofrece solo a MAX y no muestra `@todos`.
+- **"MAX está escribiendo…":** evento `typing` (on/off) en el canal del chat mientras corre el LLM. Se apaga aunque el LLM falle y no aparece si un límite frena la invocación. La franja va entre el feed y el composer, sin tapar mensajes, y se esconde sola a los 60 s.
+- **Responder a MAX:** usar "Responder" sobre un mensaje de MAX lo invoca sin escribir `@MAX`. El mensaje citado se le pasa al modelo. Responder a un humano no lo invoca.
+- **Tarjeta que no aparecía:** la tarjeta solo existe si el modelo llama `propose_task`/`propose_followup`. Si dice que dejó una propuesta sin llamarla, se le avisa una vez para que la llame; si insiste, la respuesta termina con "(No pude registrar la propuesta…)". El responsable se acepta por id o por nombre (sin acentos ni mayúsculas, solo si no es ambiguo). Los errores de las tools van al log y a la auditoría (`errors=` en `assistant_invoke`).
+- **Probado con OpenRouter real (`qwen3.7-flash`):** en aislado sí llama las tools, pero con un historial donde MAX ya "prometía" tarjetas contestaba solo con texto (`tools=- proposals=0`). Ahora, si el mensaje pide una acción (tarea, seguimiento, asignar, agendar…), la primera vuelta usa `tool_choice="required"`, igual que la vuelta del aviso. El prompt trae los próximos 14 días con su nombre (el modelo calculaba mal el día de la semana). En el seguimiento, `end` es opcional (una hora después del inicio). El error de permisos aclara que la persona sí está en el chat.
+- **Widget con tools (`app/assistant/widget.py`):** con sesión, el widget flotante usa el mismo loop de MAX con las tools de **lectura** (documentos, tareas, seguimientos, sus chats) y los permisos de quien pregunta (`scope.private_scope`). Recuerda las últimas 4 preguntas por usuario en Valkey (`max:widget:{user_id}`, 2 h; "Limpiar" la borra con `POST /chat/clear`). Contesta preguntas generales con su conocimiento. No propone tareas (no hay tarjeta): manda a `@MAX` en un chat o a Tareas. Comparte el cupo por persona con el chat (5/min, 50/día). Si el LLM falla, responde con `rag.answer_question`. Auditoría: `search_type="assistant_widget"`.
+- **Landing público sin cambios:** sin sesión el widget sigue con `rag.answer_question` y solo documentos públicos (`build_access_filter(None)`), sin tools.
+- **XSS:** la respuesta del LLM se pintaba con `| safe` en `chat/_widget_response.html` y `chat/_response.html`; ahora va escapada con `whitespace-pre-line`.
 
 ## Decisiones tomadas
 

@@ -17,19 +17,32 @@ def release_busy(conv_id) -> None:
     vk.release_lock(busy_key(conv_id))
 
 
-def check(user_id, conv_id) -> tuple[str, int] | None:
-    """Cuenta la invocación y devuelve (motivo, segundos de espera) si se pasó
-    de algún límite, o None si puede seguir. Orden: ráfaga → diario → grupo
-    (si uno bloquea, los siguientes no se cuentan)."""
-    checks = [
+def _user_checks(user_id) -> list:
+    return [
         ("minute", f"max:user:{user_id}:min", settings.assistant_user_per_minute, 60),
         ("day", f"max:user:{user_id}:day", settings.assistant_user_per_day, 86400),
-        ("conversation", f"max:conv:{conv_id}:hour", settings.assistant_conv_per_hour, 3600),
     ]
+
+
+def _first_hit(checks) -> tuple[str, int] | None:
     for reason, key, limit, window in checks:
         if vk.hit_rate_limit(key, limit, window):
             return reason, vk.ttl(f"rl:{key}") or window
     return None
+
+
+def check_user(user_id) -> tuple[str, int] | None:
+    """Solo los límites por persona (el widget); comparte el cupo con el chat."""
+    return _first_hit(_user_checks(user_id))
+
+
+def check(user_id, conv_id) -> tuple[str, int] | None:
+    """Cuenta la invocación y devuelve (motivo, segundos de espera) si se pasó
+    de algún límite, o None si puede seguir. Orden: ráfaga → diario → grupo
+    (si uno bloquea, los siguientes no se cuentan)."""
+    return _first_hit(
+        _user_checks(user_id) + [("conversation", f"max:conv:{conv_id}:hour", settings.assistant_conv_per_hour, 3600)]
+    )
 
 
 def should_warn(subject, reason: str, wait: int) -> bool:

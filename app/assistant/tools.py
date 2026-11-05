@@ -6,6 +6,7 @@ y dejan una propuesta que se publica como tarjeta para confirmar (proposals.py).
 """
 import json
 import logging
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -41,6 +42,14 @@ class ToolContext:
     # Propuestas de esta invocación; se guardan al publicar la respuesta.
     proposals: list[dict] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    # Tools que devolvieron error (para la auditoría y para no afirmar una
+    # propuesta que no quedó registrada).
+    errors: list[str] = field(default_factory=list)
+    # Documentos que devolvieron las búsquedas (id → título): el widget los
+    # muestra como fuentes.
+    sources: dict = field(default_factory=dict)
+    # Widget: sin propose_* (no hay dónde mostrar la tarjeta).
+    read_only: bool = False
 
 
 def _fn(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
@@ -118,7 +127,7 @@ TOOL_DEFINITIONS = [
         {
             "title": {"type": "string", "description": "Título corto y accionable"},
             "description": {"type": "string", "description": "Detalle (opcional)"},
-            "assignee_id": {"type": "string", "description": "id de un participante del chat (opcional)"},
+            "assignee_id": {"type": "string", "description": "id (o nombre) de un participante del chat (opcional)"},
             "due_date": {"type": "string", "description": "Fecha límite AAAA-MM-DD (opcional)"},
             "priority": {"type": "string", "enum": TASK_PRIORITIES},
         },
@@ -136,12 +145,16 @@ TOOL_DEFINITIONS = [
             },
             "day": {"type": "string", "description": "AAAA-MM-DD"},
             "start": {"type": "string", "description": "HH:MM (24 h)"},
-            "end": {"type": "string", "description": "HH:MM (24 h)"},
+            "end": {"type": "string", "description": "HH:MM (24 h). Opcional: si no lo dicen, una hora después del inicio"},
             "note": {"type": "string", "description": "Nota (opcional)"},
         },
-        ["day", "start", "end"],
+        ["day", "start"],
     ),
 ]
+
+
+# Las del widget: solo lectura.
+READ_TOOL_DEFINITIONS = [d for d in TOOL_DEFINITIONS if not d["function"]["name"].startswith("propose_")]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -189,6 +202,7 @@ def search_documents(ctx: ToolContext, query: str, department: str = "") -> dict
         doc = docs.get(_uuid(h.get("id")))
         if not doc or not scope_lib.document_visible_to_all(ctx.scope, doc):
             continue
+        ctx.sources.setdefault(str(doc.id), doc.title)
         results.append({
             "id": str(doc.id),
             "title": doc.title,
@@ -210,6 +224,7 @@ def search_passages(ctx: ToolContext, query: str) -> dict:
         doc = docs.get(_uuid(c.get("document_id")))
         if not doc or not scope_lib.document_visible_to_all(ctx.scope, doc):
             continue
+        ctx.sources.setdefault(str(doc.id), doc.title)
         results.append({
             "document_id": str(doc.id),
             "document_title": doc.title,
@@ -276,7 +291,7 @@ def search_followups(ctx: ToolContext, task_id: str = "", include_past: bool = F
 def search_messages(ctx: ToolContext, query: str, scope: str = "current") -> dict:
     if not (query or "").strip():
         return {"error": "query vacío"}
-    if scope == "shared":
+    if scope == "shared" or ctx.scope.conversation is None:
         conv_ids = scope_lib.shared_conversation_ids(ctx.db, ctx.scope)
     else:
         conv_ids = [ctx.scope.conversation.id]
@@ -329,9 +344,25 @@ def get_conversation(ctx: ToolContext, conversation_id: str, limit: int = 20) ->
 
 # ── Propuestas ────────────────────────────────────────────────────────────────
 
-def _participant(ctx: ToolContext, user_id) -> User | None:
-    uid = _uuid(user_id)
-    return next((u for u in ctx.scope.participants if u.id == uid), None) if uid else None
+def _norm(text: str) -> str:
+    text = unicodedata.normalize("NFD", (text or "").strip().lstrip("@")).lower()
+    return "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+
+def _participant(ctx: ToolContext, ref) -> User | None:
+    """Participante por id o, si el modelo mandó un nombre, por nombre (exacto o
+    primer nombre) cuando no es ambiguo."""
+    uid = _uuid(ref)
+    if uid:
+        return next((u for u in ctx.scope.participants if u.id == uid), None)
+    wanted = _norm(str(ref or ""))
+    if not wanted:
+        return None
+    exact = [u for u in ctx.scope.participants if _norm(_user_label(u)) == wanted]
+    if len(exact) == 1:
+        return exact[0]
+    first = [u for u in ctx.scope.participants if _norm(_user_label(u)).split(" ")[0] == wanted]
+    return first[0] if len(first) == 1 else None
 
 
 def propose_task(
@@ -345,7 +376,7 @@ def propose_task(
     if assignee_id:
         assignee = _participant(ctx, assignee_id)
         if assignee is None:
-            return {"error": "La persona asignada debe ser alguien de este chat (usa su id)."}
+            return {"error": "La persona asignada debe ser alguien de este chat (usa su id de la lista de participantes)."}
     due = None
     if due_date:
         try:
@@ -358,7 +389,13 @@ def propose_task(
             ctx.scope.invoker, ctx.db, "", str(assignee.id) if assignee else "", required=False,
         )
     except HTTPException as exc:
-        return {"error": f"{ctx.scope.invoker.name or 'Quien te invocó'} no puede crear esa tarea: {exc.detail}"}
+        who = ctx.scope.invoker.name or "Quien te invocó"
+        if assignee is not None:
+            return {"error": (
+                f"{_user_label(assignee)} sí está en este chat, pero {who} no tiene permiso de asignarle "
+                f"tareas ({exc.detail})."
+            )}
+        return {"error": f"{who} no puede crear esa tarea: {exc.detail}"}
 
     ctx.proposals.append({
         "kind": PROPOSAL_TASK,
@@ -377,9 +414,15 @@ def propose_task(
 
 
 def propose_followup(
-    ctx: ToolContext, day: str, start: str, end: str, task_id: str = "",
+    ctx: ToolContext, day: str, start: str, end: str = "", task_id: str = "",
     proposed_task_number: int | None = None, note: str = "",
 ) -> dict:
+    if not (end or "").strip():
+        try:
+            h, m = (int(x) for x in str(start).strip().split(":")[:2])
+            end = f"{min(h + 1, 23):02d}:{m if h < 23 else 59:02d}"
+        except ValueError:
+            end = ""
     payload = {"day": day, "start": start, "end": end, "note": _clip(note, 500)}
     if proposed_task_number:
         task_props = [p for p in ctx.proposals if p["kind"] == PROPOSAL_TASK]
@@ -431,6 +474,9 @@ def run(ctx: ToolContext, name: str, arguments: str) -> str:
     fn = _IMPLEMENTATIONS.get(name)
     if fn is None:
         return json.dumps({"error": f"Tool desconocida: {name}"})
+    if ctx.read_only and name.startswith("propose_"):
+        ctx.errors.append(name)
+        return json.dumps({"error": "Aquí no puedo crear tareas ni seguimientos."}, ensure_ascii=False)
     try:
         args = json.loads(arguments or "{}")
         if not isinstance(args, dict):
@@ -445,4 +491,7 @@ def run(ctx: ToolContext, name: str, arguments: str) -> str:
         logger.exception("assistant tool %s failed", name)
         ctx.db.rollback()
         result = {"error": "Falló la consulta"}
+    if isinstance(result, dict) and result.get("error"):
+        ctx.errors.append(name)
+        logger.info("assistant tool %s → error: %s (args=%s)", name, result["error"], arguments)
     return json.dumps(result, ensure_ascii=False, default=str)

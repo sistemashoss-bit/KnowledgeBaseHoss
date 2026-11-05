@@ -22,9 +22,7 @@
            class="w-full h-full rounded-full object-contain" />
     </div>
     <div class="max-w-[85%] space-y-1.5">
-      <p class="text-xs text-gray-800 bg-blue-50 rounded-xl rounded-tl-none px-3 py-2 leading-relaxed">
-        {{ answer | replace('\n', '<br>') | safe }}
-      </p>
+      <p class="text-xs text-gray-800 bg-blue-50 rounded-xl rounded-tl-none px-3 py-2 leading-relaxed whitespace-pre-line break-words">{{ answer | trim }}</p>
       {% if sources %}
       <div class="flex flex-wrap gap-1 px-1">
         {% for source in sources %}

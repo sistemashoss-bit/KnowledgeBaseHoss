@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
+from app.database import get_db
 from app.permissions import build_access_filter
 from app import audit, rag
+from app.assistant import widget as assistant_widget
 from app.templating import templates
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -14,21 +17,19 @@ def ask(
     request: Request,
     question: str = Form(...),
     mode: str = Query(default="full"),
+    db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     if not question.strip():
         return HTMLResponse("")
 
-    access_filter = build_access_filter(user)
-    dept_id = str(user.department_id) if user and user.department_id else None
-    role = user.role if user else "anon"
-
-    result = rag.answer_question(
-        question.strip(), access_filter, role=role, dept_id=dept_id,
-        user_id=str(user.id) if user else None,
-    )
-
-    audit.log_search(question.strip(), user=user, result_count=len(result["sources"]), search_type="rag")
+    if user:
+        # Con sesión: MAX con tools (documentos, tareas, chats) y los permisos del usuario.
+        result = assistant_widget.answer(db, user, question.strip())
+    else:
+        # Landing público: solo documentos públicos, como siempre.
+        result = rag.answer_question(question.strip(), build_access_filter(None), role="anon")
+        audit.log_search(question.strip(), user=None, result_count=len(result["sources"]), search_type="rag")
 
     tpl = "chat/_widget_response.html" if mode == "widget" else "chat/_response.html"
     return templates.TemplateResponse(
@@ -40,3 +41,11 @@ def ask(
             "sources": result["sources"],
         },
     )
+
+
+@router.post("/clear")
+def clear(user=Depends(get_current_user)):
+    """Botón "Limpiar" del widget: olvida también la memoria de la conversación."""
+    if user:
+        assistant_widget.clear_history(user.id)
+    return Response(status_code=204)

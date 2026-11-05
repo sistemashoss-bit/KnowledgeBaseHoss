@@ -4,7 +4,9 @@ OpenRouter y la respuesta publicada en el mismo chat.
 Corre en un hilo aparte (`dispatch`): el envío del mensaje no espera al LLM.
 """
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 
 from sqlalchemy.orm import joinedload
 
@@ -16,6 +18,7 @@ from app.assistant import tools
 from app.calendar.reminders import to_local
 from app.config import settings
 from app.database import SessionLocal
+from app.messaging import realtime
 from app.models import Message
 from app.tasks.recurring import local_now
 
@@ -25,6 +28,19 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="max")
 
 REPLY_MAX_CHARS = 3500
 LLM_TIMEOUT_SECONDS = 40
+# El modelo dice que dejó una propuesta (o una tarjeta) sin haber llamado propose_*.
+_CLAIMS_PROPOSAL = re.compile(r"propuest|tarjeta|confirm|cre[eé] la tarea|qued[oó] (cread|registrad)", re.I)
+_NUDGE = (
+    "Aviso del sistema: no se registró ninguna propuesta. La tarjeta para confirmar solo "
+    "aparece si llamas propose_task o propose_followup. Llámala ahora si corresponde; si no, "
+    "responde sin mencionar propuestas ni tarjetas."
+)
+# El mensaje pide una acción (crear/asignar una tarea o un seguimiento): la primera
+# vuelta obliga a usar una herramienta, para que no conteste solo con texto.
+_ASKS_ACTION = re.compile(
+    r"\b(tareas?|seguimientos?|recordatorios?|pendientes?|asign\w*|agend\w*|recu[eé]rda\w*|propuest\w*)\b", re.I
+)
+_NOT_SAVED = "(No pude registrar la propuesta; pídemelo de nuevo con más detalle.)"
 _WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
@@ -102,8 +118,20 @@ def _history(db, scope: scope_lib.Scope, source: Message) -> str:
     return "\n".join(lines)
 
 
-def _system_prompt(db, scope: scope_lib.Scope, source: Message) -> str:
+def _today_text() -> str:
+    """Fecha y hora de hoy y los próximos 14 días con su nombre (los modelos
+    chicos calculan mal el día de la semana)."""
     now = local_now()
+    upcoming = ", ".join(
+        f"{_WEEKDAYS[d.weekday()]} {d:%Y-%m-%d}" for d in (now.date() + timedelta(days=i) for i in range(1, 15))
+    )
+    return (
+        f"Hoy es {_WEEKDAYS[now.weekday()]} {now:%Y-%m-%d}, son las {now:%H:%M} (hora local).\n"
+        f"Próximos días: {upcoming}."
+    )
+
+
+def _system_prompt(db, scope: scope_lib.Scope, source: Message) -> str:
     conv = scope.conversation
     invoker = mentions.display_name(scope.invoker)
     where = [f"Grupo: «{conv.name or 'Grupo sin nombre'}»"]
@@ -115,7 +143,7 @@ def _system_prompt(db, scope: scope_lib.Scope, source: Message) -> str:
         where.append(f"zona {conv.zone.name}")
     participants = "\n".join(_participant_line(u) for u in scope.participants)
     return f"""Eres MAX, el asistente del chat interno de la empresa (plataforma knowledge).
-Hoy es {_WEEKDAYS[now.weekday()]} {now:%Y-%m-%d}, son las {now:%H:%M} (hora local).
+{_today_text()}
 {", ".join(where)}.
 
 Participantes del chat:
@@ -131,11 +159,16 @@ Reglas:
 - Para preguntas sobre políticas, procesos o documentos usa search_passages y menciona
   el título del documento de donde sale la respuesta.
 - Si te piden crear una tarea o un seguimiento, o el mensaje de {invoker} plantea un
-  pendiente claro, usa propose_task / propose_followup. Nunca digas que ya lo creaste:
-  di que dejaste la propuesta para que {invoker} la confirme.
+  pendiente claro, llama propose_task / propose_followup. La tarjeta para confirmar
+  SOLO aparece si llamas esa herramienta y no devuelve error: nunca la describas sin
+  llamarla. Nunca digas que ya lo creaste: di que dejaste la propuesta para que
+  {invoker} la confirme.
 - Para asignar usa el id de un participante. Convierte fechas relativas ("mañana",
-  "el viernes") usando la fecha de hoy.
-- Si una herramienta devuelve un error, explícalo en palabras simples.
+  "el viernes") con la lista de próximos días.
+  "Para el viernes" es la fecha límite (due_date), no parte del título; si no
+  mencionan fecha, no pongas fecha límite.
+- Si una herramienta devuelve un error, explica ese mismo motivo en palabras simples
+  (no inventes otro).
 - Responde en español, breve y en texto plano: sin markdown (nada de #, ** ni tablas);
   si necesitas listas usa "- ". No muestres ids internos.
 
@@ -153,29 +186,73 @@ def _message_text(msg) -> str:
     return text
 
 
-def _run_llm(ctx: tools.ToolContext, system: str, question: str) -> str:
+def _question(db, source: Message) -> str:
+    """El mensaje que invocó a MAX; si es una respuesta ("Responder") a otro
+    mensaje, se antepone ese mensaje para que sepa a qué se refiere."""
+    text = (source.content or "").strip()
+    if not source.reply_to_id:
+        return text
+    quoted = db.query(Message).options(joinedload(Message.sender)).filter(Message.id == source.reply_to_id).first()
+    if quoted is None or quoted.deleted_at:
+        return text
+    who = "tu mensaje" if bot_lib.is_bot(quoted.sender) else (
+        f"el mensaje de {mentions.display_name(quoted.sender)}" if quoted.sender else "un mensaje"
+    )
+    body = (quoted.content or "").strip() or "(adjunto)"
+    if len(body) > 600:
+        body = body[:599] + "…"
+    return f"[Responde a {who}: «{body}»]\n{text}"
+
+
+def _claims_missing_proposal(ctx: tools.ToolContext, text: str) -> bool:
+    if ctx.read_only or ctx.proposals or any(name.startswith("propose_") for name in ctx.errors):
+        return False
+    return bool(_CLAIMS_PROPOSAL.search(text or ""))
+
+
+def _run_llm(
+    ctx: tools.ToolContext, system: str, question: str,
+    *, tool_defs: list | None = None, history: list[dict] | None = None,
+) -> str:
+    """Loop de tool calling. `history`: turnos previos (widget), como mensajes
+    user/assistant."""
     llm = rag._llm_client().with_options(timeout=LLM_TIMEOUT_SECONDS)
     model = settings.assistant_model or settings.openrouter_model
+    tool_defs = tool_defs or tools.TOOL_DEFINITIONS
     messages: list[dict] = [
         {"role": "system", "content": system},
+        *(history or []),
         {"role": "user", "content": question},
     ]
     used = 0
-    for _ in range(settings.assistant_max_tool_calls + 2):
+    nudged = False
+    force = bool(_ASKS_ACTION.search(question or ""))
+    for _ in range(settings.assistant_max_tool_calls + 3):
         final = used >= settings.assistant_max_tool_calls
         completion = llm.chat.completions.create(
             model=model,
             messages=messages,
-            tools=tools.TOOL_DEFINITIONS,
-            tool_choice="none" if final else "auto",
+            tools=tool_defs,
+            tool_choice="none" if final else ("required" if force else "auto"),
             max_tokens=settings.assistant_max_tokens,
             # Igual que el Q&A: sin "pensar" se aprovecha el presupuesto en la respuesta.
             extra_body={"reasoning": {"enabled": False}},
         )
         msg = completion.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []
+        force = False
         if not tool_calls or final:
-            return _message_text(msg)
+            text = _message_text(msg)
+            if not _claims_missing_proposal(ctx, text):
+                return text
+            if nudged or final:
+                logger.info("assistant claimed a proposal without calling propose_*: %r", text[:200])
+                return f"{text}\n\n{_NOT_SAVED}"
+            # Habló de una propuesta sin llamar la tool: se le pide que la llame.
+            nudged = force = True
+            messages.append({"role": "assistant", "content": text})
+            messages.append({"role": "user", "content": _NUDGE})
+            continue
         messages.append({
             "role": "assistant",
             "content": msg.content or "",
@@ -198,7 +275,7 @@ def _run_llm(ctx: tools.ToolContext, system: str, question: str) -> str:
 
 def handle_invocation(conv_id, message_id, invoker_id) -> None:
     db = SessionLocal()
-    locked = False
+    locked = typing = False
     try:
         source = db.query(Message).filter(Message.id == message_id).first()
         scope = scope_lib.load_scope(db, conv_id, invoker_id)
@@ -219,9 +296,12 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
                 _post_reply(db, scope, source, limits.limit_message(reason, wait))
             return
 
+        # "MAX está escribiendo…" mientras corre el LLM (se apaga en el finally).
+        realtime.notify_typing(conv_id, True)
+        typing = True
         ctx = tools.ToolContext(db=db, scope=scope)
         try:
-            answer = _run_llm(ctx, _system_prompt(db, scope, source), source.content or "")
+            answer = _run_llm(ctx, _system_prompt(db, scope, source), _question(db, source))
         except Exception:
             logger.exception("assistant LLM call failed")
             db.rollback()
@@ -239,9 +319,14 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         audit.log_action(
             "assistant_invoke", user=scope.invoker,
             resource_type="conversation", resource_id=str(conv_id), resource_name=scope.conversation.name,
-            details=f"tools={','.join(ctx.calls) or '-'} proposals={len(ctx.proposals)}",
+            details=(
+                f"tools={','.join(ctx.calls) or '-'} proposals={len(ctx.proposals)}"
+                + (f" errors={','.join(ctx.errors)}" if ctx.errors else "")
+            ),
         )
     finally:
+        if typing:
+            realtime.notify_typing(conv_id, False)
         if locked:
             limits.release_busy(conv_id)
         db.close()

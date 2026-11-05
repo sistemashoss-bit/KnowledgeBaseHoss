@@ -4,7 +4,7 @@
   </div>
 
   <div class="prose prose-sm max-w-none text-gray-800 text-sm leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-200">
-    {{ answer | replace('\n', '<br>') | safe }}
+    <div class="whitespace-pre-line break-words">{{ answer | trim }}</div>
   </div>
 
   {% if sources %}

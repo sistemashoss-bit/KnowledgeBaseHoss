@@ -148,6 +148,16 @@ def notify_message_update(conv_id, msg_id) -> None:
     vk.publish(channel(conv_id), f"{_UPDATE_PREFIX}{msg_id}")
 
 
+# "MAX está escribiendo…": sale como `event: typing` con data `on`/`off`; no
+# refresca el feed (la respuesta llega después como un mensaje normal).
+_TYPING_PREFIX = "typing:"
+
+
+def notify_typing(conv_id, on: bool) -> None:
+    from app import valkey_client as vk
+    vk.publish(channel(conv_id), f"{_TYPING_PREFIX}{'on' if on else 'off'}")
+
+
 async def _channel_stream(chan: str, request, event_name: str):
     """Yield SSE frames from a Pub/Sub channel until the client disconnects.
 
@@ -179,6 +189,9 @@ async def _channel_stream(chan: str, request, event_name: str):
                     continue
                 if isinstance(data, str) and data.startswith(_UPDATE_PREFIX):
                     yield f"event: msgupdate\ndata: {data[len(_UPDATE_PREFIX):]}\n\n"
+                    continue
+                if isinstance(data, str) and data.startswith(_TYPING_PREFIX):
+                    yield f"event: typing\ndata: {data[len(_TYPING_PREFIX):]}\n\n"
                     continue
                 yield f"event: {event_name}\ndata: {data}\n\n"
         except asyncio.CancelledError:

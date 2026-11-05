@@ -922,6 +922,8 @@
       <span sse-swap="reaction" hx-target="this" hx-swap="innerHTML" hidden></span>
       {# `event: msgupdate` (mensaje editado/eliminado): el handler de abajo vuelve a pedir esa fila. #}
       <span sse-swap="msgupdate" hx-target="this" hx-swap="innerHTML" hidden></span>
+      {# `event: typing` (on/off): MAX está preparando una respuesta en este chat. #}
+      <span sse-swap="typing" hx-target="this" hx-swap="innerHTML" hidden></span>
       <!-- Búsqueda en este chat (botón de lupa del encabezado) -->
       <div id="msg-search" class="hidden absolute top-0 inset-x-0 z-30 bg-white border-b border-gray-200 shadow-md">
         <div class="flex items-center gap-2 px-3 py-2">
@@ -1160,6 +1162,21 @@
             htmx.trigger(document.body, 'pinsChanged');
           });
 
+          // "MAX está escribiendo…": on/off desde el servidor; se esconde solo a
+          // los 60 s por si el `off` no llega (conexión SSE caída).
+          var maxTyping = document.getElementById('max-typing'), maxTypingTimer = null;
+          function setMaxTyping(on) {
+            var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+            maxTyping.classList.toggle('hidden', !on);
+            maxTyping.classList.toggle('flex', on);
+            if (atBottom) feed.scrollTop = feed.scrollHeight;
+            clearTimeout(maxTypingTimer);
+            if (on) maxTypingTimer = setTimeout(function () { setMaxTyping(false); }, 60000);
+          }
+          document.getElementById('feed-sse').addEventListener('htmx:sseMessage', function (e) {
+            if (e.detail && e.detail.type === 'typing') setMaxTyping(e.detail.data === 'on');
+          });
+
           // ── Responder ──────────────────────────────────────────────────────
           // Este script corre antes de parsear el composer y el modal de reenviar:
           // se buscan al usarlos y sus listeners se enganchan en DOMContentLoaded.
@@ -1279,6 +1296,14 @@
           };
         })();
       </script>
+    </div>
+
+    {# Fuera del feed (que es absoluto) para no tapar el último mensaje: al
+       aparecer le quita una franja al feed y el script lo mantiene abajo. #}
+    <div id="max-typing" role="status" aria-live="polite"
+         class="hidden shrink-0 items-center gap-2 px-4 sm:px-6 py-1.5 text-xs text-gray-500">
+      <img src="{{ asset('mascota.webp') }}" alt="" class="w-5 h-5 rounded-full object-cover" />
+      MAX está escribiendo…
     </div>
 
 
@@ -1647,6 +1672,7 @@
           var form = document.getElementById('send-form');
           var menu = document.getElementById('mention-menu');
           var people = {{ mention_people | tojson }};
+          var allowEveryone = {{ 'true' if mention_everyone else 'false' }};
           var items = [], active = 0, isOpen = false;
 
           function norm(s) { return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
@@ -1688,7 +1714,7 @@
               return norm(p.name).split(/\s+/).some(function (w) { return w.indexOf(r.q) === 0; })
                 || norm(p.name).indexOf(r.q) === 0 || norm(p.email).indexOf(r.q) === 0;
             }).slice(0, 8).map(function (p) { return { name: p.name, hint: p.email }; });
-            if ('todos'.indexOf(r.q) === 0) items.push({ name: 'todos', hint: 'Notifica a todo el grupo' });
+            if (allowEveryone && 'todos'.indexOf(r.q) === 0) items.push({ name: 'todos', hint: 'Notifica a todo el grupo' });
             active = 0;
             render();
           }

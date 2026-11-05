@@ -325,7 +325,7 @@
         </div>
         <div class="flex-1 min-w-0">
           <p class="text-white font-semibold text-sm leading-tight">MAX</p>
-          <p class="text-blue-200 text-xs">Busca en los documentos</p>
+          <p class="text-blue-200 text-xs">{{ 'Documentos, tareas y chats' if current_user else 'Busca en los documentos' }}</p>
         </div>
         <div class="flex items-center gap-1">
           <button x-show="msgs > 0" @click="clearChat()"
@@ -352,7 +352,7 @@
               </svg>
             </div>
             <p class="text-sm font-medium text-gray-700">¿En qué puedo ayudarte?</p>
-            <p class="text-xs text-gray-400 mt-1">Pregunta sobre políticas, procesos o cualquier documento</p>
+            <p class="text-xs text-gray-400 mt-1">{{ 'Pregunta por documentos, tus tareas, tus chats o lo que necesites' if current_user else 'Pregunta sobre políticas, procesos o cualquier documento' }}</p>
           </div>
         </template>
         <div x-ref="messages" id="widget-messages"></div>
@@ -490,6 +490,8 @@
           if (el) el.innerHTML = '';
           this.msgs = 0;
           localStorage.removeItem(key);
+          // MAX también olvida la conversación (memoria corta del servidor).
+          if (userId) fetch('/chat/clear', { method: 'POST' }).catch(() => {});
         },
         toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
         // El botón cierra lo que esté abierto; si no hay nada, abre el menú

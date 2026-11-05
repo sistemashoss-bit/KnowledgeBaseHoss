@@ -16,13 +16,20 @@ from app.tasks.service import task_view_condition
 
 @dataclass
 class Scope:
-    conversation: Conversation
+    # None en el widget: MAX en privado, solo con quien pregunta.
+    conversation: Conversation | None
     invoker: User
     participants: list[User] = field(default_factory=list)
 
     @property
     def participant_ids(self) -> set:
         return {u.id for u in self.participants}
+
+
+def private_scope(user: User) -> Scope:
+    """El widget: la respuesta solo la lee quien pregunta, así que el alcance son
+    sus propios permisos."""
+    return Scope(conversation=None, invoker=user, participants=[user])
 
 
 def load_scope(db: Session, conv_id, invoker_id) -> Scope | None:

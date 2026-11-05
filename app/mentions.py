@@ -42,12 +42,13 @@ def find(content: str, users) -> tuple[set, bool]:
     return ids, ALL in hits
 
 
-def highlight(html, names, me: str = "") -> Markup:
+def highlight(html, names, me: str = "", everyone: bool = True) -> Markup:
     """Resalta las menciones en el HTML ya escapado (salida de linkify). Solo
-    toca el texto: nunca dentro de etiquetas ni del texto de un enlace."""
+    toca el texto: nunca dentro de etiquetas ni del texto de un enlace.
+    `everyone=False` (chats directos) no resalta @todos."""
     if not names or "@" not in str(html):
         return Markup(html)
-    pat = _pattern([str(escape(n)) for n in names] + [ALL])
+    pat = _pattern([str(escape(n)) for n in names] + ([ALL] if everyone else []))
     me_l = str(escape(me)).lower()
 
     def repl(m: re.Match) -> str:

@@ -25,7 +25,7 @@ from app.permissions import branch_user_ids, manager_scope
 from app.models import (
     Conversation, ConversationParticipant, Department,
     Message, MessageAttachment, MessageReaction, User, Whiteboard, WhiteboardShare,
-    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP, ASSISTANT_BOT_ID,
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP, ASSISTANT_BOT_ID, ASSISTANT_BOT_NAME,
 )
 from app.templating import _msg_preview, _osm_location, templates, whiteboard_message
 
@@ -378,8 +378,13 @@ def _feed_context(
     mención (`members` si ya están cargados; si no, una consulta, y solo si
     algún mensaje trae "@")."""
     names = []
-    if is_group and any("@" in (m.content or "") for m in messages):
-        names = [mentions.display_name(u) for u in (members if members is not None else _group_members(conv_id, db))]
+    if any("@" in (m.content or "") for m in messages):
+        if is_group:
+            names = [mentions.display_name(u) for u in (members if members is not None else _group_members(conv_id, db))]
+        else:
+            # Chat directo: solo se menciona a MAX (y él menciona a quien le preguntó).
+            people = members if members is not None else _group_members(conv_id or messages[0].conversation_id, db)
+            names = [mentions.display_name(u) for u in people] + [ASSISTANT_BOT_NAME]
     bot_msg_ids = [m.id for m in messages if assistant_bot.is_bot_id(m.sender_id)]
     return {
         "messages": messages,
@@ -389,6 +394,7 @@ def _feed_context(
         "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
         "mention_names": names,
         "mention_me": mentions.display_name(current_user),
+        "mention_everyone": is_group,
         "edit_since": datetime.utcnow() - EDIT_WINDOW,
     }
 
@@ -519,11 +525,13 @@ def conversation_view(
                 members=[p.user for p in conv.participants if p.user],
             ),
             "has_more": has_more,
-            # Autocompletado de @menciones del compositor (solo grupos).
+            # Autocompletado de @menciones del compositor: en grupos los
+            # participantes (MAX incluido); en directos solo MAX.
             "mention_people": [
-                {"name": mentions.display_name(p.user), "email": p.user.email}
+                {"name": mentions.display_name(p.user), "email": "Asistente" if p.user.is_bot else p.user.email}
                 for p in conv.participants if p.user and str(p.user_id) != str(current_user.id)
-            ] if conv.type == CONV_GROUP else [],
+            ] if conv.type == CONV_GROUP else [{"name": ASSISTANT_BOT_NAME, "email": "Asistente"}],
+            "mention_everyone": conv.type == CONV_GROUP,
             "contacts": contacts,
             "departments": departments,
             "contact_avatars": _contact_avatars(contacts),
@@ -1122,7 +1130,14 @@ def _after_new_message(conv_id, msg_id, sender: User, db: Session, preview: str,
     # Menciones (solo grupos): a quien se mencionó le llega una notificación
     # `chat_mention` en vez del simple refresco del badge.
     mentioned: set = set()
-    invoke_assistant = False
+    # Chat directo: no hay menciones entre personas, pero sí se invoca a MAX
+    # (no es participante; responde con lo que ven los dos).
+    invoke_assistant = (
+        conv.type == CONV_DIRECT
+        and not assistant_bot.is_bot(sender)
+        and "@" in mention_text
+        and assistant_bot.mentioned_in(mention_text)
+    )
     if conv.type == CONV_GROUP and "@" in mention_text:
         members = [u for u in _group_members(conv_id, db) if u.id != sender.id]
         # MAX no recibe notificaciones: se le "avisa" invocándolo (solo con @MAX,
@@ -1149,6 +1164,16 @@ def _after_new_message(conv_id, msg_id, sender: User, db: Session, preview: str,
     for uid in recipient_ids:
         if uid not in mentioned:
             realtime.notify_user(uid)
+
+    # Responder a un mensaje de MAX también lo invoca (sigue la conversación sin
+    # @MAX). `mention_text` vacío = reenvío o pizarra: esos nunca lo invocan.
+    if (
+        not invoke_assistant
+        and mention_text
+        and not assistant_bot.is_bot(sender)
+        and assistant_bot.replies_to_bot(db, msg_id)
+    ):
+        invoke_assistant = True
 
     if invoke_assistant:
         from app.assistant import agent as assistant_agent

@@ -4,6 +4,9 @@
 
 {% for msg in messages %}
 {% set is_mine = msg.sender_id == current_user.id %}
+{#- Nombre y avatar: en grupos de los demás; en directos también los de MAX,
+    que si no se verían como escritos por el contacto. -#}
+{% set show_sender = not is_mine and (show_avatars or (msg.sender and msg.sender.is_bot)) %}
 {% set loc = msg.content | osm_location %}
 {% set sticker = msg.content | sticker_url %}
 {% set board = msg.content | whiteboard_link %}
@@ -18,7 +21,7 @@
      class="group flex {% if is_mine %}justify-end{% else %}items-end gap-2{% endif %} mb-2">
 
   {# ── Avatar (others, group only) ─────────────────────────────────────── #}
-  {% if show_avatars and not is_mine %}
+  {% if show_sender %}
   <div class="shrink-0 self-end mb-5">
     {% if msg.sender and msg.sender.avatar_key %}
     <img src="{{ avatar_url(msg.sender.avatar_key) }}"
@@ -35,7 +38,7 @@
   <div class="min-w-0 max-w-[85%] sm:max-w-xs lg:max-w-md xl:max-w-lg">
 
     {# Sender name — only in groups for others #}
-    {% if show_avatars and not is_mine and msg.sender %}
+    {% if show_sender and msg.sender %}
     <p class="text-xs text-gray-400 mb-1 ml-1">
       {{ msg.sender.name or msg.sender.email }}
     </p>
@@ -114,7 +117,7 @@
       {% else %}
         bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm
       {% endif %}
-      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify | mentionify(mention_names|default([]), mention_me|default('')) }}</div>
+      {% if msg.attachments %}rounded-b-sm{% endif %}">{{ msg.content | linkify | mentionify(mention_names|default([]), mention_me|default(''), mention_everyone|default(true)) }}</div>
     {% endif %}
 
     {# Attachments #}
