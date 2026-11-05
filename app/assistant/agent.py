@@ -205,7 +205,7 @@ def _question(db, source: Message) -> str:
 
 
 def _claims_missing_proposal(ctx: tools.ToolContext, text: str) -> bool:
-    if ctx.read_only or ctx.proposals or any(name.startswith("propose_") for name in ctx.errors):
+    if ctx.proposals or any(name.startswith("propose_") for name in ctx.errors):
         return False
     return bool(_CLAIMS_PROPOSAL.search(text or ""))
 

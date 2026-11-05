@@ -39,6 +39,7 @@ def ask(
             "question": question.strip(),
             "answer": result["answer"],
             "sources": result["sources"],
+            "proposals": result.get("proposals", []),
         },
     )
 

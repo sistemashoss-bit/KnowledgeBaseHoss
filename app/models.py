@@ -952,15 +952,16 @@ PROPOSAL_FAILED = "failed"
 
 
 class AssistantProposal(Base):
-    """Acción que MAX propone en un mensaje (crear tarea o seguimiento). No se
-    ejecuta hasta que quien lo invocó la confirma desde la tarjeta del mensaje;
-    entonces se crea con los permisos de esa persona. Se borra con el mensaje
-    (retención del chat)."""
+    """Acción que MAX propone (crear tarea o seguimiento). No se ejecuta hasta
+    que quien lo invocó la confirma desde la tarjeta; entonces se crea con los
+    permisos de esa persona. En el chat va con su mensaje y se borra con él
+    (retención del chat). Desde el widget no hay mensaje ni conversación
+    (`conversation_id` NULL): es privada de quien preguntó."""
     __tablename__ = "assistant_proposals"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=True, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     # Mensaje que invocó a MAX (origen que se guarda en Task.context al confirmar).
     source_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     invoker_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)

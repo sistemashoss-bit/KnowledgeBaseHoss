@@ -17,20 +17,25 @@ from app.tasks import service as task_service
 SOURCE_APP = "assistant"
 
 
-def save(db: Session, message: Message, source_message_id, invoker_id, proposals: list[dict]) -> list[AssistantProposal]:
-    """Guarda las propuestas de una respuesta. Las de seguimiento que apuntan a
-    una tarea propuesta en la misma respuesta (`task_ref`, índice en la lista)
-    se ligan por id de propuesta. Sin commit."""
+def save(db: Session, message: Message | None, source_message_id, invoker_id, proposals: list[dict],
+         *, source_text: str = "") -> list[AssistantProposal]:
+    """Guarda las propuestas de una respuesta (`message` None = widget; entonces
+    `source_text` es la pregunta, para `Task.context`). Las de seguimiento que
+    apuntan a una tarea propuesta en la misma respuesta (`task_ref`, índice en
+    la lista) se ligan por id de propuesta. Sin commit."""
     rows: list[AssistantProposal] = []
     for p in proposals:
+        payload = dict(p["payload"])
+        if message is None and source_text:
+            payload["source_text"] = source_text[:2000]
         rows.append(AssistantProposal(
             id=uuid.uuid4(),
-            message_id=message.id,
-            conversation_id=message.conversation_id,
+            message_id=message.id if message else None,
+            conversation_id=message.conversation_id if message else None,
             source_message_id=source_message_id,
             invoker_id=invoker_id,
             kind=p["kind"],
-            payload=dict(p["payload"]),
+            payload=payload,
             status=PROPOSAL_PENDING,
         ))
     for row in rows:
@@ -72,6 +77,8 @@ def _load_for_actor(db: Session, proposal_id: str, user: User, *, lock: bool = F
         raise HTTPException(404)
     if str(p.invoker_id) != str(user.id):
         raise HTTPException(403, "Solo quien invocó a MAX puede confirmar o descartar esta propuesta")
+    if p.conversation_id is None:
+        return p  # widget: privada, basta con ser quien preguntó
     in_chat = db.query(ConversationParticipant.user_id).filter(
         ConversationParticipant.conversation_id == p.conversation_id,
         ConversationParticipant.user_id == user.id,
@@ -82,6 +89,12 @@ def _load_for_actor(db: Session, proposal_id: str, user: User, *, lock: bool = F
 
 
 def _source_context(p: AssistantProposal, db: Session) -> dict:
+    if p.conversation_id is None:
+        return {
+            "source": "widget",
+            "message_text": p.payload.get("source_text"),
+            "proposal_id": str(p.id),
+        }
     source = db.query(Message).filter(Message.id == p.source_message_id).first() if p.source_message_id else None
     return {
         "source": "chat",

@@ -302,7 +302,8 @@
   <!-- ── Floating AI chat widget ─────────────────────────────────────────── -->
   <div data-menu-background x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
        @htmx:before-request="loading = true"
-       @htmx:after-swap="loading = false; msgs++; scrollBottom(); $refs.form.reset(); saveChat()"
+       @htmx:after-request="loading = false"
+       @htmx:after-swap="loading = false; if ($event.detail.target && $event.detail.target.id === 'widget-messages') { msgs++; scrollBottom(); $refs.form.reset(); } saveChat()"
        @click.outside="menu = false"
        @keydown.escape.window="menu = false"
        class="chat-widget fixed z-50 flex flex-col items-end gap-3">
@@ -475,7 +476,8 @@
               if (Date.now() - ts < 86400000 && html) {
                 this.$nextTick(() => {
                   const el = this.$refs.messages;
-                  if (el) { el.innerHTML = html; this.msgs = el.children.length; this.scrollBottom(); }
+                  // htmx.process: los botones de las tarjetas restauradas vuelven a funcionar.
+                  if (el) { el.innerHTML = html; if (window.htmx) htmx.process(el); this.msgs = el.children.length; this.scrollBottom(); }
                 });
               } else { localStorage.removeItem(key); }
             }

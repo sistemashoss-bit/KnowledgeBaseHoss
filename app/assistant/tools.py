@@ -48,8 +48,6 @@ class ToolContext:
     # Documentos que devolvieron las búsquedas (id → título): el widget los
     # muestra como fuentes.
     sources: dict = field(default_factory=dict)
-    # Widget: sin propose_* (no hay dónde mostrar la tarjeta).
-    read_only: bool = False
 
 
 def _fn(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
@@ -121,13 +119,17 @@ TOOL_DEFINITIONS = [
     ),
     _fn(
         "propose_task",
-        "Propone crear una tarea. NO la crea: aparece una tarjeta en el chat para que quien te invocó la "
+        "Propone crear una tarea. NO la crea: aparece una tarjeta para que quien te invocó la "
         "confirme. Úsala cuando te pidan crear una tarea o cuando en la conversación haya un pendiente "
         "claro que alguien debe hacer.",
         {
             "title": {"type": "string", "description": "Título corto y accionable"},
             "description": {"type": "string", "description": "Detalle (opcional)"},
-            "assignee_id": {"type": "string", "description": "id (o nombre) de un participante del chat (opcional)"},
+            "assignee_id": {
+                "type": "string",
+                "description": "id (o nombre) de la persona: en un chat, un participante; en privado, alguien "
+                               "a quien quien pregunta pueda asignar (opcional)",
+            },
             "due_date": {"type": "string", "description": "Fecha límite AAAA-MM-DD (opcional)"},
             "priority": {"type": "string", "enum": TASK_PRIORITIES},
         },
@@ -152,9 +154,6 @@ TOOL_DEFINITIONS = [
     ),
 ]
 
-
-# Las del widget: solo lectura.
-READ_TOOL_DEFINITIONS = [d for d in TOOL_DEFINITIONS if not d["function"]["name"].startswith("propose_")]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -349,20 +348,52 @@ def _norm(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) != "Mn")
 
 
-def _participant(ctx: ToolContext, ref) -> User | None:
-    """Participante por id o, si el modelo mandó un nombre, por nombre (exacto o
-    primer nombre) cuando no es ambiguo."""
+def _match_person(people: list[User], ref) -> tuple[User | None, list[User]]:
+    """(persona, candidatos): por id, o por nombre (completo, o primer nombre)
+    sin acentos ni mayúsculas. Si el nombre es ambiguo devuelve (None, candidatos)."""
     uid = _uuid(ref)
     if uid:
-        return next((u for u in ctx.scope.participants if u.id == uid), None)
+        return next((u for u in people if u.id == uid), None), []
     wanted = _norm(str(ref or ""))
     if not wanted:
-        return None
-    exact = [u for u in ctx.scope.participants if _norm(_user_label(u)) == wanted]
-    if len(exact) == 1:
-        return exact[0]
-    first = [u for u in ctx.scope.participants if _norm(_user_label(u)).split(" ")[0] == wanted]
-    return first[0] if len(first) == 1 else None
+        return None, []
+    for match in (
+        lambda u: _norm(_user_label(u)) == wanted,
+        lambda u: _norm(_user_label(u)).split(" ")[0] == wanted,
+        lambda u: wanted in _norm(_user_label(u)) or wanted == _norm(u.email).split("@")[0],
+    ):
+        found = [u for u in people if match(u)]
+        if len(found) == 1:
+            return found[0], []
+        if found:
+            return None, found
+    return None, []
+
+
+def _participant(ctx: ToolContext, ref) -> User | None:
+    """Participante del chat por id o nombre (si no es ambiguo)."""
+    return _match_person(ctx.scope.participants, ref)[0]
+
+
+def _resolve_assignee(ctx: ToolContext, ref) -> tuple[User | None, str | None]:
+    """(persona, error). En un chat: un participante. En privado (widget):
+    alguien a quien quien pregunta puede asignar, igual que en el formulario."""
+    if ctx.scope.conversation is not None:
+        user = _participant(ctx, ref)
+        if user is None:
+            return None, "La persona asignada debe ser alguien de este chat (usa su id de la lista de participantes)."
+        return user, None
+    people = task_service._assignable_users_query(ctx.scope.invoker, ctx.db).filter(User.is_bot.is_(False)).all()
+    user, candidates = _match_person(people, ref)
+    if user:
+        return user, None
+    if candidates:
+        names = "; ".join(f"{_user_label(u)} ({u.email})" for u in candidates[:5])
+        return None, f"Hay varias personas con ese nombre: {names}. Pregunta a cuál se refiere."
+    return None, (
+        "No encontré a esa persona entre a quienes puedes asignar tareas. Revisa el nombre; "
+        "si es de otra área, quizá no tengas permiso de asignarle."
+    )
 
 
 def propose_task(
@@ -374,9 +405,9 @@ def propose_task(
         return {"error": "Falta el título"}
     assignee = None
     if assignee_id:
-        assignee = _participant(ctx, assignee_id)
-        if assignee is None:
-            return {"error": "La persona asignada debe ser alguien de este chat (usa su id de la lista de participantes)."}
+        assignee, error = _resolve_assignee(ctx, assignee_id)
+        if error:
+            return {"error": error}
     due = None
     if due_date:
         try:
@@ -391,8 +422,9 @@ def propose_task(
     except HTTPException as exc:
         who = ctx.scope.invoker.name or "Quien te invocó"
         if assignee is not None:
+            where = "sí está en este chat, pero" if ctx.scope.conversation is not None else "existe, pero"
             return {"error": (
-                f"{_user_label(assignee)} sí está en este chat, pero {who} no tiene permiso de asignarle "
+                f"{_user_label(assignee)} {where} {who} no tiene permiso de asignarle "
                 f"tareas ({exc.detail})."
             )}
         return {"error": f"{who} no puede crear esa tarea: {exc.detail}"}
@@ -474,9 +506,6 @@ def run(ctx: ToolContext, name: str, arguments: str) -> str:
     fn = _IMPLEMENTATIONS.get(name)
     if fn is None:
         return json.dumps({"error": f"Tool desconocida: {name}"})
-    if ctx.read_only and name.startswith("propose_"):
-        ctx.errors.append(name)
-        return json.dumps({"error": "Aquí no puedo crear tareas ni seguimientos."}, ensure_ascii=False)
     try:
         args = json.loads(arguments or "{}")
         if not isinstance(args, dict):
