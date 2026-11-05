@@ -293,6 +293,8 @@ def can_manage_user(actor: "User", target: "User") -> bool:
 
     if str(actor.id) == str(target.id):
         return False  # nobody manages themselves here
+    if getattr(target, "is_bot", False):
+        return False  # MAX (usuario de sistema) no se edita ni se activa
     if actor.role == ROLE_SUPERADMIN:
         return True  # superadmin manages everyone
     if actor.role == ROLE_ADMIN:

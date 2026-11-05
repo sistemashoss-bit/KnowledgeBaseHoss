@@ -729,6 +729,8 @@
               <span class="font-medium text-gray-700">{{ p.user.name or p.user.email if p.user else "?" }}</span>
               {% if p.user and p.user.id|string == current_user.id|string %}
               <span class="text-gray-400">(tú)</span>
+              {% elif p.user and p.user.is_bot %}
+              <span class="text-gray-400">(asistente)</span>
               {% elif active_conv.created_by|string == current_user.id|string or current_user.role == 'superadmin' %}
               <form method="post" action="/messaging/{{ active_conv.id }}/members/remove" class="inline">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -1927,7 +1929,7 @@
         </div>
       </div>
 
-      {% if p.user and p.user.id|string != current_user.id|string
+      {% if p.user and p.user.id|string != current_user.id|string and not p.user.is_bot
             and (active_conv.created_by|string == current_user.id|string
             or current_user.role == 'superadmin') %}
 

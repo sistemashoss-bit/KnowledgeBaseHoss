@@ -381,20 +381,11 @@ def _rrf_merge(
     return [sources[cid] for cid in top_ids]
 
 
-def answer_question(
-    question: str,
-    access_filter: dict,
-    *,
-    role: str = "anon",
-    dept_id: str | None = None,
-    user_id: str | None = None,
-) -> dict:
-    from app import valkey_client as vk
-
-    cached = vk.get_cached_rag(question, role, dept_id, user_id)
-    if cached:
-        return {"answer": cached, "sources": []}
-
+def retrieve_chunks(question: str, access_filter: dict, top_k: int = 3) -> list[dict]:
+    """Fragmentos más relevantes para `question` dentro de `access_filter`:
+    BM25 + kNN (si hay embeddings), unidos con RRF y reordenados con Voyage.
+    Cada fragmento trae document_id, document_title, department_name y content.
+    Lo usan el Q&A (answer_question) y las tools del asistente MAX."""
     client = search_module.get_client()
 
     # ── BM25 search ──────────────────────────────────────────────────────────
@@ -450,7 +441,24 @@ def answer_question(
 
     # ── Merge with RRF → Voyage Rerank ───────────────────────────────────────
     rrf_chunks = _rrf_merge(bm25_hits, knn_hits, top_k=20)
-    top_chunks = rerank_chunks(question, rrf_chunks, top_k=3)
+    return rerank_chunks(question, rrf_chunks, top_k=top_k)
+
+
+def answer_question(
+    question: str,
+    access_filter: dict,
+    *,
+    role: str = "anon",
+    dept_id: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    from app import valkey_client as vk
+
+    cached = vk.get_cached_rag(question, role, dept_id, user_id)
+    if cached:
+        return {"answer": cached, "sources": []}
+
+    top_chunks = retrieve_chunks(question, access_filter, top_k=3)
 
     if not top_chunks:
         return {

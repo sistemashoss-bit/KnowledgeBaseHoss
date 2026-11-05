@@ -1,0 +1,111 @@
+# Plan: asistente en el chat de knowledge
+
+MAX, la misma mascota del widget, como un participante más del chat (`@MAX`). Cuando lo mencionan, responde en el mismo chat con el contexto de la conversación y puede proponer tareas o seguimientos.
+
+## Estado (2026-11-05)
+
+Fases 1 a 4 implementadas y probadas contra un Postgres local, con el LLM, Valkey y OpenSearch simulados:
+
+- **Fase 1:** `app/tasks/service.py` con los helpers de permisos, `create_task`, `create_follow_ups` y `task_view_condition`. Las rutas de tareas y seguimientos los usan. `rag.retrieve_chunks` está separado de `answer_question`.
+- **Fase 2:** migración `053` (usuario MAX inactivo con `is_bot`, agregado a todos los grupos, tabla `assistant_proposals`). La invocación se dispara en `_after_new_message`, en un hilo aparte. MAX no se puede quitar, no recibe avisos y no aparece en la gestión de usuarios. El avatar se resuelve con la key `asset:` en `storage.get_avatar_signed_url`.
+- **Fase 3:** `app/assistant/tools.py`, filtradas por lo que ven todos (`app/assistant/scope.py`).
+- **Fase 4:** las propuestas se guardan en la tabla `assistant_proposals` (no en Valkey), para que la tarjeta conserve su estado. Confirmar y descartar están en `/assistant/proposals/{id}/…`.
+- **Límites:** `app/assistant/limits.py`.
+
+Falta:
+- Probar con OpenRouter real: si `qwen3.7-flash` maneja bien las tools; si no, definir `ASSISTANT_MODEL`.
+- Correr la migración 053 en producción. Se aplica sola al desplegar.
+- Botón "Editar" en la tarjeta (hoy solo hay Confirmar y Descartar; se edita la tarea ya creada).
+- Opcionales sin hacer: indicador "MAX está escribiendo…" e invocación en chats directos.
+
+## Decisiones tomadas
+
+- **Sin MCP por ahora.** El chat es interno: tool calling directo en la llamada a OpenRouter. Las tools se escriben como funciones de Python reutilizables, así que se pueden envolver en un MCP después si hace falta.
+- **Sin modo privado.** El bot solo responde en el chat donde lo mencionan.
+- **Sin entity links ni ontología (owlready2) por ahora.** Las relaciones ya son llaves foráneas: tarea → proyecto, documento, depto y responsable; seguimiento → tarea. El único vínculo nuevo, "la tarea surgió de un mensaje", se guarda en `Task.context`.
+- **Las acciones no se ejecutan solas.** El bot propone y quien lo invocó confirma.
+
+## Reglas de permisos
+
+1. El bot actúa con los permisos de **quien lo invocó**, nunca con los suyos.
+2. La respuesta la leen todos, así que solo puede usar lo que **todos los participantes** pueden ver: el propio chat, documentos `public`/`employee` y tareas visibles para todos.
+3. Crear una tarea o un seguimiento pasa por las mismas validaciones que la web (`_can_edit_task`, `_can_manage_follow_ups`, `manager_scope`).
+4. Lo que escriben otros participantes es texto no confiable: nunca dispara una acción sin confirmación.
+
+## Fase 1: sacar la lógica a servicios
+
+- `app/tasks/service.py`: `search_tasks(user, ...)`, `create_task(user, ...)`, `search_follow_ups(user, ...)`, `create_follow_up(user, task, ...)`. Se extraen de `app/tasks/router.py` y las rutas pasan a llamarlas.
+- `app/rag.py`: separar `retrieve_chunks(query, access_filter, top_k)` (BM25 + kNN, unidos con RRF, rerank) de `answer_question`. El chat RAG actual sigue funcionando igual.
+- `app/messaging/service.py`: `search_messages(user, query, ...)` y `get_conversation(user, conv_id, limit)`, validando que sea participante.
+- Sin cambios de comportamiento: probar que la web funciona igual.
+
+## Fase 2: el usuario bot y la invocación
+
+- Usuario bot en `users` llamado **MAX**, el mismo nombre del widget, con la misma imagen (`app/assets/mascota.webp`). Se marca con `is_bot` o un rol nuevo (confirmar al implementar). No aparece en listados, no inicia sesión y no se le pueden asignar tareas.
+- Avatar: el bot se crea con `avatar_key = "asset:mascota.webp"`. En `storage.get_avatar_signed_url`, si la key empieza con `asset:`, se devuelve `/assets/mascota.webp` en vez de firmar contra Wasabi. Todos los avatares de usuario pasan por esa función (`templating._avatar_url`, `messaging._contact_avatars`, `calendar/router.py`), así que con ese cambio basta. El bot nunca inicia sesión por SSO, así que `provisioning` no le sobreescribe la key.
+- **MAX está en todos los grupos**, para que se pueda invocar desde cualquiera:
+  - se agrega como participante al crear un grupo (`create_group`);
+  - una migración lo agrega a los grupos existentes;
+  - no se puede quitar con `remove_member`.
+- Así `mentions.find` lo detecta sin cambios.
+- Ignorar los mensajes enviados por el propio bot para que no se invoque solo, porque sus respuestas mencionan a quien preguntó.
+- En `_after_new_message` (`app/messaging/router.py`): si el mensaje menciona al bot, se encola el trabajo en Valkey o en una tarea de fondo. El envío no espera al LLM.
+- Habilitar la mención del bot en chats directos (hoy las menciones solo funcionan en grupos), si se quiere.
+- Indicador "MAX está escribiendo…" por el canal de tiempo real (opcional).
+- La respuesta es un `Message` del bot con `reply_to_id` al mensaje que lo invocó y mencionando a quien preguntó, y pasa por `_after_new_message` normal.
+
+## Fase 3: tools de lectura
+
+| Tool | Devuelve |
+|---|---|
+| `get_context` | Se inyecta siempre, no lo pide el modelo: los últimos N mensajes, los participantes, el alcance del grupo (zona/sucursal/depto), quién invocó y su rol |
+| `search_documents` | Documentos por título/descripción, filtrados por lo que todos pueden ver |
+| `search_passages` | Fragmentos con su documento (`retrieve_chunks`) |
+| `search_task` | Tareas visibles (`visible_tasks_query`) con la intersección de participantes |
+| `search_followup` | Seguimientos de esas tareas |
+| `search_messages` | Mensajes de las conversaciones del que invocó que también ven todos. Solo cubre 30 días (retención) |
+| `get_conversation` | Otra conversación, con las mismas reglas |
+
+- Un loop de tool calling con un máximo de iteraciones y de tokens.
+- Revisar de nuevo los permisos con la BD antes de devolver cada resultado (el índice se actualiza en segundo plano).
+- Elegir el modelo: probar si `qwen3.7-flash` aguanta varias tools seguidas; si no, uno más capaz solo para el asistente (setting aparte en `config.py`).
+- Auditoría: `audit.log_search(..., search_type="assistant")` y registro de cada tool llamada.
+
+## Fase 4: acciones con confirmación
+
+- `create_task` y `create_followup` no escriben: devuelven una **propuesta** (título, responsable, fecha, prioridad, tarea padre en el caso del seguimiento).
+- El bot publica un mensaje con una tarjeta de **Confirmar / Editar / Descartar**. Solo quien lo invocó puede confirmar.
+- Al confirmar se llama al servicio de la fase 1 con el usuario que confirma:
+  - `source_app = "assistant"`
+  - `context = {"source": "chat", "conversation_id", "message_id", "message_text"}`
+- La propuesta pendiente se guarda en Valkey con TTL o en una tabla pequeña (confirmar al implementar), para que el botón tenga qué ejecutar.
+- Auditoría de la creación igual que en la web.
+
+## Límites de uso (Valkey)
+
+Se usa `vk.hit_rate_limit(key, limit, window)`, que ya existe en `app/valkey_client.py` y se usa en `issue_reports`. Los valores van como settings en `config.py` para ajustarlos sin desplegar código.
+
+Valores decididos (se pueden ajustar con los settings):
+
+| Límite | Key | Valor |
+|---|---|---|
+| Ráfaga por usuario | `max:user:{user_id}:min` | 5 por minuto |
+| Diario por usuario | `max:user:{user_id}:day` | 50 por día (ventana de 24 h) |
+| Por grupo | `max:conv:{conv_id}:hour` | 30 por hora |
+| Una invocación a la vez por chat | `max:busy:{conv_id}` | lock `SET NX` con TTL de 60 s; se libera al responder |
+| Por invocación | — | máximo 6 llamadas a tools y tope de tokens de salida |
+
+- Se revisan en orden: lock del chat → ráfaga → diario → grupo. Si algo bloquea, no se llama al LLM.
+- Al pasarse del límite, MAX responde una sola vez, por ejemplo "Llegaste al límite de consultas, intenta en un rato". Para no repetir el aviso, se usa una key `max:warned:{user_id}` con el TTL del límite.
+- Si Valkey no está disponible, `hit_rate_limit` no limita. Lo dejaría así; el tope de tool calls por invocación sigue aplicando.
+- Ajustar los valores después de una o dos semanas con lo registrado en auditoría.
+
+## Pendientes por decidir
+
+- Ninguno por ahora. Nombre, avatar y presencia en grupos ya están decididos. No se avisa a los participantes.
+
+## Para después
+
+- MCP sobre las mismas funciones (Claude Desktop, extensión), con autenticación por token.
+- Detección proactiva de tareas en mensajes, como opción por grupo.
+- Relaciones genéricas u ontología, solo si aparecen relaciones que no caben en una columna (documento → documento, conceptos que no son tablas).

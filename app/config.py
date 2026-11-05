@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     openrouter_api_key: str
     openrouter_model: str = "qwen/qwen3.7-flash"
 
+    # Asistente MAX en el chat (app/assistant). Vacío = usa openrouter_model;
+    # necesita un modelo con tool calling.
+    assistant_model: str = ""
+    assistant_max_tool_calls: int = 6
+    assistant_max_tokens: int = 1200
+    assistant_context_messages: int = 30
+    # Límites de uso (Valkey): invocaciones por usuario y por grupo.
+    assistant_user_per_minute: int = 5
+    assistant_user_per_day: int = 50
+    assistant_conv_per_hour: int = 30
+    # Una invocación a la vez por chat; el lock se suelta al responder.
+    assistant_busy_ttl_seconds: int = 60
+
     # Widget de reportes: Jev (TypeSafe) vía OpenRouter, con la misma API key,
     # clasifica departamento y severidad. Versión fijada (no el alias -latest)
     # para que los umbrales no cambien solos con un release nuevo.

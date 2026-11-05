@@ -155,6 +155,61 @@
     </div>
     {% endif %}
 
+    {#- Propuestas de MAX (crear tarea / seguimiento): solo quien lo invocó las
+        confirma o descarta; al resto se le muestra el estado. -#}
+    {% set props = assistant_proposals.get(msg.id|string, []) if assistant_proposals is defined else [] %}
+    {% if props and not msg.deleted_at %}
+    <div class="flex flex-col gap-1.5 mt-1.5">
+      {% for p in props %}
+      {% set d = p.payload %}
+      <div class="w-72 max-w-full rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 text-xs text-gray-700">
+        <p class="text-[11px] font-medium text-blue-600 mb-0.5">
+          {{ 'Nueva tarea' if p.kind == 'task' else 'Nuevo seguimiento' }}
+        </p>
+        {% if p.kind == 'task' %}
+        <p class="font-semibold text-sm text-gray-800 [overflow-wrap:anywhere]">{{ d.title }}</p>
+        {% if d.description %}<p class="mt-0.5 text-gray-500 line-clamp-3 [overflow-wrap:anywhere]">{{ d.description }}</p>{% endif %}
+        <p class="mt-1 text-gray-500">
+          {{ d.assignee_name or 'Sin persona asignada' }}
+          {% if d.due_date %} · vence {{ d.due_date[8:10] }}/{{ d.due_date[5:7] }}/{{ d.due_date[0:4] }}{% endif %}
+          · prioridad {{ {'low': 'baja', 'medium': 'media', 'high': 'alta', 'urgent': 'urgente'}.get(d.priority, d.priority) }}
+        </p>
+        {% else %}
+        <p class="font-semibold text-sm text-gray-800 [overflow-wrap:anywhere]">{{ d.task_title }}</p>
+        <p class="mt-1 text-gray-500">
+          {{ d.day[8:10] }}/{{ d.day[5:7] }}/{{ d.day[0:4] }} · {{ d.start }}–{{ d.end }}
+        </p>
+        {% if d.note %}<p class="mt-0.5 text-gray-500 [overflow-wrap:anywhere]">{{ d.note }}</p>{% endif %}
+        {% endif %}
+
+        {% if p.status == 'pending' %}
+          {% if p.invoker_id|string == current_user.id|string %}
+          <div class="flex gap-2 mt-2">
+            <button type="button" hx-post="/assistant/proposals/{{ p.id }}/confirm"
+                    hx-target="closest [data-msg-id]" hx-swap="outerHTML"
+                    class="px-3 py-1 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors">Confirmar</button>
+            <button type="button" hx-post="/assistant/proposals/{{ p.id }}/discard"
+                    hx-target="closest [data-msg-id]" hx-swap="outerHTML"
+                    class="px-3 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">Descartar</button>
+          </div>
+          {% else %}
+          <p class="mt-1.5 text-gray-400 italic">Esperando que {{ p.invoker.name or p.invoker.email if p.invoker else 'quien preguntó' }} la confirme</p>
+          {% endif %}
+        {% elif p.status == 'confirmed' %}
+          <p class="mt-1.5 text-green-700 font-medium">
+            ✓ {{ 'Tarea creada' if p.kind == 'task' else 'Seguimiento programado' }}
+            {% if p.task_id %}· <a href="/tasks/{{ p.task_id }}" class="underline hover:text-green-800">ver tarea</a>{% endif %}
+          </p>
+        {% elif p.status == 'discarded' %}
+          <p class="mt-1.5 text-gray-400">Descartada</p>
+        {% else %}
+          <p class="mt-1.5 text-red-600">No se pudo: {{ p.error or 'error desconocido' }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     {# Reacciones (bloque propio: se refresca solo, sin re-renderizar el feed) #}
     {% if not msg.deleted_at %}
     {% with rx_id=msg.id, rx_list=reactions.get(msg.id, []) if reactions is defined else [],

@@ -18,6 +18,7 @@
         <option value="">Todos los tipos</option>
         <option value="document" {{ 'selected' if selected_type == 'document' }}>Documentos</option>
         <option value="rag" {{ 'selected' if selected_type == 'rag' }}>Preguntas (RAG)</option>
+        <option value="assistant" {{ 'selected' if selected_type == 'assistant' }}>MAX en el chat</option>
       </select>
       {% if selected_type %}
       <a href="/logs/searches" class="text-xs text-gray-500 hover:text-gray-700">Limpiar filtro</a>
@@ -48,7 +49,7 @@
             <td class="px-4 py-3">
               <span class="px-2 py-0.5 rounded-full text-xs font-medium
                 {{ 'bg-blue-100 text-blue-700' if log.search_type == 'rag' else 'bg-blue-100 text-blue-700' }}">
-                {{ 'Pregunta' if log.search_type == 'rag' else 'Búsqueda' }}
+                {{ 'Pregunta' if log.search_type == 'rag' else ('MAX' if log.search_type == 'assistant' else 'Búsqueda') }}
               </span>
             </td>
             <td class="px-4 py-3 text-gray-900">{{ log.query[:120] }}</td>

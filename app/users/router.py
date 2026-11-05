@@ -63,7 +63,7 @@ class UserOut(BaseModel):
 
 @api_router.get("/", response_model=list[UserOut])
 def list_users_api(db: Session = Depends(get_db), _=Depends(require_role(ROLE_SUPERADMIN))):
-    return db.query(User).order_by(User.email).all()
+    return db.query(User).filter(User.is_bot.is_(False)).order_by(User.email).all()
 
 
 @api_router.post("/", response_model=UserOut, status_code=201)
@@ -92,7 +92,7 @@ def create_user_api(
 
 @api_router.get("/{user_id}", response_model=UserOut)
 def get_user_api(user_id: str, db: Session = Depends(get_db), _=Depends(require_role(ROLE_SUPERADMIN))):
-    u = db.query(User).filter(User.id == user_id).first()
+    u = db.query(User).filter(User.id == user_id, User.is_bot.is_(False)).first()
     if not u:
         raise HTTPException(404)
     return u
@@ -105,7 +105,7 @@ def update_user_api(
     db: Session = Depends(get_db),
     _=Depends(require_role(ROLE_SUPERADMIN)),
 ):
-    u = db.query(User).filter(User.id == user_id).first()
+    u = db.query(User).filter(User.id == user_id, User.is_bot.is_(False)).first()
     if not u:
         raise HTTPException(404)
     if org_managed_by_hoss() and (data.role is not None or data.department_id is not None):
@@ -127,7 +127,7 @@ def update_user_api(
 
 @api_router.delete("/{user_id}", status_code=204)
 def delete_user_api(user_id: str, db: Session = Depends(get_db), _=Depends(require_role(ROLE_SUPERADMIN))):
-    u = db.query(User).filter(User.id == user_id).first()
+    u = db.query(User).filter(User.id == user_id, User.is_bot.is_(False)).first()
     if not u:
         raise HTTPException(404)
     db.delete(u)
@@ -159,7 +159,7 @@ def user_management(
     # gente de sus sucursales.
     scoped_branch_ids = managed_branch_ids(actor)
     if actor.role == ROLE_SUPERADMIN:
-        q = db.query(User)
+        q = db.query(User).filter(User.is_bot.is_(False))
         role_options = ROLES
     else:
         q = db.query(User).filter(

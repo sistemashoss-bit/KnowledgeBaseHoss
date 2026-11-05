@@ -121,6 +121,48 @@ def set_json(key: str, value, ttl: int) -> None:
         pass
 
 
+# ── Lock con TTL ──────────────────────────────────────────────────────────────
+
+def acquire_lock(key: str, ttl: int) -> bool:
+    """True si tomó el lock (SET NX con TTL). Sin Valkey devuelve True: no hay
+    con qué coordinar y bloquear dejaría la función sin servicio."""
+    r = _get()
+    if r is None:
+        return True
+    try:
+        return bool(r.set(key, "1", ex=ttl, nx=True))
+    except Exception:
+        return True
+
+
+def release_lock(key: str) -> None:
+    r = _get()
+    if r is None:
+        return
+    try:
+        r.delete(key)
+    except Exception:
+        pass
+
+
+def set_flag(key: str, ttl: int) -> bool:
+    """Marca `key` por `ttl` segundos; True solo si no estaba marcada (para
+    avisar algo una sola vez por ventana). Sin Valkey, True."""
+    return acquire_lock(key, ttl)
+
+
+def ttl(key: str) -> int:
+    """Segundos que le quedan a `key` (0 si no existe o sin Valkey)."""
+    r = _get()
+    if r is None:
+        return 0
+    try:
+        value = r.ttl(key)
+        return max(int(value), 0)
+    except Exception:
+        return 0
+
+
 # ── Once-daily lock ───────────────────────────────────────────────────────────
 
 def try_acquire_daily_lock(key: str) -> bool:

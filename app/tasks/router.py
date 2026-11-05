@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -17,11 +17,11 @@ from app import images
 from app.documents.router import _preview_meta
 from app.messaging import realtime, stickers
 from app.permissions import (
-    build_access_filter, can_access_document, granted_department_ids, has_oversight, is_manager,
+    build_access_filter, granted_department_ids, has_oversight, is_manager,
     branch_user_ids as _branch_user_ids, manager_scope as _manager_scope, scope_user_condition,
 )
 from app.models import (
-    Branch, Department, Document, Project, RecurringTask, RecurringTaskShare, Task, TaskComment, TaskCommentReaction,
+    Branch, Department, Project, RecurringTask, RecurringTaskShare, Task, TaskComment, TaskCommentReaction,
     TaskEvidence, TaskFollowUp,
     TaskShare, TaskStatusHistory, TaskTag, TaskTagAssignment, User,
     CALENDAR_REMINDER_OPTIONS,
@@ -29,9 +29,15 @@ from app.models import (
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_TAG_COLORS,
     RECURRENCE_FREQUENCIES,
 )
-from app.calendar.reminders import compute_remind_at, to_local, to_utc
+from app.calendar.reminders import to_local
 from app.tasks.business_hours import business_hours_label, business_seconds
-from app.tasks.recurring import local_now, matches_recurrence, parse_recurrence
+from app.tasks.recurring import local_now, parse_recurrence
+from app.tasks import service as task_service
+from app.tasks.service import (  # noqa: F401  (helpers compartidos con el asistente)
+    FOLLOW_UP_MAX_REPEATS, _assignable_users_query, _can_edit_task, _can_manage_follow_ups, _can_view_task,
+    _effective_department_id, _follow_up_days, _is_shared_with, _parse_follow_up, _schedule_follow_up,
+    _tasks_query, _validate_target_scope, _validated_document_id,
+)
 from app.templating import templates
 
 
@@ -43,56 +49,6 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 # ── Visibility helpers ────────────────────────────────────────────────────────
-
-def _tasks_query(user: User, db: Session, include_archived: bool = True, *, audit: bool = False):
-    """Tareas visibles para el usuario. `audit=True` solo en vistas de lectura:
-    ahí el auditor ve las de todos los departamentos; para participar
-    (comentar, subir evidencias) conserva el alcance normal de empleado."""
-    q = db.query(Task).options(
-        joinedload(Task.assignee),
-        joinedload(Task.created_by_user),
-        joinedload(Task.department),
-        joinedload(Task.project),
-        joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
-    )
-    if user.role != ROLE_SUPERADMIN and not (audit and user.role == ROLE_AUDITOR):
-        conditions = [
-            Task.created_by == user.id,
-            Task.assigned_to == user.id,
-        ]
-        if user.department_id:
-            conditions.append(Task.department_id == user.department_id)
-        granted = granted_department_ids(user)
-        if granted:
-            conditions.append(Task.department_id.in_(granted))
-        q = q.filter(or_(*conditions))
-    if not include_archived:
-        q = q.filter(Task.archived_at.is_(None))
-    return q
-
-
-def _effective_department_id(department_id, assigned_to, db: Session):
-    """Departamento con el que queda una tarea. Si no se eligió uno pero hay
-    asignado (p.ej. autoasignación), hereda el del asignado: sin esto la tarea
-    queda con department_id NULL y el admin del área no la ve ni la gestiona."""
-    if department_id:
-        return department_id
-    if assigned_to:
-        return db.query(User.department_id).filter(User.id == assigned_to).scalar()
-    return None
-
-
-def _can_edit_task(user: User, task: Task, db: Session) -> bool:
-    if user.role == ROLE_SUPERADMIN:
-        return True
-    if str(task.created_by) == str(user.id):
-        return True
-    scope = _manager_scope(user, db)
-    if task.department_id and task.department_id in scope["dept_ids"]:
-        return True
-    if task.assigned_to and task.assigned_to in _branch_user_ids(scope, db):
-        return True
-    return False
 
 
 def _can_update_status(user: User, task: Task, db: Session) -> bool:
@@ -109,18 +65,6 @@ def _can_approve_task(user: User, task: Task) -> bool:
     return str(task.created_by) == str(user.id)
 
 
-def _is_shared_with(user: User, task_id, db: Session) -> bool:
-    return db.query(TaskShare).filter(TaskShare.task_id == task_id, TaskShare.user_id == user.id).first() is not None
-
-
-def _can_view_task(user: User, task_id, db: Session) -> bool:
-    """La ve por su alcance (incluye la lectura de auditor) o porque se la compartieron."""
-    return (
-        _tasks_query(user, db, audit=True).filter(Task.id == task_id).first() is not None
-        or _is_shared_with(user, task_id, db)
-    )
-
-
 def _can_comment(user: User, task_id, db: Session) -> bool:
     """Comenta quien participa por su alcance o a quien se la compartieron (el
     auditor fuera de su alcance solo lee)."""
@@ -132,11 +76,6 @@ def _can_comment(user: User, task_id, db: Session) -> bool:
 
 def _can_share(user: User, task: Task, db: Session) -> bool:
     """Comparte quien puede editarla y el asignado; a quien se la compartieron, no."""
-    return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
-
-
-def _can_manage_follow_ups(user: User, task: Task, db: Session) -> bool:
-    """Programa y cierra seguimientos quien edita la tarea y su asignado."""
     return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
 
 
@@ -231,16 +170,6 @@ def _accessible_documents(user: User) -> list[dict]:
         return rag.search_documents("", build_access_filter(user), size=500)
     except Exception:
         return []
-
-
-def _validated_document_id(document_id: str, user: User, db: Session) -> str | None:
-    """Devuelve el id si el documento existe y el usuario puede accederlo; si no, None."""
-    if not document_id:
-        return None
-    doc = db.query(Document).filter(Document.id == document_id).first()
-    if not doc or not can_access_document(user, doc):
-        return None
-    return document_id
 
 
 # ── Tag helpers ────────────────────────────────────────────────────────────────
@@ -482,33 +411,19 @@ def create_task(
     if not current_user:
         raise HTTPException(401)
     storage.check_upload_sizes(*evidences)
-    _validate_target_scope(current_user, db, department_id, assigned_to, required=False)
 
-    task = Task(
-        id=uuid.uuid4(),
-        title=title.strip(),
-        description=description.strip() or None,
-        priority=priority if priority in TASK_PRIORITIES else "medium",
-        status=status if status in TASK_STATUSES else "pending",
-        department_id=_effective_department_id(department_id, assigned_to, db),
-        assigned_to=assigned_to if assigned_to else None,
-        project_id=project_id if project_id else None,
-        document_id=_validated_document_id(document_id, current_user, db),
-        created_by=current_user.id,
+    task = task_service.create_task(
+        db, current_user,
+        title=title,
+        description=description,
+        priority=priority,
+        status=status,
+        department_id=department_id,
+        assigned_to=assigned_to,
+        project_id=project_id,
+        document_id=document_id,
         due_date=date.fromisoformat(due_date) if due_date else None,
     )
-    db.add(task)
-    db.flush()
-    if task.status == TASK_DONE:
-        task.completed_at = task.created_at
-    db.add(TaskStatusHistory(
-        id=uuid.uuid4(),
-        task_id=task.id,
-        from_status=None,
-        to_status=task.status,
-        changed_by=current_user.id,
-        changed_at=task.created_at,
-    ))
     for tid in _validated_tag_ids(tag_ids, task.department_id, db):
         db.add(TaskTagAssignment(task_id=task.id, tag_id=tid))
     shared_ids = _add_shares(task, shared_with, current_user, db)
@@ -533,17 +448,8 @@ def create_task(
         ))
 
     db.commit()
-    if task.assigned_to and str(task.assigned_to) != str(current_user.id):
-        actor = current_user.name or current_user.email
-        realtime.notify_user(
-            task.assigned_to,
-            title=f"{actor} te asignó una tarea",
-            body=task.title,
-            url=f"/tasks/{task.id}",
-            kind="task_assigned",
-        )
+    task_service.notify_task_created(task, current_user)
     _notify_shared(task, shared_ids, current_user)
-    realtime.notify_tasks()
     audit.log_action(
         "task_create", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
@@ -1406,71 +1312,6 @@ def _follow_up_view(f: TaskFollowUp) -> dict:
     }
 
 
-# Tope de fechas que genera un seguimiento con "Repetir" (diario por ~2 meses).
-FOLLOW_UP_MAX_REPEATS = 60
-
-
-def _follow_up_days(
-    task: Task, first: date, frequency: str, day_of_week: str, day_of_month: str,
-    days_of_week: list[str], repeat_until: str,
-) -> list[date]:
-    """Días de un seguimiento repetido: los que coinciden con la frecuencia
-    (mismos criterios que las tareas recurrentes) desde `first` hasta
-    `repeat_until`, que por defecto es la fecha límite de la tarea."""
-    freq, dow, dom, custom_days = parse_recurrence(frequency, day_of_week, day_of_month, days_of_week)
-    try:
-        until = date.fromisoformat(repeat_until) if repeat_until else task.due_date
-    except ValueError:
-        raise HTTPException(422, "Fecha de fin de la repetición inválida")
-    if until is None:
-        raise HTTPException(422, "Indica hasta cuándo se repite (la tarea no tiene fecha límite)")
-    if task.due_date and until > task.due_date:
-        raise HTTPException(422, "La repetición debe terminar antes o el día de la fecha límite")
-    if until < first:
-        raise HTTPException(422, "La repetición debe terminar después del primer día")
-    days = []
-    d = first
-    while d <= until:
-        if matches_recurrence(freq, dow, dom, custom_days, d):
-            days.append(d)
-            if len(days) > FOLLOW_UP_MAX_REPEATS:
-                raise HTTPException(422, f"La repetición genera más de {FOLLOW_UP_MAX_REPEATS} seguimientos; acorta el periodo")
-        d += timedelta(days=1)
-    if not days:
-        raise HTTPException(422, "Ningún día del periodo coincide con la repetición")
-    return days
-
-
-def _parse_follow_up(task: Task, day: str, start: str, end: str, reminder_minutes: str, existing=None):
-    """Valida un seguimiento (hora local) y devuelve (start_utc, end_utc, reminder).
-
-    El día debe caer entre hoy y la fecha límite de la tarea; al editar se
-    permite conservar un día que ya pasó."""
-    try:
-        d = date.fromisoformat(day)
-        start_local = datetime.combine(d, datetime.strptime(start, "%H:%M").time())
-        end_local = datetime.combine(d, datetime.strptime(end, "%H:%M").time())
-    except ValueError:
-        raise HTTPException(422, "Fecha u hora inválida")
-    if end_local <= start_local:
-        raise HTTPException(422, "La hora de fin debe ser posterior a la de inicio")
-    if task.due_date and d > task.due_date:
-        raise HTTPException(422, "El seguimiento debe ser antes o el día de la fecha límite")
-    keeps_day = existing is not None and to_local(existing.start_at).date() == d
-    if d < local_now().date() and not keeps_day:
-        raise HTTPException(422, "El seguimiento no puede ser en un día que ya pasó")
-    if reminder_minutes in ("", None):
-        reminder = None
-    else:
-        try:
-            reminder = int(reminder_minutes)
-        except ValueError:
-            raise HTTPException(422, "Recordatorio inválido")
-        if reminder not in CALENDAR_REMINDER_OPTIONS:
-            raise HTTPException(422, "Recordatorio inválido")
-    return to_utc(start_local), to_utc(end_local), reminder
-
-
 def _follow_up_task(task_id: str, user: User, db: Session) -> Task:
     try:
         uuid.UUID(task_id)
@@ -1495,13 +1336,6 @@ def _task_follow_up(task: Task, follow_up_id: str, db: Session) -> TaskFollowUp:
     return f
 
 
-def _schedule_follow_up(f: TaskFollowUp, start_at: datetime, end_at: datetime, reminder: int | None) -> None:
-    if (f.start_at, f.reminder_minutes) != (start_at, reminder):
-        f.remind_at = compute_remind_at(start_at, False, reminder)
-        f.reminded_at = None
-    f.start_at, f.end_at, f.reminder_minutes = start_at, end_at, reminder
-
-
 @router.post("/{task_id}/follow-ups")
 def add_follow_up(
     task_id: str,
@@ -1523,38 +1357,16 @@ def add_follow_up(
     if not current_user:
         raise HTTPException(401)
     task = _follow_up_task(task_id, current_user, db)
-    if task.status == TASK_DONE or task.archived_at:
-        raise HTTPException(422, "La tarea ya está terminada")
-    start_at, end_at, reminder = _parse_follow_up(task, day, start, end, reminder_minutes)
-
-    first = date.fromisoformat(day)
-    if repeat == "true":
-        days = _follow_up_days(task, first, frequency, day_of_week, day_of_month, days_of_week, repeat_until)
-        series_id = uuid.uuid4()
-    else:
-        days, series_id = [first], None
-    note = note.strip()[:500] or None
-    for d in days:
-        # Zona fija (local_utc_offset_hours): basta con desplazar los días.
-        shift = timedelta(days=(d - first).days)
-        f = TaskFollowUp(task_id=task.id, note=note, series_id=series_id, created_by=current_user.id)
-        _schedule_follow_up(f, start_at + shift, end_at + shift, reminder)
-        db.add(f)
+    result = task_service.create_follow_ups(
+        db, current_user, task,
+        day=day, start=start, end=end, reminder_minutes=reminder_minutes, note=note,
+        repeat=repeat == "true", frequency=frequency, day_of_week=day_of_week,
+        day_of_month=day_of_month, days_of_week=days_of_week, repeat_until=repeat_until,
+    )
     db.commit()
+    task_service.notify_follow_ups_created(task, current_user, result)
 
-    when = f"{to_local(start_at):%d/%m %H:%M}"
-    if len(days) > 1:
-        when = f"{len(days)} seguimientos desde el {when}"
-    # Avisa al asignado si el seguimiento lo programó alguien más.
-    if task.assigned_to and task.assigned_to != current_user.id:
-        realtime.notify_user(
-            task.assigned_to,
-            title=f"{current_user.name or current_user.email} programó un seguimiento",
-            body=f"{task.title} · {when}",
-            url=f"/tasks/{task.id}",
-            kind="task_follow_up",
-        )
-    realtime.notify_task(task.id)
+    start_at, end_at, days, series_id = result["start_at"], result["end_at"], result["days"], result["series_id"]
     audit.log_action(
         "task_follow_up_add", user=current_user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
@@ -1894,61 +1706,6 @@ def _set_recurring_shares(rt: RecurringTask, user_ids: list[str], db: Session) -
             rt.shares.remove(share)
     for uid in valid - set(current):
         rt.shares.append(RecurringTaskShare(user_id=uid))
-
-
-def _assignable_users_query(user: User, db: Session):
-    """Usuarios activos a los que se puede asignar una tarea puntual (persona a persona).
-
-    superadmin → cualquiera. encargado → él mismo y las personas de su alcance
-    (manager_scope: su departamento —en Comercial, la gente de sus sucursales—
-    y los departamentos con acceso `manage`). employee → sólo él mismo
-    (autoasignación)."""
-    q = db.query(User).filter(User.is_active == True)
-    if user.role == ROLE_SUPERADMIN:
-        return q.order_by(User.email)
-    if is_manager(user):
-        in_scope = scope_user_condition(_manager_scope(user, db))
-        if in_scope is None:
-            return q.filter(User.id == user.id)
-        return q.filter(or_(User.id == user.id, in_scope)).order_by(User.email)
-    return q.filter(User.id == user.id)
-
-
-def _validate_target_scope(
-    user: User, db: Session, department_id: str, assigned_to: str, *, required: bool = True,
-) -> None:
-    """Valida a quién puede dirigir un encargado (o un empleado) una tarea/plantilla.
-
-    - superadmin: sin restricción.
-    - encargado (admin, o con acceso `manage`): puede difundir a cualquier
-      departamento (`department_id`) sin restricción — es una bandeja compartida
-      global, sin elegir persona. Si además señala a alguien puntual
-      (`assigned_to`), debe caer dentro de su alcance de gestión — ver
-      `_assignable_users_query`.
-    - employee: no puede difundir a un departamento ni asignar a otra persona;
-      sólo puede autoasignarse (o dejarla sin persona puntual).
-
-    `required`: True exige que venga department_id o assigned_to (plantillas
-    recurrentes, que no tienen sentido sin destinatario); False lo permite
-    vacío (tarea suelta personal, sin depto ni asignado).
-    """
-    if user.role == ROLE_SUPERADMIN:
-        return
-    if required and not department_id and not assigned_to:
-        raise HTTPException(400, "Elige un departamento o una persona")
-
-    if is_manager(user):
-        if assigned_to:
-            allowed_users = {str(u.id) for u in _assignable_users_query(user, db).all()}
-            if assigned_to not in allowed_users:
-                raise HTTPException(403, "Solo puedes asignar a alguien dentro de tu alcance")
-        return
-
-    # employee (o cualquier rol no-encargado): sólo autoasignación
-    if department_id:
-        raise HTTPException(403, "No puedes asignar tareas a un departamento")
-    if assigned_to and assigned_to != str(user.id):
-        raise HTTPException(403, "Solo puedes asignarte tareas a ti mismo")
 
 
 @recurring_router.get("/", response_class=HTMLResponse)

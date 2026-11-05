@@ -19,11 +19,13 @@ from app.database import get_db, SessionLocal
 from app import audit, mentions, notification_bus, reactions, storage, valkey_client as vk
 from app import images
 from app.messaging import realtime, stickers
+from app.assistant import bot as assistant_bot
+from app.assistant import proposals as assistant_proposals
 from app.permissions import branch_user_ids, manager_scope
 from app.models import (
     Conversation, ConversationParticipant, Department,
     Message, MessageAttachment, MessageReaction, User, Whiteboard, WhiteboardShare,
-    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP,
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_AUDITOR, CONV_DIRECT, CONV_GROUP, ASSISTANT_BOT_ID,
 )
 from app.templating import _msg_preview, _osm_location, templates, whiteboard_message
 
@@ -378,8 +380,10 @@ def _feed_context(
     names = []
     if is_group and any("@" in (m.content or "") for m in messages):
         names = [mentions.display_name(u) for u in (members if members is not None else _group_members(conv_id, db))]
+    bot_msg_ids = [m.id for m in messages if assistant_bot.is_bot_id(m.sender_id)]
     return {
         "messages": messages,
+        "assistant_proposals": assistant_proposals.for_messages(db, bot_msg_ids),
         "current_user": current_user,
         "is_group": is_group,
         "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
@@ -1027,6 +1031,8 @@ def _other_participant_ids(conv_id: str, exclude_user_id, db: Session) -> list:
         .filter(
             ConversationParticipant.conversation_id == conv_id,
             ConversationParticipant.user_id != exclude_user_id,
+            # MAX no recibe avisos ni badges (no tiene sesión).
+            ConversationParticipant.user_id != ASSISTANT_BOT_ID,
         )
         .all()
     )
@@ -1116,8 +1122,17 @@ def _after_new_message(conv_id, msg_id, sender: User, db: Session, preview: str,
     # Menciones (solo grupos): a quien se mencionó le llega una notificación
     # `chat_mention` en vez del simple refresco del badge.
     mentioned: set = set()
+    invoke_assistant = False
     if conv.type == CONV_GROUP and "@" in mention_text:
-        others = [u for u in _group_members(conv_id, db) if u.id != sender.id]
+        members = [u for u in _group_members(conv_id, db) if u.id != sender.id]
+        # MAX no recibe notificaciones: se le "avisa" invocándolo (solo con @MAX,
+        # no con @todos, y nunca a partir de sus propios mensajes).
+        others = [u for u in members if not assistant_bot.is_bot(u)]
+        invoke_assistant = (
+            not assistant_bot.is_bot(sender)
+            and any(assistant_bot.is_bot(u) for u in members)
+            and assistant_bot.mentioned_in(mention_text)
+        )
         mentioned, everyone = mentions.find(mention_text, others)
         group = conv.name or "Grupo sin nombre"
         actor = mentions.display_name(sender)
@@ -1134,6 +1149,10 @@ def _after_new_message(conv_id, msg_id, sender: User, db: Session, preview: str,
     for uid in recipient_ids:
         if uid not in mentioned:
             realtime.notify_user(uid)
+
+    if invoke_assistant:
+        from app.assistant import agent as assistant_agent
+        assistant_agent.dispatch(conv_id, msg_id, sender.id)
 
 
 @router.post("/{conv_id}/send", response_class=HTMLResponse)
@@ -1420,6 +1439,8 @@ def create_group(
         all_ids &= allowed_ids
     for uid in all_ids:
         db.add(ConversationParticipant(conversation_id=conv.id, user_id=uid))
+    # MAX está en todos los grupos para que se le pueda invocar con @MAX.
+    assistant_bot.add_to_conversation(conv.id, db)
 
     db.commit()
     audit.log_action(
@@ -1552,6 +1573,8 @@ def remove_member(
     removing_self = user_id == str(current_user.id)
     if not (is_creator or is_superadmin or removing_self):
         raise HTTPException(403)
+    if assistant_bot.is_bot_id(user_id):
+        raise HTTPException(403, "MAX está en todos los grupos y no se puede quitar")
 
     removed_user = db.query(User).filter(User.id == user_id).first()
     participant = db.query(ConversationParticipant).filter(

@@ -76,6 +76,12 @@ CONV_DIRECT = "direct"
 CONV_GROUP = "group"
 CONV_TYPES = [CONV_DIRECT, CONV_GROUP]
 
+# ── Asistente MAX ─────────────────────────────────────────────────────────────
+# Usuario bot que crea la migración 053 (mismo id allá). Participa en todos los
+# grupos y responde cuando lo mencionan (app/assistant).
+ASSISTANT_BOT_ID = uuid.UUID("00000000-0000-4000-8000-00000000a1a1")
+ASSISTANT_BOT_NAME = "MAX"
+
 # ── Reactions (mensajes y comentarios) ────────────────────────────────────────
 # Lista fija: valida el input y evita cargar un selector completo de emojis.
 REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "✅"]
@@ -216,6 +222,10 @@ class User(Base):
     # departamento `branch_scoped` gestiona el departamento completo.
     all_branches = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, default=True)
+    # Usuario de sistema (MAX, el asistente del chat). Se crea inactivo para que
+    # no aparezca en selectores (filtran is_active) ni pueda iniciar sesión; los
+    # listados que no filtran por is_active lo excluyen con este campo.
+    is_bot = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -927,6 +937,43 @@ class MessageAttachment(Base):
 
     message = relationship("Message", back_populates="attachments")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+# ── Asistente MAX: propuestas de acción ──────────────────────────────────────
+
+PROPOSAL_TASK = "task"
+PROPOSAL_FOLLOW_UP = "follow_up"
+PROPOSAL_KINDS = [PROPOSAL_TASK, PROPOSAL_FOLLOW_UP]
+
+PROPOSAL_PENDING = "pending"
+PROPOSAL_CONFIRMED = "confirmed"
+PROPOSAL_DISCARDED = "discarded"
+PROPOSAL_FAILED = "failed"
+
+
+class AssistantProposal(Base):
+    """Acción que MAX propone en un mensaje (crear tarea o seguimiento). No se
+    ejecuta hasta que quien lo invocó la confirma desde la tarjeta del mensaje;
+    entonces se crea con los permisos de esa persona. Se borra con el mensaje
+    (retención del chat)."""
+    __tablename__ = "assistant_proposals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    # Mensaje que invocó a MAX (origen que se guarda en Task.context al confirmar).
+    source_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    invoker_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(20), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    status = Column(String(20), nullable=False, default=PROPOSAL_PENDING)
+    error = Column(String(300), nullable=True)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    invoker = relationship("User", foreign_keys=[invoker_id])
+    task = relationship("Task", foreign_keys=[task_id])
 
 
 # ── Pizarras (Excalidraw + Yjs) ───────────────────────────────────────────────

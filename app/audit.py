@@ -74,6 +74,9 @@ ACTION_LABELS: dict[str, str] = {
     "branch_create": "Creación de sucursal",
     "branch_edit": "Edición de sucursal",
     "branch_delete": "Eliminación de sucursal",
+    # Asistente MAX
+    "assistant_invoke": "Consulta a MAX en el chat",
+    "assistant_proposal_discard": "Propuesta de MAX descartada",
 }
 
 

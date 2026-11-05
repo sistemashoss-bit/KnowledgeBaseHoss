@@ -98,8 +98,16 @@ def _stable_url(params: dict) -> str:
     return url
 
 
+AVATAR_ASSET_PREFIX = "asset:"
+
+
 def get_avatar_signed_url(key: str) -> str:
-    """URL firmada (local, sin red) y estable por 50 min; ver _stable_url."""
+    """URL firmada (local, sin red) y estable por 50 min; ver _stable_url.
+
+    Una llave `asset:<archivo>` apunta a app/assets en vez de Wasabi: la usa el
+    usuario bot (MAX, con la mascota del widget), que no tiene avatar en hoss."""
+    if key.startswith(AVATAR_ASSET_PREFIX):
+        return f"/assets/{key.removeprefix(AVATAR_ASSET_PREFIX)}"
     return _stable_url({"Bucket": settings.wasabi_avatar_bucket_name, "Key": key})
 
 

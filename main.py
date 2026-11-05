@@ -170,6 +170,7 @@ from app.trainings.router import router as trainings_router
 from app.notifications.router import router as notifications_router
 from app.issue_reports.router import router as issue_reports_router
 from app.calendar.router import router as calendar_router
+from app.assistant.router import router as assistant_router
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import build_access_filter
@@ -195,6 +196,7 @@ app.include_router(issue_reports_router)
 app.include_router(calendar_router)
 app.include_router(whiteboards_router)
 app.include_router(trainings_router)
+app.include_router(assistant_router)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
