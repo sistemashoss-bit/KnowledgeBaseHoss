@@ -26,7 +26,17 @@
   {% endif %}
 {% endmacro %}
 
-{% macro task_card(task, can_drag, today, csrf_token, current_user) %}
+{% macro shared_badge(task) %}
+<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 shrink-0"
+      title="Compartida con: {% for sh in task.shares %}{{ sh.user.name or sh.user.email }}{% if not loop.last %}, {% endif %}{% endfor %}">
+  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+  </svg>
+  Compartida
+</span>
+{% endmacro %}
+
+{% macro task_card(task, can_drag, today, csrf_token, current_user, show_shared=False) %}
 {% set can_approve = current_user.role == "superadmin" or task.created_by|string == current_user.id|string %}
 <div data-task-id="{{ task.id }}" data-status="{{ task.status }}" data-can-approve="{{ 'true' if can_approve else 'false' }}"
      {% if can_drag %}draggable="true"{% endif %}
@@ -52,8 +62,10 @@
     </span>
     {% endif %}
   </div>
-  {% if task.tags %}
+  {% set shared = show_shared and task.shares %}
+  {% if task.tags or shared %}
   <div class="mt-1.5 flex flex-wrap gap-1">
+    {% if shared %}{{ shared_badge(task) }}{% endif %}
     {% for tt in task.tags %}
     <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700">{{ tt.tag.name }}</span>
     {% endfor %}
@@ -225,7 +237,7 @@
           <div data-status="{{ s }}" data-cards
                class="flex-1 p-2 space-y-2 min-h-[140px] rounded-b-xl transition-colors">
             {% for task in columns[s] %}
-              {{ task_card(task, can_drag, today, csrf_token, current_user) }}
+              {{ task_card(task, can_drag, today, csrf_token, current_user, tab != "shared") }}
             {% endfor %}
             <div data-empty class="text-center text-xs text-gray-300 py-6 {% if columns[s] %}hidden{% endif %}">
               Sin tareas
@@ -264,6 +276,7 @@
                   Recurrente
                 </span>
                 {% endif %}
+                {% if tab != "shared" and task.shares %}{{ shared_badge(task) }}{% endif %}
                 {% for tt in task.tags %}
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700 shrink-0">{{ tt.tag.name }}</span>
                 {% endfor %}

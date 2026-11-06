@@ -84,11 +84,32 @@ def _is_shared_with(user: User, task_id, db: Session) -> bool:
     return db.query(TaskShare).filter(TaskShare.task_id == task_id, TaskShare.user_id == user.id).first() is not None
 
 
+def shared_with_overseen_condition(user: User, db: Session | None = None):
+    """Condición SQL sobre Task: compartidas con alguna persona que `user`
+    supervisa en la pestaña Departamento (su alcance de gestión más los
+    departamentos con acceso extra). None si no supervisa a nadie; el
+    superadmin ya ve todas."""
+    scope = _manager_scope(user, db)
+    if scope is None:
+        return None
+    in_scope = scope_user_condition({**scope, "dept_ids": scope["dept_ids"] | granted_department_ids(user)})
+    if in_scope is None:
+        return None
+    return Task.id.in_(select(TaskShare.task_id).join(User, User.id == TaskShare.user_id).where(in_scope))
+
+
+def _is_shared_with_overseen(user: User, task_id, db: Session) -> bool:
+    cond = shared_with_overseen_condition(user, db)
+    return cond is not None and db.query(Task.id).filter(Task.id == task_id, cond).first() is not None
+
+
 def _can_view_task(user: User, task_id, db: Session) -> bool:
-    """La ve por su alcance (incluye la lectura de auditor) o porque se la compartieron."""
+    """La ve por su alcance (incluye la lectura de auditor), porque se la
+    compartieron o porque se compartió con alguien que supervisa."""
     return (
         _tasks_query(user, db, audit=True).filter(Task.id == task_id).first() is not None
         or _is_shared_with(user, task_id, db)
+        or _is_shared_with_overseen(user, task_id, db)
     )
 
 
@@ -236,8 +257,9 @@ def _schedule_follow_up(f: TaskFollowUp, start_at: datetime, end_at: datetime, r
 
 def task_view_condition(user: User):
     """Condición SQL de las tareas que `user` puede ver (igual que _can_view_task:
-    su alcance con lectura de auditor, más las compartidas con él), o None si las
-    ve todas. Sirve para combinar varias personas con AND (asistente MAX)."""
+    su alcance con lectura de auditor, más las compartidas con él o con quien
+    supervisa), o None si las ve todas. Sirve para combinar varias personas con
+    AND (asistente MAX)."""
     if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         return None
     conditions = [
@@ -250,6 +272,9 @@ def task_view_condition(user: User):
     granted = granted_department_ids(user)
     if granted:
         conditions.append(Task.department_id.in_(granted))
+    overseen = shared_with_overseen_condition(user)
+    if overseen is not None:
+        conditions.append(overseen)
     return or_(*conditions)
 
 

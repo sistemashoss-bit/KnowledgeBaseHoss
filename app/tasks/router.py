@@ -219,6 +219,7 @@ def list_tasks(
         joinedload(Task.department),
         joinedload(Task.project),
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
+        joinedload(Task.shares).joinedload(TaskShare.user),
     ).filter(Task.archived_at.is_(None))
 
     # Data for create form. "departments" es difusión abierta (cualquier admin
@@ -266,6 +267,10 @@ def list_tasks(
             branch_user_ids = _branch_user_ids(scope, db)
             if branch_user_ids:
                 conds.append(Task.assigned_to.in_(branch_user_ids))
+            # Las compartidas con alguien de su alcance, aunque sean de otro departamento.
+            shared_cond = task_service.shared_with_overseen_condition(current_user, db)
+            if shared_cond is not None:
+                conds.append(shared_cond)
             q = base.filter(or_(*conds)) if conds else base.filter(false())
 
             # Filtro por persona: las de su alcance y las de sus departamentos
@@ -275,7 +280,7 @@ def list_tasks(
             user_q = user_q.filter(in_scope if in_scope is not None else false())
             filter_users = user_q.order_by(User.email).all()
             if user_id and any(str(u.id) == user_id for u in filter_users):
-                q = q.filter(Task.assigned_to == user_id)
+                q = q.filter(or_(Task.assigned_to == user_id, Task.shares.any(TaskShare.user_id == user_id)))
                 filter_user_id = user_id
         can_drag = False
 
@@ -283,7 +288,12 @@ def list_tasks(
         filter_departments = departments
     selected_department = next((d for d in filter_departments if str(d.id) == dept_id), None)
     if selected_department is not None:
-        q = q.filter(Task.department_id == selected_department.id)
+        dept_cond = Task.department_id == selected_department.id
+        if tab == "dept":  # superadmin: también las compartidas con gente de ese departamento
+            dept_cond = or_(dept_cond, Task.shares.any(
+                TaskShare.user.has(User.department_id == selected_department.id)
+            ))
+        q = q.filter(dept_cond)
         filter_dept_id = dept_id
 
     search = search.strip()
@@ -499,7 +509,7 @@ def task_detail(
 
     # Verify visibility (por su alcance o porque se la compartieron)
     in_scope = _tasks_query(current_user, db, audit=True).filter(Task.id == task_id).first() is not None
-    if not in_scope and not _is_shared_with(current_user, task_id, db):
+    if not in_scope and not _can_view_task(current_user, task_id, db):
         raise HTTPException(403)
     # El auditor puede ver tareas ajenas a su alcance, pero no participar en ellas;
     # a quien se la compartieron solo comenta (no sube evidencias).
