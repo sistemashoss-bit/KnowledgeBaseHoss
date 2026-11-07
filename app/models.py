@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, LargeBinary, String, Text, Table, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Date, ForeignKey, Index, Integer, LargeBinary, Sequence, String, Text, Table, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -47,6 +47,19 @@ PRIORITY_MEDIUM = "medium"
 PRIORITY_HIGH = "high"
 PRIORITY_URGENT = "urgent"
 TASK_PRIORITIES = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_URGENT]
+
+# ── Ticket constants ──────────────────────────────────────────────────────────
+TICKET_INCIDENT = "incident"   # algo que dejó de funcionar
+TICKET_REQUEST = "request"     # algo que se pide (acceso, alta, cambio…)
+TICKET_KINDS = [TICKET_INCIDENT, TICKET_REQUEST]
+
+TICKET_OPEN = "open"
+TICKET_IN_PROGRESS = "in_progress"
+TICKET_WAITING = "waiting"      # en espera del solicitante: pausa el SLA de resolución
+TICKET_RESOLVED = "resolved"    # el solicitante lo confirma (cierra) o lo reabre
+TICKET_CLOSED = "closed"
+TICKET_STATUSES = [TICKET_OPEN, TICKET_IN_PROGRESS, TICKET_WAITING, TICKET_RESOLVED, TICKET_CLOSED]
+TICKET_ACTIVE_STATUSES = [TICKET_OPEN, TICKET_IN_PROGRESS, TICKET_WAITING]
 
 # ── Task tag colors (paleta fija, mapeada a clases Tailwind en la plantilla) ───
 TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "pink"]
@@ -680,6 +693,142 @@ class TaskEvidence(Base):
 
     task = relationship("Task", back_populates="evidences")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+# ── Tickets (incidencias y solicitudes) ───────────────────────────────────────
+
+class Ticket(Base):
+    """Incidencia o solicitud que alguien levanta a un departamento. A diferencia
+    de una `Task` no tiene recurrencia, fecha límite, proyecto ni calendario: se
+    mide con SLA (primera respuesta y resolución, en horas laborales). `number`
+    es el folio secuencial para referirse a él (#1024) y va en la URL."""
+    __tablename__ = "tickets"
+    __table_args__ = (
+        Index("ix_tickets_department_status", "department_id", "status"),
+        Index("ix_tickets_requester", "requester_id"),
+        Index("ix_tickets_assigned_to", "assigned_to"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    number = Column(
+        Integer, Sequence("ticket_number_seq"), server_default=text("nextval('ticket_number_seq')"),
+        unique=True, nullable=False,
+    )
+    kind = Column(String(20), nullable=False, default=TICKET_INCIDENT)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default=TICKET_OPEN)
+    priority = Column(String(10), nullable=False, default=PRIORITY_MEDIUM)
+
+    # Departamento que lo atiende; SET NULL no aplica: sin departamento nadie lo vería.
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    requester_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # Como en Task: app de origen del widget de reportes y lo técnico que capturó.
+    source_app = Column(String(50), nullable=True)
+    context = Column(JSONB, nullable=True)
+
+    # Metas de SLA en minutos laborales, copiadas de la política al crearlo (y al
+    # cambiar prioridad o departamento) para que editar la política no cambie
+    # retroactivamente los tickets ya levantados. NULL = sin meta.
+    sla_response_minutes = Column(Integer, nullable=True)
+    sla_resolution_minutes = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Primer comentario o cambio de estado de alguien que lo atiende (no el solicitante).
+    first_response_at = Column(DateTime, nullable=True)
+    # Última vez que pasó a "Resuelto" (se limpia si se reabre) y cuándo se cerró.
+    resolved_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+
+    department = relationship("Department")
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    requester = relationship("User", foreign_keys=[requester_id])
+    comments = relationship(
+        "TicketComment", back_populates="ticket", order_by="TicketComment.created_at", passive_deletes=True,
+    )
+    evidences = relationship(
+        "TicketEvidence", back_populates="ticket", order_by="TicketEvidence.created_at", passive_deletes=True,
+    )
+    status_history = relationship(
+        "TicketStatusHistory", back_populates="ticket", order_by="TicketStatusHistory.changed_at",
+        passive_deletes=True,
+    )
+
+
+class TicketStatusHistory(Base):
+    """Cada cambio de estado (el inicial con `from_status` NULL). El SLA de
+    resolución se calcula con estos tramos, sin contar los de "En espera"."""
+    __tablename__ = "ticket_status_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_status = Column(String(20), nullable=True)
+    to_status = Column(String(20), nullable=False)
+    changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    ticket = relationship("Ticket", back_populates="status_history")
+    changed_by_user = relationship("User", foreign_keys=[changed_by])
+
+
+class TicketComment(Base):
+    """Igual que TaskComment: hilos de un nivel, stickers (la URL del APNG) y reacciones."""
+    __tablename__ = "ticket_comments"
+    __table_args__ = (
+        Index("ix_ticket_comments_ticket_created", "ticket_id", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("ticket_comments.id", ondelete="SET NULL"), nullable=True)
+    content = Column(Text, nullable=False)
+    edited = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket", back_populates="comments")
+    user = relationship("User")
+
+
+class TicketCommentReaction(Base):
+    __tablename__ = "ticket_comment_reactions"
+
+    comment_id = Column(UUID(as_uuid=True), ForeignKey("ticket_comments.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    emoji = Column(String(16), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TicketEvidence(Base):
+    """Archivo adjunto al ticket; vive en el bucket de evidencias (prefijo tickets/)."""
+    __tablename__ = "ticket_evidences"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_key = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket", back_populates="evidences")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+class TicketSlaPolicy(Base):
+    """Metas de SLA de un departamento para una prioridad, en minutos laborales.
+    Sin fila, aplica el default global (settings.ticket_sla_hours)."""
+    __tablename__ = "ticket_sla_policies"
+
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True)
+    priority = Column(String(10), primary_key=True)
+    response_minutes = Column(Integer, nullable=True)
+    resolution_minutes = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ── Calendar ──────────────────────────────────────────────────────────────────

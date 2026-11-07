@@ -1,7 +1,8 @@
 """Endpoint del widget de reportes (carpeta report-widget/, servido por CDN).
 
 Otra app (hoss-front, meta…) embebe el widget; el usuario describe el problema,
-adjunta un screenshot y aquí nace una tarea clasificada por Jev.
+adjunta un screenshot y aquí nace un ticket (incidencia, o solicitud si Jev ve
+que pide una mejora) clasificado por Jev.
 
 Autenticación, en este orden:
 - `Authorization: Bearer <accessToken de hoss-api>` desde otras apps: se valida
@@ -21,7 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import audit, storage
+from app import audit
 from app import images
 from starlette.concurrency import run_in_threadpool
 from app import valkey_client as vk
@@ -30,12 +31,10 @@ from app.auth.deps import get_current_user
 from app.auth.provisioning import provision_from_identity
 from app.config import settings
 from app.database import get_db
-from app.issue_reports.classify import classify
+from app.issue_reports.classify import NOUL_YES, classify
 from app.messaging import realtime
-from app.models import (
-    Department, Task, TaskEvidence, TaskStatusHistory, User,
-    PRIORITY_MEDIUM, ROLE_ADMIN, TASK_PENDING,
-)
+from app.models import Department, User, PRIORITY_MEDIUM, TICKET_INCIDENT, TICKET_REQUEST
+from app.tickets import service as tickets
 
 router = APIRouter(prefix="/api/issue-reports", tags=["issue-reports"])
 
@@ -204,62 +203,47 @@ async def create_issue_report(
     if result:
         ctx["jev"] = result["jev"]
 
-    task = Task(
-        id=uuid.uuid4(),
+    feature = bool(result) and result["jev"].get("feature_request", 0) >= NOUL_YES
+    if not department_id:
+        raise HTTPException(503, "No hay departamento de triage configurado para recibir el reporte")
+    ticket = tickets.create_ticket(
+        db, user,
+        kind=TICKET_REQUEST if feature else TICKET_INCIDENT,
         title=_title(description, ctx.get("app")),
         description=description,
-        priority=priority,
-        status=TASK_PENDING,
         department_id=department_id,
-        created_by=user.id,
+        priority=priority,
         source_app=ctx.get("app") or "widget",
         context=ctx,
     )
-    db.add(task)
-    db.flush()
-    db.add(TaskStatusHistory(
-        id=uuid.uuid4(), task_id=task.id, from_status=None, to_status=task.status,
-        changed_by=user.id, changed_at=task.created_at,
-    ))
     if shot:
         content, content_type, ext = shot
-        key = f"tasks/{task.id}/{uuid.uuid4()}_captura.{ext}"
-        storage.upload_evidence(key, content, content_type)
-        db.add(TaskEvidence(
-            id=uuid.uuid4(), task_id=task.id, uploaded_by=user.id,
-            filename=f"captura.{ext}", file_key=key, content_type=content_type, file_size=len(content),
-        ))
+        tickets.add_evidence(ticket, user, content, f"captura.{ext}", content_type, db)
     db.commit()
 
-    # Avisar a los admins del departamento destino: la tarea nace sin asignar.
-    dept = db.get(Department, department_id) if department_id else None
-    if dept:
-        admin_ids = [
-            uid for (uid,) in db.query(User.id).filter(
-                User.department_id == dept.id, User.role == ROLE_ADMIN,
-                User.is_active.is_(True), User.id != user.id,
-            )
-        ]
-        actor = user.name or user.email
-        for uid in admin_ids:
-            realtime.notify_user(
-                uid, title=f"Nuevo reporte de {actor}", body=task.title, url=f"/tasks/{task.id}",
-                kind="issue_report",
-            )
-    realtime.notify_tasks()
+    # Avisar a los admins del departamento destino: el ticket nace sin asignar.
+    dept = db.get(Department, ticket.department_id)
+    admin_ids = tickets.department_admin_ids(dept.id, db, exclude=user.id)
+    if admin_ids:
+        realtime.notify_users(
+            admin_ids, title=f"Nuevo reporte de {user.name or user.email}",
+            body=f"#{ticket.number} {ticket.title}", url=f"/tickets/{ticket.number}", kind="issue_report",
+        )
     audit.log_action(
         "issue_report", user=user, request=request,
-        resource_type="task", resource_id=task.id, resource_name=task.title,
+        resource_type="ticket", resource_id=ticket.id, resource_name=f"#{ticket.number} {ticket.title}",
         details=(
-            f"app={task.source_app} priority={priority} classified={bool(result)}"
+            f"app={ticket.source_app} kind={ticket.kind} priority={priority} classified={bool(result)}"
             f" department={'manual' if chosen else 'auto'}"
         ),
     )
 
     return {
-        "id": str(task.id),
-        "url": str(request.base_url).rstrip("/") + f"/tasks/{task.id}",
-        "department": dept.name if dept else None,
+        "id": str(ticket.id),
+        "number": ticket.number,
+        "kind": ticket.kind,
+        "url": str(request.base_url).rstrip("/") + f"/tickets/{ticket.number}",
+        "department": dept.name,
         "priority": priority,
         "classified": bool(result),
     }

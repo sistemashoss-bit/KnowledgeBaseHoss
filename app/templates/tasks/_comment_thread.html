@@ -12,7 +12,7 @@
   </div>
   {% if can_comment|default(true) %}
   <form x-show="replying" x-cloak
-        hx-post="/tasks/{{ root.task_id }}/comments"
+        hx-post="{{ comment_base if comment_base is defined else '/tasks/' ~ root.task_id }}/comments"
         hx-target="#replies-{{ root.id }}"
         hx-swap="beforeend"
         hx-on::after-request="if (event.detail.successful) { this.reset(); this.dispatchEvent(new CustomEvent('reply-sent', { bubbles: true })); }"

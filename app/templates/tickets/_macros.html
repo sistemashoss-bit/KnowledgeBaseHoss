@@ -1,0 +1,71 @@
+{# Insignias compartidas por la lista y el detalle de tickets. Las clases van
+   completas (no armadas con variables) para que Tailwind las detecte. #}
+
+{% macro status_badge(s) -%}
+  {%- set cls = {
+    "open": "bg-blue-100 text-blue-700",
+    "in_progress": "bg-indigo-100 text-indigo-700",
+    "waiting": "bg-amber-100 text-amber-700",
+    "resolved": "bg-green-100 text-green-700",
+    "closed": "bg-gray-100 text-gray-500",
+  } -%}
+  {%- set labels = {"open": "Abierto", "in_progress": "En atención", "waiting": "En espera", "resolved": "Resuelto", "closed": "Cerrado"} -%}
+  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {{ cls[s] }}">{{ labels[s] }}</span>
+{%- endmacro %}
+
+{% macro kind_badge(k) -%}
+  {%- if k == "incident" -%}
+  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-red-50 text-red-700 border border-red-200">Incidencia</span>
+  {%- else -%}
+  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-sky-50 text-sky-700 border border-sky-200">Solicitud</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro priority_label(p) -%}
+  {%- if p == "urgent" %}<span class="inline-flex items-center gap-1.5 text-xs text-gray-700 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-red-500"></span>Urgente</span>
+  {%- elif p == "high" %}<span class="inline-flex items-center gap-1.5 text-xs text-gray-700 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-orange-400"></span>Alta</span>
+  {%- elif p == "medium" %}<span class="inline-flex items-center gap-1.5 text-xs text-gray-700 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-yellow-400"></span>Media</span>
+  {%- else %}<span class="inline-flex items-center gap-1.5 text-xs text-gray-700 whitespace-nowrap"><span class="w-2 h-2 rounded-full bg-gray-300"></span>Baja</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Horas laborales: 1h 20m / 45m / 3d no: las jornadas no miden lo mismo. #}
+{% macro duration(seconds) -%}
+  {%- set s = seconds | abs -%}
+  {%- set hours = (s // 3600) | int -%}
+  {%- set minutes = ((s % 3600) // 60) | int -%}
+  {%- if hours > 0 -%}{{ hours }}h{% if minutes %} {{ minutes }}m{% endif %}
+  {%- else -%}{{ minutes }}m
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro sla_badge(state) -%}
+  {%- set cls = {
+    "ok": "bg-green-50 text-green-700 border-green-200",
+    "risk": "bg-amber-50 text-amber-700 border-amber-200",
+    "breached": "bg-red-50 text-red-700 border-red-200",
+    "met": "bg-gray-50 text-gray-500 border-gray-200",
+    "missed": "bg-red-50 text-red-600 border-red-200",
+  } -%}
+  {%- set labels = {"ok": "En tiempo", "risk": "Por vencer", "breached": "Vencido", "met": "Cumplido", "missed": "Incumplido"} -%}
+  {%- if state -%}
+  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap border {{ cls[state] }}">{{ labels[state] }}</span>
+  {%- else -%}<span class="text-xs text-gray-300">—</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Una línea por meta: "Primera respuesta · vence en 2h" / "cumplida en 40m". #}
+{% macro sla_line(name, m) -%}
+  {%- if m -%}
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="text-xs text-gray-500 w-32 shrink-0">{{ name }}</span>
+    {{ sla_badge(m.state) }}
+    <span class="text-xs text-gray-500">
+      {%- if m.state in ("ok", "risk") %}vence en {{ duration(m.remaining) }} <span class="text-gray-300">· meta {{ duration(m.target) }}</span>
+      {%- elif m.state == "breached" %}vencido hace {{ duration(m.remaining) }} <span class="text-gray-300">· meta {{ duration(m.target) }}</span>
+      {%- else %}en {{ duration(m.elapsed) }} <span class="text-gray-300">· meta {{ duration(m.target) }}</span>
+      {%- endif -%}
+    </span>
+  </div>
+  {%- endif -%}
+{%- endmacro %}

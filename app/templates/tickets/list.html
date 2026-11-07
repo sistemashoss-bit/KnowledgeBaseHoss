@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% import "tickets/_macros.html" as tk %}
+{% from "_pagination.html" import pagination %}
+{% block title %}Tickets — HOSS Conocimiento{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
+  <div class="max-w-6xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">Tickets</h1>
+        <p class="text-sm text-gray-500 mt-0.5">Incidencias y solicitudes a los departamentos</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {% if can_edit_sla %}
+        <a href="/tickets/sla"
+           class="px-3 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-white transition-colors">SLA</a>
+        {% endif %}
+        <a href="/tickets/new"
+           class="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          Nuevo ticket
+        </a>
+      </div>
+    </div>
+
+    <!-- Pestañas -->
+    {% set view_labels = {"mine": "Mis solicitudes", "assigned": "Asignados a mí", "dept": "Mi departamento", "all": "Todos"} %}
+    <div class="flex gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
+      {% for v in views %}
+      <a href="?view={{ v }}"
+         class="inline-flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors
+                {% if v == view %}border-blue-600 text-blue-700 font-medium{% else %}border-transparent text-gray-500 hover:text-gray-700{% endif %}">
+        {{ view_labels[v] }}
+        {% if counts[v] %}<span class="text-[11px] px-1.5 rounded-full {% if v == view %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-500{% endif %}">{{ counts[v] }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+
+    <!-- Filtros -->
+    <form method="get" class="flex flex-wrap items-end gap-2 mb-4">
+      <input type="hidden" name="view" value="{{ view }}" />
+      <div class="flex-1 min-w-[12rem]">
+        <label for="f-q" class="sr-only">Buscar</label>
+        <input id="f-q" type="search" name="q" value="{{ q }}" placeholder="Buscar por folio (#123) o título"
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <select name="status" aria-label="Estado" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        {% for value, label in [("active", "Activos"), ("resolved", "Resueltos"), ("closed", "Cerrados"), ("all", "Todos los estados")] %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="kind" aria-label="Tipo" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        <option value="">Todos los tipos</option>
+        {% for value, label in kind_labels.items() %}
+        <option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="priority" aria-label="Prioridad" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        <option value="">Toda prioridad</option>
+        {% for p in priorities | reverse %}
+        <option value="{{ p }}" {% if priority == p %}selected{% endif %}>{{ priority_labels[p] }}</option>
+        {% endfor %}
+      </select>
+      {% if filter_departments | length > 1 %}
+      <select name="department_id" aria-label="Departamento" onchange="this.form.submit()"
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white max-w-[12rem]">
+        <option value="">Todos los departamentos</option>
+        {% for d in filter_departments %}
+        <option value="{{ d.id }}" {% if department_id == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <button type="submit" class="px-3 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg bg-white hover:bg-gray-50">Buscar</button>
+    </form>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+          <tr class="whitespace-nowrap">
+            <th class="text-left font-medium px-4 py-3">Folio</th>
+            <th class="text-left font-medium px-4 py-3">Ticket</th>
+            <th class="text-left font-medium px-4 py-3">Estado</th>
+            <th class="text-left font-medium px-4 py-3">Prioridad</th>
+            <th class="text-left font-medium px-4 py-3">SLA</th>
+            <th class="text-left font-medium px-4 py-3">{% if view == "mine" %}Departamento{% else %}Solicitante{% endif %}</th>
+            <th class="text-left font-medium px-4 py-3">Asignado</th>
+            <th class="text-left font-medium px-4 py-3">Creado</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for t in tickets %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 whitespace-nowrap">
+              <a href="/tickets/{{ t.number }}" class="font-mono font-semibold text-gray-900 hover:text-blue-600">#{{ t.number }}</a>
+            </td>
+            <td class="px-4 py-3 min-w-[16rem]">
+              <a href="/tickets/{{ t.number }}" class="block font-medium text-gray-800 hover:text-blue-600">{{ t.title }}</a>
+              <div class="mt-1 flex items-center gap-2">
+                {{ tk.kind_badge(t.kind) }}
+                {% if view != "mine" %}<span class="text-xs text-gray-400 truncate">{{ t.department.name }}</span>{% endif %}
+              </div>
+            </td>
+            <td class="px-4 py-3">{{ tk.status_badge(t.status) }}</td>
+            <td class="px-4 py-3">{{ tk.priority_label(t.priority) }}</td>
+            <td class="px-4 py-3">{{ tk.sla_badge(sla[t.id].worst) }}</td>
+            <td class="px-4 py-3 text-gray-600 whitespace-nowrap">
+              {% if view == "mine" %}{{ t.department.name }}{% else %}{{ t.requester.name or t.requester.email }}{% endif %}
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap">
+              {% if t.assignee %}<span class="text-gray-600">{{ t.assignee.name or t.assignee.email }}</span>
+              {% else %}<span class="text-amber-600">Sin asignar</span>{% endif %}
+            </td>
+            <td class="px-4 py-3 text-gray-500 whitespace-nowrap">
+              <time datetime="{{ t.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ t.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="px-4 py-12 text-center text-gray-400">
+            {% if q or kind or priority or department_id or status != "active" %}Ningún ticket coincide con los filtros.
+            {% elif view == "mine" %}No has levantado tickets activos. <a href="/tickets/new" class="text-blue-600 hover:text-blue-500">Levantar uno</a>
+            {% else %}Sin tickets activos.{% endif %}
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 space-y-1">
+      {{ pagination(page, total, page_size, {"view": view, "status": status, "kind": kind, "priority": priority, "department_id": department_id, "q": q}) }}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     work_hours: dict[int, list[int]] = {
         0: [8, 19], 1: [8, 19], 2: [8, 19], 3: [8, 19], 4: [8, 19], 5: [8, 15],
     }
+    # SLA de tickets por prioridad: [primera respuesta, resolución] en horas
+    # laborales (mismo work_hours). Cada departamento puede sobrescribirlo en
+    # /tickets/sla (TicketSlaPolicy).
+    ticket_sla_hours: dict[str, list[float]] = {
+        "urgent": [1, 4], "high": [2, 8], "medium": [4, 24], "low": [8, 48],
+    }
+    # Fracción de la meta consumida a partir de la cual el SLA se marca "por vencer".
+    ticket_sla_warning_ratio: float = 0.75
 
     # Wasabi S3-compatible — solo las credenciales son secretas (van en .env).
     # Los nombres de bucket, región y endpoint son estables y viven aquí.

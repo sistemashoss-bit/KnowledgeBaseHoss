@@ -126,6 +126,18 @@ def notify_task(task_id) -> None:
     vk.publish(task_channel(task_id), "changed")
 
 
+def ticket_channel(ticket_id) -> str:
+    """Canal por ticket: quienes tienen abierto su detalle."""
+    return f"tickets:ticket:{ticket_id}"
+
+
+def notify_ticket(ticket_id) -> None:
+    """Avisa que el ticket cambió (estado, asignación, comentarios, evidencias)
+    para que cada detalle abierto se refresque."""
+    from app import valkey_client as vk
+    vk.publish(ticket_channel(ticket_id), "changed")
+
+
 # Prefijo de payload que se reenvía como `event: reaction` en vez del evento del
 # canal: así una reacción no dispara el refresco del feed ni el reload de la tarea,
 # y el cliente solo vuelve a pedir el bloque de reacciones de ese id.
@@ -237,4 +249,10 @@ async def tasks_event_stream(request):
 async def task_event_stream(task_id: str, request):
     """Yield SSE frames on one task's channel until the client disconnects."""
     async for frame in _channel_stream(task_channel(task_id), request, "task"):
+        yield frame
+
+
+async def ticket_event_stream(ticket_id: str, request):
+    """Yield SSE frames on one ticket's channel until the client disconnects."""
+    async for frame in _channel_stream(ticket_channel(ticket_id), request, "ticket"):
         yield frame

@@ -1,3 +1,5 @@
+{# `comment_base`: URL del objeto comentado; por defecto la tarea (los tickets pasan /tickets/<folio>). #}
+{% set cbase = comment_base if comment_base is defined else "/tasks/" ~ comment.task_id %}
 {% set is_author = current_user and comment.user_id == current_user.id %}
 {% set can_manage = is_author or can_edit|default(false) %}
 {# Comentario-sticker (mssgs-stickers.com): se ve como imagen y no se edita. #}
@@ -33,7 +35,7 @@
                 class="text-xs text-gray-400 hover:text-gray-700 transition-colors">Editar</button>
         {% endif %}
         <button type="button"
-                hx-post="/tasks/{{ comment.task_id }}/comments/{{ comment.id }}/delete"
+                hx-post="{{ cbase }}/comments/{{ comment.id }}/delete"
                 hx-vals='{"csrf_token": "{{ csrf_token }}"}'
                 hx-target="#comment-{{ comment.id }}"
                 hx-swap="outerHTML"
@@ -52,7 +54,7 @@
 
     {% with rx_id=comment.id,
             rx_list=comment_reactions.get(comment.id, []) if comment_reactions is defined else [],
-            rx_url="/tasks/" ~ comment.task_id ~ "/comments/" ~ comment.id ~ "/reactions",
+            rx_url=cbase ~ "/comments/" ~ comment.id ~ "/reactions",
             rx_class="mt-1.5", rx_float="rx-at-corner",
             rx_readonly=not can_comment|default(true) %}
     {% include "_reactions.html" %}
@@ -61,7 +63,7 @@
     <!-- Edición inline (solo autor) -->
     {% if is_author and not sticker %}
     <form x-show="editing" x-cloak
-          hx-post="/tasks/{{ comment.task_id }}/comments/{{ comment.id }}/edit"
+          hx-post="{{ cbase }}/comments/{{ comment.id }}/edit"
           hx-target="#comment-{{ comment.id }}"
           hx-swap="outerHTML"
           class="mt-1">
