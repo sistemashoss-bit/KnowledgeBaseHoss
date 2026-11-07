@@ -62,7 +62,7 @@
     </span>
     {% endif %}
   </div>
-  {% set shared = show_shared and task.shares %}
+  {% set shared = show_shared %}
   {% if task.tags or shared %}
   <div class="mt-1.5 flex flex-wrap gap-1">
     {% if shared %}{{ shared_badge(task) }}{% endif %}
@@ -237,7 +237,7 @@
           <div data-status="{{ s }}" data-cards
                class="flex-1 p-2 space-y-2 min-h-[140px] rounded-b-xl transition-colors">
             {% for task in columns[s] %}
-              {{ task_card(task, can_drag, today, csrf_token, current_user, tab != "shared") }}
+              {{ task_card(task, can_drag, today, csrf_token, current_user, task.id in shared_tag_ids) }}
             {% endfor %}
             <div data-empty class="text-center text-xs text-gray-300 py-6 {% if columns[s] %}hidden{% endif %}">
               Sin tareas
@@ -276,7 +276,7 @@
                   Recurrente
                 </span>
                 {% endif %}
-                {% if tab != "shared" and task.shares %}{{ shared_badge(task) }}{% endif %}
+                {% if task.id in shared_tag_ids %}{{ shared_badge(task) }}{% endif %}
                 {% for tt in task.tags %}
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-{{ tt.tag.color }}-100 text-{{ tt.tag.color }}-700 shrink-0">{{ tt.tag.name }}</span>
                 {% endfor %}

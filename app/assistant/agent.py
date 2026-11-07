@@ -21,12 +21,14 @@ from app.database import SessionLocal
 from app.messaging import realtime
 from app.models import Message
 from app.tasks.recurring import local_now
+from app.templating import assistant_sources_block
 
 logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="max")
 
 REPLY_MAX_CHARS = 3500
+MAX_SOURCES = 4  # documentos consultados que se muestran bajo la respuesta (igual que el widget)
 LLM_TIMEOUT_SECONDS = 40
 # El modelo dice que dejó una propuesta (o una tarjeta) sin haber llamado propose_*.
 _CLAIMS_PROPOSAL = re.compile(r"propuest|tarjeta|confirm|cre[eé] la tarea|qued[oó] (cread|registrad)", re.I)
@@ -58,10 +60,14 @@ def _run_safe(conv_id, message_id, invoker_id) -> None:
 
 # ── Respuesta ─────────────────────────────────────────────────────────────────
 
-def _post_reply(db, scope: scope_lib.Scope, source: Message, text: str, proposal_items: list[dict] | None = None):
+def _post_reply(
+    db, scope: scope_lib.Scope, source: Message, text: str, proposal_items: list[dict] | None = None,
+    sources: list[dict] | None = None,
+):
     """Publica la respuesta de MAX (respondiendo al mensaje que lo invocó y
-    mencionando a quien preguntó) con sus propuestas, y dispara los avisos
-    normales del chat."""
+    mencionando a quien preguntó) con sus propuestas y los documentos que
+    consultó (al final del texto; el feed los dibuja como en el widget), y
+    dispara los avisos normales del chat."""
     from app.messaging.router import _after_new_message
 
     bot = bot_lib.get_bot(db)
@@ -74,6 +80,7 @@ def _post_reply(db, scope: scope_lib.Scope, source: Message, text: str, proposal
         text = f"@{invoker_name} {text}"
     if len(text) > REPLY_MAX_CHARS:
         text = text[: REPLY_MAX_CHARS - 1] + "…"
+    text += assistant_sources_block(sources or [])
 
     msg = Message(conversation_id=scope.conversation.id, sender_id=bot.id, content=text, reply_to_id=source.id)
     db.add(msg)
@@ -313,7 +320,8 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
                 "Dejé la propuesta para que la confirmes." if ctx.proposals
                 else "No encontré cómo ayudarte con eso. ¿Me lo puedes decir de otra forma?"
             )
-        _post_reply(db, scope, source, answer, ctx.proposals)
+        sources = [{"id": doc_id, "title": title} for doc_id, title in list(ctx.sources.items())[:MAX_SOURCES]]
+        _post_reply(db, scope, source, answer, ctx.proposals, sources)
 
         audit.log_search(source.content or "", user=scope.invoker, result_count=len(ctx.calls), search_type="assistant")
         audit.log_action(

@@ -237,6 +237,9 @@ def list_tasks(
     filter_users = []
     filter_dept_id = ""
     filter_user_id = ""
+    # Departamento: tareas que entran solo por estar compartidas con alguien del
+    # alcance (no son del departamento); llevan la etiqueta "Compartida".
+    is_own = None
 
     if tab == "assigned":
         q = base.filter(Task.assigned_to == current_user.id)
@@ -272,6 +275,7 @@ def list_tasks(
             if shared_cond is not None:
                 conds.append(shared_cond)
             q = base.filter(or_(*conds)) if conds else base.filter(false())
+            is_own = lambda t: t.department_id in dept_ids or t.assigned_to in branch_user_ids  # noqa: E731
 
             # Filtro por persona: las de su alcance y las de sus departamentos
             # con acceso extra.
@@ -293,6 +297,7 @@ def list_tasks(
             dept_cond = or_(dept_cond, Task.shares.any(
                 TaskShare.user.has(User.department_id == selected_department.id)
             ))
+            is_own = lambda t: t.department_id == selected_department.id  # noqa: E731
         q = q.filter(dept_cond)
         filter_dept_id = dept_id
 
@@ -303,6 +308,7 @@ def list_tasks(
             Task.description.icontains(search, autoescape=True),
         ))
     tasks = q.order_by(Task.created_at.desc()).all()
+    shared_tag_ids = {t.id for t in tasks if not is_own(t)} if tab == "dept" and is_own else set()
 
     # Group into Kanban columns keyed by status.
     columns = {s: [] for s in TASK_STATUSES}
@@ -334,6 +340,7 @@ def list_tasks(
             "filter_users": filter_users,
             "filter_dept_id": filter_dept_id,
             "filter_user_id": filter_user_id,
+            "shared_tag_ids": shared_tag_ids,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
             "today": date.today().isoformat(),

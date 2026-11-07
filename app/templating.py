@@ -106,6 +106,49 @@ def _whiteboard_link(text: str | None) -> dict | None:
 templates.env.filters["whiteboard_link"] = _whiteboard_link
 
 
+# Documentos que consultó MAX al responder en el chat (app/assistant/agent.py):
+# van al final del mensaje, uno por línea, con URL absoluta para que se lean en
+# avisos y reenvíos. En el feed se dibujan como botones bajo la respuesta.
+ASSISTANT_SOURCES_HEADER = "📄 Documentos:"
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_SOURCE_LINE = r"- [^\n]+?: https?://\S+/documents/" + _UUID + r"/view"
+_SOURCES_BLOCK_RE = re.compile(
+    r"\n\n" + re.escape(ASSISTANT_SOURCES_HEADER) + r"((?:\n" + _SOURCE_LINE + r")+)\Z"
+)
+_SOURCE_LINE_RE = re.compile(
+    r"- (?P<title>[^\n]+?): https?://\S+/documents/(?P<id>" + _UUID + r")/view"
+)
+
+
+def assistant_sources_block(sources: list[dict]) -> str:
+    """Bloque que agrega MAX al final de su respuesta en el chat."""
+    from app.config import settings
+    if not sources:
+        return ""
+    base = settings.public_url.rstrip("/")
+    lines = [
+        f"- {' '.join(str(s['title']).split())}: {base}/documents/{s['id']}/view"
+        for s in sources
+    ]
+    return "\n\n" + ASSISTANT_SOURCES_HEADER + "\n" + "\n".join(lines)
+
+
+def split_assistant_sources(text: str | None) -> tuple[str, list[dict]]:
+    """(texto sin el bloque, [{"id", "title", "url"}]); sin bloque, (texto, [])."""
+    text = text or ""
+    m = _SOURCES_BLOCK_RE.search(text)
+    if not m:
+        return text, []
+    sources = [
+        {"id": x.group("id"), "title": x.group("title"), "url": f"/documents/{x.group('id')}/view"}
+        for x in _SOURCE_LINE_RE.finditer(m.group(1))
+    ]
+    return text[:m.start()], sources
+
+
+templates.env.filters["assistant_sources"] = split_assistant_sources
+
+
 def _msg_preview(msg) -> str:
     """Texto corto de un mensaje para la lista de chats (no la URL cruda de un
     sticker o una ubicación)."""

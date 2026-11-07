@@ -18,6 +18,22 @@
 {% block content %}
 
 <style>
+/* "MAX está escribiendo…": tres puntos que saltan uno tras otro */
+.max-typing-dots { display: inline-flex; align-items: flex-end; gap: 3px; height: 10px; }
+.max-typing-dots span {
+  width: 5px; height: 5px; border-radius: 9999px; background: currentColor;
+  animation: max-typing-bounce 1.2s infinite ease-in-out;
+}
+.max-typing-dots span:nth-child(2) { animation-delay: .15s; }
+.max-typing-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes max-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .max-typing-dots span { animation: none; opacity: .7; }
+}
+
 /* Opciones del menú de apariencia */
 .chat-theme-option {
   display: flex;
@@ -1164,8 +1180,12 @@
 
           // "MAX está escribiendo…": on/off desde el servidor; se esconde solo a
           // los 60 s por si el `off` no llega (conexión SSE caída).
-          var maxTyping = document.getElementById('max-typing'), maxTypingTimer = null;
+          // #max-typing está después de este script: se busca al usarlo (al
+          // correr el script todavía no existe y getElementById da null).
+          var maxTypingTimer = null;
           function setMaxTyping(on) {
+            var maxTyping = document.getElementById('max-typing');
+            if (!maxTyping) return;
             var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
             maxTyping.classList.toggle('hidden', !on);
             maxTyping.classList.toggle('flex', on);
@@ -1303,7 +1323,8 @@
     <div id="max-typing" role="status" aria-live="polite"
          class="hidden shrink-0 items-center gap-2 px-4 sm:px-6 py-1.5 text-xs text-gray-500">
       <img src="{{ asset('mascota.webp') }}" alt="" class="w-5 h-5 rounded-full object-cover" />
-      MAX está escribiendo…
+      MAX está escribiendo
+      <span class="max-typing-dots text-gray-400" aria-hidden="true"><span></span><span></span><span></span></span>
     </div>
 
 
