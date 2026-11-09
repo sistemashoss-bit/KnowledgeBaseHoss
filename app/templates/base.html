@@ -90,7 +90,7 @@
     {% set current_path = request.url.path.rstrip('/') %}
     {% macro nav_current(section) -%}
       {% set matches = current_path == section or current_path.startswith(section ~ '/') %}
-      {% set more_specific = (section == '/documents' and (current_path == '/documents/mine' or current_path.startswith('/documents/mine/'))) or (section == '/tasks' and (current_path == '/tasks/tags' or current_path.startswith('/tasks/tags/'))) %}
+      {% set more_specific = (section == '/documents' and (current_path == '/documents/mine' or current_path.startswith('/documents/mine/'))) or (section == '/tasks' and (current_path == '/tasks/tags' or current_path.startswith('/tasks/tags/'))) or (section == '/reports' and (current_path == '/reports/tasks' or current_path.startswith('/reports/tasks/'))) %}
       {% if matches and not more_specific %}aria-current="page"{% endif %}
     {%- endmacro %}
     <nav class="flex-1 px-4 py-4 space-y-1">
@@ -202,6 +202,13 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
             </svg>
             <span class="nav-label">Resumen General</span>
+          </a>
+          <a href="/reports/tasks/" {{ nav_current('/reports/tasks') }}
+             class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+            <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            <span class="nav-label">Resumen de Tareas</span>
           </a>
         </div>
       </details>

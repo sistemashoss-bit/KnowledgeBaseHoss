@@ -11,7 +11,7 @@ from app.database import get_db
 from app.permissions import granted_department_ids, has_oversight
 from app.models import (
     AuditLog, Department, Project, SearchLog,
-    Task, TaskComment, TaskFollowUp, TaskStatusHistory, User,
+    Task, TaskComment, TaskFollowUp, TaskShare, TaskStatusHistory, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
 )
@@ -194,19 +194,15 @@ def _follow_up_window(items: list[dict], limit: int = FOLLOW_UPS_SHOWN) -> list[
     return items[start:start + limit]
 
 
-def _open_tasks(dept_ids, db: Session, user_id: str = "") -> list[dict]:
-    """Tareas pendientes y en progreso (no archivadas) agrupadas por
-    departamento, con sus seguimientos y su último comentario. Es el estado
-    actual: no se acota por el rango de fechas."""
+def _open_tasks(conds: list, db: Session) -> list[dict]:
+    """Tareas pendientes y en progreso (no archivadas) que cumplen `conds`,
+    agrupadas por departamento, con sus seguimientos y su último comentario. Es
+    el estado actual: no se acota por un rango de fechas."""
     q = (
         db.query(Task)
         .options(joinedload(Task.assignee), joinedload(Task.department))
-        .filter(Task.status.in_([TASK_PENDING, TASK_IN_PROGRESS]), Task.archived_at.is_(None))
+        .filter(Task.status.in_([TASK_PENDING, TASK_IN_PROGRESS]), Task.archived_at.is_(None), *conds)
     )
-    if dept_ids is not None:
-        q = q.filter(Task.department_id.in_(dept_ids)) if dept_ids else q.filter(Task.id == None)
-    if user_id:
-        q = q.filter(Task.assigned_to == user_id)
     tasks = q.order_by(Task.due_date.asc().nullslast(), Task.created_at).all()
     if not tasks:
         return []
@@ -314,7 +310,148 @@ def _top_searches(dt_from: datetime, dt_to: datetime, db: Session, limit: int = 
     return [{"query": r.query, "count": r.count, "avg_results": round(r.avg_results or 0, 1)} for r in rows]
 
 
-# ── Route ─────────────────────────────────────────────────────────────────────
+def _department_options(current_user, db: Session) -> list:
+    """Departamentos para el filtro: todos para superadmin/auditor; para el resto,
+    los suyos (propio + acceso extra) solo si son más de uno."""
+    if current_user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
+        return db.query(Department).order_by(Department.name).all()
+    own_dept_ids = [current_user.department_id] if current_user.department_id else []
+    scoped = list(granted_department_ids(current_user)) + own_dept_ids
+    return (
+        db.query(Department).filter(Department.id.in_(scoped)).order_by(Department.name).all()
+        if len(set(scoped)) > 1 else []
+    )
+
+
+def _require_reports_access(current_user) -> None:
+    if not current_user.department_id and not has_oversight(current_user) and current_user.role != ROLE_AUDITOR:
+        raise HTTPException(403)
+
+
+# ── Resumen de Tareas ─────────────────────────────────────────────────────────
+
+# Vistas como las pestañas de Tareas. "dept" es el alcance de reportería (sus
+# departamentos, o todos para superadmin/auditor) con filtro de persona.
+TASK_REPORT_VIEWS = [
+    ("dept", "Departamento"),
+    ("assigned", "Asignadas a mí"),
+    ("shared", "Compartidas conmigo"),
+]
+
+
+def _task_report_scope(current_user, view: str, department_id: str, user_id: str, db: Session) -> dict:
+    """Condiciones de la consulta y estado de los filtros del Resumen de Tareas."""
+    if view not in dict(TASK_REPORT_VIEWS):
+        view = "dept"
+    dept_users, active_user = [], ""
+    if view == "dept":
+        dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+        conds = []
+        if dept_ids is not None:
+            conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
+        if active_user:
+            conds.append(Task.assigned_to == active_user)
+        departments = _department_options(current_user, db)
+    else:
+        # Vistas personales: como en Tareas, filtro por cualquier departamento.
+        conds = [
+            Task.assigned_to == current_user.id if view == "assigned"
+            else Task.shares.any(TaskShare.user_id == current_user.id)
+        ]
+        departments = db.query(Department).order_by(Department.name).all()
+        active_dept = department_id if any(str(d.id) == department_id for d in departments) else ""
+        if active_dept:
+            conds.append(Task.department_id == active_dept)
+
+    subtitle = [f"Vista: {dict(TASK_REPORT_VIEWS)[view]}"]
+    dept = next((d for d in departments if str(d.id) == active_dept), None)
+    if dept is None and active_dept:
+        dept = db.get(Department, active_dept)
+    if dept:
+        subtitle.append(f"Departamento: {dept.name}")
+    for u in dept_users:
+        if str(u.id) == active_user:
+            subtitle.append(f"Usuario: {u.name or u.email}")
+    return {
+        "view": view, "conds": conds, "departments": departments,
+        "active_dept": active_dept, "dept_users": dept_users, "active_user": active_user,
+        "subtitle": subtitle,
+    }
+
+
+@router.get("/tasks/", response_class=HTMLResponse)
+def tasks_report(
+    request: Request,
+    view: str = "dept",
+    department_id: str = "",
+    user_id: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    _require_reports_access(current_user)
+
+    scope = _task_report_scope(current_user, view, department_id, user_id, db)
+    groups = _open_tasks(scope["conds"], db)
+    all_tasks = [t for g in groups for t in g["tasks"]]
+    return templates.TemplateResponse(
+        request,
+        "reports/tasks.html",
+        {
+            "current_user": current_user,
+            "views": TASK_REPORT_VIEWS,
+            "view": scope["view"],
+            "departments": scope["departments"],
+            "active_dept": scope["active_dept"],
+            "dept_users": scope["dept_users"],
+            "active_user": scope["active_user"],
+            "subtitle": " · ".join(scope["subtitle"]),
+            "open_tasks": groups,
+            "totals": {
+                "pending": sum(g["pending"] for g in groups),
+                "in_progress": sum(g["in_progress"] for g in groups),
+                "overdue": sum(1 for t in all_tasks if t["overdue"]),
+            },
+        },
+    )
+
+
+@router.get("/tasks/export.{fmt}")
+def export_tasks_report(
+    fmt: str,
+    view: str = "dept",
+    department_id: str = "",
+    user_id: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Exporta el Resumen de Tareas con los mismos filtros de la página."""
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    _require_reports_access(current_user)
+    if fmt not in ("xlsx", "pdf"):
+        raise HTTPException(404)
+
+    scope = _task_report_scope(current_user, view, department_id, user_id, db)
+    groups = _open_tasks(scope["conds"], db)
+    generated = datetime.now()
+    subtitle = " · ".join(scope["subtitle"] + [f"Generado: {generated.strftime('%d/%m/%Y %H:%M')}"])
+
+    filename = f"resumen-tareas-{generated.strftime('%Y%m%d-%H%M')}.{fmt}"
+    if fmt == "xlsx":
+        content = open_tasks_xlsx(groups, subtitle)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        content = open_tasks_pdf(groups, subtitle)
+        media = "application/pdf"
+    return Response(
+        content, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Resumen General ───────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
 def reports_dashboard(
@@ -328,8 +465,7 @@ def reports_dashboard(
 ):
     if not current_user:
         return RedirectResponse("/auth/login", status_code=302)
-    if not current_user.department_id and not has_oversight(current_user) and current_user.role != ROLE_AUDITOR:
-        raise HTTPException(403)
+    _require_reports_access(current_user)
 
     # Date range defaults: last 30 days
     try:
@@ -347,7 +483,6 @@ def reports_dashboard(
     task_stats = _task_stats(dept_ids, dt_from, dt_to, db, active_user)
     dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db, active_user)
     tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db, active_user)
-    open_tasks = _open_tasks(dept_ids, db, active_user)
 
     # Proyectos: superadmin y auditor. Usuarios más activos y búsquedas
     # frecuentes: solo superadmin (salen del audit log, son globales sin acotar
@@ -377,17 +512,7 @@ def reports_dashboard(
     priority_keys = ["low", "medium", "high", "urgent"]
     priority_data = [task_stats["by_priority"].get(k, 0) for k in priority_keys]
 
-    # Filter options for superadmin/auditor
-    if is_org_wide:
-        departments = db.query(Department).order_by(Department.name).all()
-    else:
-        # Con acceso extra a otros departamentos puede filtrar entre los suyos.
-        own_dept_ids = [current_user.department_id] if current_user.department_id else []
-        scoped = list(granted_department_ids(current_user)) + own_dept_ids
-        departments = (
-            db.query(Department).filter(Department.id.in_(scoped)).order_by(Department.name).all()
-            if len(set(scoped)) > 1 else []
-        )
+    departments = _department_options(current_user, db)
 
     return templates.TemplateResponse(
         request,
@@ -405,7 +530,6 @@ def reports_dashboard(
             # KPIs
             "task_stats": task_stats,
             "dept_time_stats": dept_time_stats,
-            "open_tasks": open_tasks,
             "business_hours_label": business_hours_label(),
             "project_stats": project_stats,
             # tables
@@ -420,48 +544,4 @@ def reports_dashboard(
             "priority_labels": priority_labels,
             "priority_data": priority_data,
         },
-    )
-
-
-@router.get("/open-tasks.{fmt}")
-def export_open_tasks(
-    fmt: str,
-    department_id: str = "",
-    user_id: str = "",
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """Exporta la tabla "Tareas pendientes y en progreso" con los mismos
-    filtros de departamento/usuario del dashboard."""
-    if not current_user:
-        return RedirectResponse("/auth/login", status_code=302)
-    if not current_user.department_id and not has_oversight(current_user) and current_user.role != ROLE_AUDITOR:
-        raise HTTPException(403)
-    if fmt not in ("xlsx", "pdf"):
-        raise HTTPException(404)
-
-    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
-    groups = _open_tasks(dept_ids, db, active_user)
-
-    subtitle = []
-    if active_dept:
-        dept = db.get(Department, active_dept)
-        if dept:
-            subtitle.append(f"Departamento: {dept.name}")
-    for u in dept_users:
-        if str(u.id) == active_user:
-            subtitle.append(f"Usuario: {u.name or u.email}")
-    generated = datetime.now()
-    subtitle.append(f"Generado: {generated.strftime('%d/%m/%Y %H:%M')}")
-
-    filename = f"tareas-abiertas-{generated.strftime('%Y%m%d-%H%M')}.{fmt}"
-    if fmt == "xlsx":
-        content = open_tasks_xlsx(groups, " · ".join(subtitle))
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    else:
-        content = open_tasks_pdf(groups, " · ".join(subtitle))
-        media = "application/pdf"
-    return Response(
-        content, media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

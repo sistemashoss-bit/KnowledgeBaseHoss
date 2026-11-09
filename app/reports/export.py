@@ -1,4 +1,4 @@
-"""Exportación de "Tareas pendientes y en progreso" (reportería) a XLSX y PDF.
+"""Exportación del "Resumen de Tareas" (reportería: pendientes y en progreso) a XLSX y PDF.
 
 Recibe los grupos de `_open_tasks` (por departamento). Las fechas de comentario
 vienen en UTC naive y se muestran en la hora local del negocio
@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 from app.config import settings
 from app.models import TASK_IN_PROGRESS
 
-TITLE = "Tareas pendientes y en progreso"
+TITLE = "Resumen de Tareas — pendientes y en progreso"
 HEADERS = [
     "Departamento", "Tarea", "Estado", "Responsable", "Vence", "Vencida",
     "Seguimientos", "Último comentario", "Comentado por", "Fecha comentario",
