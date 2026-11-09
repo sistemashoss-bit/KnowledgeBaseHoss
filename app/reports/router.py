@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
@@ -333,6 +333,7 @@ def _require_reports_access(current_user) -> None:
 # Relación de la tarea con el usuario elegido en el filtro (como las pestañas
 # de Tareas: asignadas a, creadas por, compartidas con).
 TASK_USER_RELATIONS = [
+    ("all", "Todos"),
     ("assigned", "Asignadas al usuario"),
     ("created", "Asignadas por el usuario"),
     ("shared", "Compartidas con el usuario"),
@@ -342,17 +343,18 @@ TASK_USER_RELATIONS = [
 def _task_report_scope(current_user, department_id: str, user_id: str, relation: str, db: Session) -> dict:
     """Condiciones de la consulta y estado de los filtros del Resumen de Tareas."""
     if relation not in dict(TASK_USER_RELATIONS):
-        relation = "assigned"
+        relation = "all"
     dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
     conds = []
     if dept_ids is not None:
         conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
     if active_user:
-        conds.append({
+        by_relation = {
             "assigned": Task.assigned_to == active_user,
             "created": Task.created_by == active_user,
             "shared": Task.shares.any(TaskShare.user_id == active_user),
-        }[relation])
+        }
+        conds.append(or_(*by_relation.values()) if relation == "all" else by_relation[relation])
     departments = _department_options(current_user, db)
 
     subtitle = []
@@ -364,7 +366,8 @@ def _task_report_scope(current_user, department_id: str, user_id: str, relation:
     for u in dept_users:
         if str(u.id) == active_user:
             subtitle.append(f"Usuario: {u.name or u.email}")
-            subtitle.append(dict(TASK_USER_RELATIONS)[relation])
+            if relation != "all":
+                subtitle.append(dict(TASK_USER_RELATIONS)[relation])
     return {
         "conds": conds, "departments": departments,
         "active_dept": active_dept, "dept_users": dept_users, "active_user": active_user,
@@ -377,7 +380,7 @@ def tasks_report(
     request: Request,
     department_id: str = "",
     user_id: str = "",
-    relation: str = "assigned",
+    relation: str = "all",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -415,7 +418,7 @@ def export_tasks_report(
     fmt: str,
     department_id: str = "",
     user_id: str = "",
-    relation: str = "assigned",
+    relation: str = "all",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):

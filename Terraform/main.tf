@@ -53,7 +53,7 @@ resource "google_compute_address" "static_ip" {
 
 resource "google_compute_instance" "vm_instance" {
   name                      = "hosscomunicacion"
-  machine_type              = "e2-small"
+  machine_type              = "e2-medium"
   tags                      = ["hosscomunicacion-web"]
   allow_stopping_for_update = true
 
