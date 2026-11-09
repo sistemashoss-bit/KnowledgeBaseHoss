@@ -16,13 +16,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.calendar.reminders import compute_remind_at, to_local, to_utc
 from app.messaging import realtime
 from app.models import (
-    Document, Task, TaskFollowUp, TaskShare, TaskStatusHistory, TaskTagAssignment, User,
+    Document, Project, Task, TaskFollowUp, TaskShare, TaskStatusHistory, TaskTagAssignment, User,
     CALENDAR_REMINDER_OPTIONS, ROLE_AUDITOR, ROLE_SUPERADMIN,
     TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
 )
 from app.permissions import (
     branch_user_ids as _branch_user_ids, can_access_document, granted_department_ids, is_manager,
-    manager_scope as _manager_scope, scope_user_condition,
+    manager_scope as _manager_scope, scope_user_condition, visible_projects_filter,
 )
 from app.tasks.recurring import local_now, matches_recurrence, parse_recurrence
 
@@ -37,7 +37,7 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True, *, audi
         joinedload(Task.assignee),
         joinedload(Task.created_by_user),
         joinedload(Task.department),
-        joinedload(Task.project),
+        joinedload(Task.projects),
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     )
     if user.role != ROLE_SUPERADMIN and not (audit and user.role == ROLE_AUDITOR):
@@ -116,6 +116,37 @@ def _can_view_task(user: User, task_id, db: Session) -> bool:
 def _can_manage_follow_ups(user: User, task: Task, db: Session) -> bool:
     """Programa y cierra seguimientos quien edita la tarea y su asignado."""
     return _can_edit_task(user, task, db) or (task.assigned_to and str(task.assigned_to) == str(user.id))
+
+
+def visible_projects(user: User, db: Session):
+    """Proyectos a los que `user` puede vincular tareas: los que puede ver."""
+    q = db.query(Project)
+    cond = visible_projects_filter(user, db)
+    return q if cond is None else q.filter(cond)
+
+
+def _validated_projects(project_ids, user: User, db: Session) -> list[Project]:
+    """Proyectos de `project_ids` que existen y `user` puede ver (los demás se ignoran)."""
+    ids = []
+    for pid in project_ids or []:
+        try:
+            ids.append(uuid.UUID(str(pid)))
+        except ValueError:
+            continue
+    if not ids:
+        return []
+    return visible_projects(user, db).filter(Project.id.in_(ids)).order_by(Project.name).all()
+
+
+def set_task_projects(task: Task, project_ids, user: User, db: Session) -> None:
+    """Deja la tarea en los proyectos elegidos entre los que `user` puede ver. Los
+    vínculos con proyectos que no ve se conservan: no puede quitarlos sin saberlo."""
+    current = list(task.projects)
+    visible_now = {
+        p.id for p in visible_projects(user, db).filter(Project.id.in_([p.id for p in current]))
+    } if current else set()
+    hidden = [p for p in current if p.id not in visible_now]
+    task.projects = hidden + _validated_projects(project_ids, user, db)
 
 
 def _validated_document_id(document_id: str, user: User, db: Session) -> str | None:
@@ -290,7 +321,7 @@ def create_task(
     status: str = "pending",
     department_id: str = "",
     assigned_to: str = "",
-    project_id: str = "",
+    project_ids: list[str] | None = None,
     document_id: str = "",
     due_date: date | None = None,
     source_app: str | None = None,
@@ -308,7 +339,7 @@ def create_task(
         status=status if status in TASK_STATUSES else "pending",
         department_id=_effective_department_id(department_id, assigned_to, db),
         assigned_to=assigned_to if assigned_to else None,
-        project_id=project_id if project_id else None,
+        projects=_validated_projects(project_ids, actor, db),
         document_id=_validated_document_id(document_id, actor, db),
         created_by=actor.id,
         due_date=due_date,

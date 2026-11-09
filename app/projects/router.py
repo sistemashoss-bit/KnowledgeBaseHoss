@@ -150,14 +150,14 @@ def project_detail(
             joinedload(Task.assignee),
             joinedload(Task.department),
         )
-        .filter(Task.project_id == project_id)
+        .filter(Task.projects.any(Project.id == project_id))
     )
     if task_status and task_status in TASK_STATUSES:
         tasks_q = tasks_q.filter(Task.status == task_status)
     tasks = tasks_q.order_by(Task.created_at.desc()).all()
 
     # Stats over ALL tasks in project (ignore task_status filter for counts)
-    all_tasks = db.query(Task).filter(Task.project_id == project_id).all()
+    all_tasks = db.query(Task).filter(Task.projects.any(Project.id == project_id)).all()
     stats = {s: 0 for s in TASK_STATUSES}
     for t in all_tasks:
         stats[t.status] = stats.get(t.status, 0) + 1
@@ -284,7 +284,6 @@ def delete_project(
     if not project or not _can_edit_project(current_user, project):
         raise HTTPException(403)
     name = project.name
-    db.query(Task).filter(Task.project_id == project_id).update({"project_id": None})
     db.delete(project)
     db.commit()
     audit.log_action(

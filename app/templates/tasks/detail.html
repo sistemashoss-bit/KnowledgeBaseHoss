@@ -102,8 +102,10 @@
               </span>
               {% endif %}
             </div>
-            {% if task.project %}
-            <p class="text-xs text-gray-400 mt-1">📁 {{ task.project.name }}</p>
+            {% if task.projects %}
+            <p class="text-xs text-gray-400 mt-1">
+              {% for p in task.projects %}<a href="/projects/{{ p.id }}" class="hover:text-blue-600">📁 {{ p.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+            </p>
             {% endif %}
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -408,6 +410,12 @@
               Compartir
             </button>
             {% endif %}
+            {% if can_edit and (project_options or task.projects) %}
+            <button onclick="document.getElementById('panel-projects').classList.toggle('hidden')"
+                    class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+              Proyectos
+            </button>
+            {% endif %}
             {% if can_edit and dept_tags %}
             <button onclick="document.getElementById('panel-tags').classList.toggle('hidden')"
                     class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
@@ -434,6 +442,35 @@
               <button type="submit"
                       class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
                 Compartir
+              </button>
+            </div>
+          </form>
+        </div>
+        {% endif %}
+
+        {% if can_edit and (project_options or task.projects) %}
+        <div id="panel-projects" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <form hx-post="/tasks/{{ task.id }}/projects" hx-target="body">
+            <p class="text-xs text-gray-500 mb-2">La tarea aparece en cada proyecto que marques.</p>
+            {% if project_options %}
+            <div class="flex flex-wrap gap-2 mb-3 max-h-48 overflow-y-auto">
+              {% for p in project_options %}
+              <label class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-white text-gray-700 border border-gray-200 cursor-pointer">
+                <input type="checkbox" name="project_ids" value="{{ p.id }}" {{ 'checked' if p.id|string in selected_project_ids }}
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                {{ p.name }}
+              </label>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% set hidden_projects = task.projects | rejectattr('id', 'in', project_options | map(attribute='id') | list) | list %}
+            {% if hidden_projects %}
+            <p class="text-xs text-gray-400 mb-3">También está en {{ hidden_projects | map(attribute='name') | join(', ') }} (no puedes quitarla de ahí).</p>
+            {% endif %}
+            <div class="flex justify-end">
+              <button type="submit"
+                      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
+                Guardar proyectos
               </button>
             </div>
           </form>

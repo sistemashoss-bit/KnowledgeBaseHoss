@@ -398,6 +398,16 @@ class SearchLog(Base):
 
 # ── Projects & Tasks ──────────────────────────────────────────────────────────
 
+# Una tarea puede estar en varios proyectos (y un proyecto tiene muchas tareas).
+# Borrar la tarea o el proyecto solo quita el vínculo.
+task_projects = Table(
+    "task_projects",
+    Base.metadata,
+    Column("task_id", UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
+    Column("project_id", UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True, index=True),
+)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -421,7 +431,7 @@ class Project(Base):
     branch = relationship("Branch", back_populates="projects")
     zone = relationship("Zone", back_populates="projects")
     created_by_user = relationship("User", back_populates="created_projects", foreign_keys=[created_by])
-    tasks = relationship("Task", back_populates="project", passive_deletes=True)
+    tasks = relationship("Task", secondary=task_projects, back_populates="projects", passive_deletes=True)
 
 
 class Task(Base):
@@ -440,7 +450,6 @@ class Task(Base):
     source_app = Column(String(50), nullable=True)
     context = Column(JSONB, nullable=True)
 
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -461,7 +470,9 @@ class Task(Base):
     # hoy/mañana; evita repetir el aviso si el scheduler corre varias veces.
     due_reminded_on = Column(Date, nullable=True)
 
-    project = relationship("Project", back_populates="tasks")
+    projects = relationship(
+        "Project", secondary=task_projects, back_populates="tasks", order_by="Project.name", passive_deletes=True,
+    )
     department = relationship("Department", back_populates="tasks")
     document = relationship("Document", foreign_keys=[document_id])
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_to])

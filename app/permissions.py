@@ -319,7 +319,7 @@ def visible_tasks_query(user: "User", db):
         joinedload(Task.assignee),
         joinedload(Task.created_by_user),
         joinedload(Task.department),
-        joinedload(Task.project),
+        joinedload(Task.projects),
     )
     if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         return q

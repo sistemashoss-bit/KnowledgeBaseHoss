@@ -42,6 +42,7 @@ ACTION_LABELS: dict[str, str] = {
     "task_update": "Edición de tarea",
     "task_assign": "Asignación de tarea",
     "task_tags_update": "Actualización de etiquetas de tarea",
+    "task_projects_update": "Actualización de proyectos de tarea",
     "task_delete": "Eliminación de tarea",
     "task_comment": "Comentario en tarea",
     "task_follow_up_add": "Seguimiento programado en tarea",

@@ -217,7 +217,7 @@ def list_tasks(
         joinedload(Task.assignee),
         joinedload(Task.created_by_user),
         joinedload(Task.department),
-        joinedload(Task.project),
+        joinedload(Task.projects),
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
         joinedload(Task.shares).joinedload(TaskShare.user),
     ).filter(Task.archived_at.is_(None))
@@ -227,7 +227,7 @@ def list_tasks(
     # acotada al alcance de cada rol (ver _assignable_users_query).
     departments = db.query(Department).order_by(Department.name).all()
     users = _assignable_users_query(current_user, db).all()
-    projects = db.query(Project).order_by(Project.name).all()
+    projects = task_service.visible_projects(current_user, db).order_by(Project.name).all()
     tags = db.query(TaskTag).order_by(TaskTag.name).all()
 
     # Filtro por departamento en las vistas personales y para superadmin.
@@ -415,7 +415,7 @@ def create_task(
     status: str = Form("pending"),
     department_id: str = Form(""),
     assigned_to: str = Form(""),
-    project_id: str = Form(""),
+    project_ids: list[str] = Form(default=[]),
     document_id: str = Form(""),
     due_date: str = Form(""),
     next_url: str = Form(""),
@@ -437,7 +437,7 @@ def create_task(
         status=status,
         department_id=department_id,
         assigned_to=assigned_to,
-        project_id=project_id,
+        project_ids=project_ids,
         document_id=document_id,
         due_date=date.fromisoformat(due_date) if due_date else None,
     )
@@ -494,7 +494,7 @@ def task_detail(
             joinedload(Task.assignee),
             joinedload(Task.created_by_user),
             joinedload(Task.department),
-            joinedload(Task.project),
+            joinedload(Task.projects),
             joinedload(Task.comments).joinedload(TaskComment.user),
             joinedload(Task.evidences).joinedload(TaskEvidence.uploader),
             joinedload(Task.document),
@@ -533,6 +533,10 @@ def task_detail(
         if task.department_id else []
     )
     selected_tag_ids = {str(tt.tag_id) for tt in task.tags}
+    can_edit = _can_edit_task(current_user, task, db)
+    project_options = (
+        task_service.visible_projects(current_user, db).order_by(Project.name).all() if can_edit else []
+    )
 
     # Metadatos de previsualización del documento vinculado (mismo criterio que las
     # cards de Documentos): Drive/PDF/imagen/HTML → iframe; el resto solo enlace.
@@ -555,7 +559,9 @@ def task_detail(
             "selected_tag_ids": selected_tag_ids,
             "statuses": TASK_STATUSES,
             "priorities": TASK_PRIORITIES,
-            "can_edit": _can_edit_task(current_user, task, db),
+            "can_edit": can_edit,
+            "project_options": project_options,
+            "selected_project_ids": {str(p.id) for p in task.projects},
             "can_update_status": _can_update_status(current_user, task, db),
             "is_admin": is_manager(current_user),
             "can_approve": _can_approve_task(current_user, task),
@@ -983,6 +989,34 @@ def set_task_tags(
         "task_tags_update", user=current_user, request=request,
         resource_type="task", resource_id=task_id, resource_name=task.title,
         details=f"tags={len(valid_ids)}",
+    )
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
+@router.post("/{task_id}/projects", response_class=HTMLResponse)
+def set_task_projects(
+    task_id: str,
+    request: Request,
+    project_ids: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Proyectos de la tarea: solo se eligen desde aquí (las recurrentes llevan uno)."""
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).options(joinedload(Task.projects)).filter(Task.id == task_id).first()
+    if not task or not _can_edit_task(current_user, task, db):
+        raise HTTPException(403)
+
+    task_service.set_task_projects(task, project_ids, current_user, db)
+    names = [p.name for p in task.projects]
+    db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
+    audit.log_action(
+        "task_projects_update", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+        details=f"projects={len(names)} names={','.join(names[:5])}",
     )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
