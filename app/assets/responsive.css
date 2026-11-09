@@ -3,16 +3,23 @@
 .app-main { min-width: 0; min-height: 0; overflow-wrap: anywhere; }
 .app-main > .flex-1 { min-height: 0; min-width: 0; }
 #app-sidebar { overflow-y: auto; overscroll-behavior: contain; }
-#app-sidebar nav > a[aria-current="page"] {
+#app-sidebar nav a[aria-current="page"] {
   background-color: #2563eb;
   color: #fff;
   box-shadow: inset 3px 0 0 #93c5fd;
 }
-#app-sidebar nav > a[aria-current="page"]:hover { background-color: #1d4ed8; }
-#app-sidebar nav > a:focus-visible {
+#app-sidebar nav a[aria-current="page"]:hover { background-color: #1d4ed8; }
+#app-sidebar nav a:focus-visible {
   outline: 2px solid #93c5fd;
   outline-offset: 2px;
 }
+/* Submenú plegable del menú lateral (Admin). */
+#app-sidebar .nav-group > summary { list-style: none; }
+#app-sidebar .nav-group > summary::-webkit-details-marker { display: none; }
+#app-sidebar .nav-group > summary:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+#app-sidebar .nav-group-chevron { transition: transform .2s ease; }
+#app-sidebar .nav-group[open] .nav-group-chevron { transform: rotate(90deg); }
+#app-sidebar .nav-group-items { padding-left: .75rem; margin-left: .75rem; border-left: 1px solid #334155; }
 .mobile-menu-backdrop { display: none; }
 .chat-widget { bottom: max(1rem, env(safe-area-inset-bottom)); right: 1rem; }
 .chat-widget-panel {
@@ -81,7 +88,7 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 @media (min-width: 1024px) {
   .sidebar-toggle { display: flex; }
   #app-sidebar { transition: width .2s ease; overflow-x: hidden; }
-  #app-sidebar nav > a { white-space: nowrap; }
+  #app-sidebar nav a { white-space: nowrap; }
   .sidebar-collapsed #app-sidebar { width: 4.5rem; }
   .sidebar-collapsed #app-sidebar .sidebar-brand {
     display: flex;
@@ -96,7 +103,11 @@ input, select, textarea { max-width: 100%; min-width: 0; }
   .sidebar-collapsed #app-sidebar .sidebar-logo-mini { display: block; }
   .sidebar-collapsed #app-sidebar nav,
   .sidebar-collapsed #app-sidebar .sidebar-user { padding-left: .75rem; padding-right: .75rem; }
-  .sidebar-collapsed #app-sidebar nav > a {
+  #app-sidebar nav summary { white-space: nowrap; }
+  .sidebar-collapsed #app-sidebar .nav-group-chevron { display: none; }
+  .sidebar-collapsed #app-sidebar .nav-group-items { padding-left: 0; margin-left: 0; border-left: 0; }
+  .sidebar-collapsed #app-sidebar nav summary,
+  .sidebar-collapsed #app-sidebar nav a {
     position: relative;
     justify-content: center;
     padding-left: 0;

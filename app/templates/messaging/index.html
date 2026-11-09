@@ -409,6 +409,24 @@
     border-color: var(--chat-border);
 }
 
+
+/* Soltar archivos sobre la conversación para adjuntarlos. */
+#chat-drop-overlay {
+    position: absolute;
+    inset: .75rem;
+    z-index: 30;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed #60a5fa;
+    border-radius: 1rem;
+    background-color: rgba(239, 246, 255, .92);
+    color: #1d4ed8;
+    font-size: .875rem;
+    font-weight: 600;
+    pointer-events: none;
+}
+#chat-column.is-dragging #chat-drop-overlay { display: flex; }
 </style>
 
 <div class="flex-1 min-h-0 min-w-0 flex overflow-hidden">
@@ -607,7 +625,8 @@
      class="flex-1 min-w-0 min-h-0 {% if active_conv %}flex flex-row{% else %}hidden md:flex flex-col{% endif %} overflow-hidden bg-gray-50">
 
 
-<div class="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+<div id="chat-column" class="relative flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+    <div id="chat-drop-overlay" aria-hidden="true">Suelta los archivos para adjuntarlos</div>
 
     {% if active_conv %}
     <a href="/messaging/" class="chat-chrome-bar md:hidden shrink-0 flex items-center gap-2 px-4 py-3 text-sm font-medium">← Conversaciones</a>
@@ -1353,7 +1372,7 @@
             hx-target="#send-form"
             hx-swap="none"
             hx-encoding="multipart/form-data"
-            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-preview-bar').classList.add('hidden'); clearReply(); } document.getElementById('msg-input').focus()"
+            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-input').dispatchEvent(new Event('files-changed')); clearReply(); } document.getElementById('msg-input').focus()"
             class="flex flex-col gap-2">
 
         <!-- Respondiendo a… (lo llena "Responder" del menú del mensaje) -->
@@ -1374,9 +1393,10 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
           </svg>
-          <span>Archivo(s) adjunto(s) · máx 50 MB c/u</span>
+          <span id="file-preview-label" class="min-w-0 truncate">Archivo(s) adjunto(s)</span>
+          <span class="shrink-0">· máx 50 MB c/u</span>
           <button type="button"
-                  onclick="var fi=document.getElementById('file-input'); fi.value=''; document.getElementById('file-preview-bar').classList.add('hidden')"
+                  onclick="var fi=document.getElementById('file-input'); fi.value=''; fi.dispatchEvent(new Event('files-changed'))"
                   class="chat-tool-btn ml-auto px-2 py-0.5 rounded-md">Quitar</button>
         </div>
 
@@ -1435,8 +1455,7 @@
                 Nueva pizarra
               </button>
             </div>
-            <input id="file-input" type="file" name="files" multiple class="hidden"
-                   onchange="document.getElementById('file-preview-bar').classList.toggle('hidden', this.files.length === 0)" />
+            <input id="file-input" type="file" name="files" multiple class="hidden" />
           </div>
 
           <!-- Emoji button (app/assets/emoji.js) -->
@@ -1556,6 +1575,105 @@
               alert('No se pudo obtener tu ubicación.\n\n' + why);
             }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
           });
+        })();
+      </script>
+      <script>
+        // Adjuntar arrastrando archivos sobre la conversación o pegándolos (Ctrl+V).
+        // Todo termina en #file-input, que el form ya manda como "files" al /send.
+        (function () {
+          var input = document.getElementById('file-input');
+          var text = document.getElementById('msg-input');
+          var bar = document.getElementById('file-preview-bar');
+          var label = document.getElementById('file-preview-label');
+          var zone = document.getElementById('chat-column');
+          if (!input || !zone || typeof DataTransfer === 'undefined') return;
+          var MAX = 50 * 1024 * 1024;
+          var before = [];
+
+          function refresh() {
+            var names = Array.prototype.map.call(input.files, function (f) { return f.name; });
+            bar.classList.toggle('hidden', !names.length);
+            bar.classList.toggle('flex', names.length > 0);
+            label.textContent = names.length > 1 ? names.length + ' archivos: ' + names.join(', ') : (names[0] || '');
+            label.title = names.join('\n');
+          }
+
+          // Las capturas del portapapeles llegan todas como "image.png": les damos fecha y hora.
+          function named(f) {
+            if (!/^image\.\w+$/i.test(f.name)) return f;
+            var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+            var stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+            return new File([f], 'captura-' + stamp + f.name.slice(5), { type: f.type, lastModified: f.lastModified });
+          }
+
+          function setFiles(kept, added) {
+            var dt = new DataTransfer(), big = [];
+            kept.forEach(function (f) { dt.items.add(f); });
+            Array.prototype.forEach.call(added, function (f) {
+              if (f.size > MAX) big.push(f.name); else dt.items.add(named(f));
+            });
+            input.files = dt.files;
+            refresh();
+            if (big.length) alert('No se adjuntaron porque superan 50 MB:\n\n' + big.join('\n'));
+          }
+
+          function addFiles(list) {
+            if (!list.length) return;
+            setFiles(Array.prototype.slice.call(input.files), list);
+            text.focus();
+          }
+
+          // Elegir en el selector suma a lo que ya estaba (arrastrado o pegado) en vez de reemplazarlo.
+          input.addEventListener('click', function () { before = Array.prototype.slice.call(input.files); });
+          input.addEventListener('change', function () {
+            setFiles(before, Array.prototype.slice.call(input.files));
+            before = [];
+          });
+          input.addEventListener('files-changed', refresh);
+
+          // Pegar: en el cuadro de mensaje o en cualquier parte del chat que no sea otro campo.
+          document.addEventListener('paste', function (e) {
+            var cd = e.clipboardData;
+            if (!cd || !cd.files || !cd.files.length) return;
+            var t = e.target;
+            if (t !== text && t.closest && t.closest('input, textarea, select, [contenteditable="true"], dialog, [role="dialog"]')) return;
+            // Celdas de Excel/Word traen texto y además una imagen del rango: ahí se pega el texto.
+            var onlyImages = Array.prototype.every.call(cd.files, function (f) { return f.type.indexOf('image/') === 0; });
+            if (onlyImages && (cd.getData('text/plain') || '').trim()) return;
+            e.preventDefault();
+            addFiles(cd.files);
+          });
+
+          // Arrastrar y soltar sobre la conversación.
+          var depth = 0;
+          function hasFiles(e) {
+            return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1;
+          }
+          function stop() { depth = 0; zone.classList.remove('is-dragging'); }
+          zone.addEventListener('dragenter', function (e) {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            depth++;
+            zone.classList.add('is-dragging');
+          });
+          zone.addEventListener('dragover', function (e) {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          });
+          zone.addEventListener('dragleave', function (e) {
+            if (!hasFiles(e)) return;
+            if (--depth <= 0) stop();
+          });
+          zone.addEventListener('drop', function (e) {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            stop();
+            addFiles(e.dataTransfer.files);
+          });
+          // Soltar fuera de la zona no debe abrir el archivo en la pestaña.
+          window.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+          window.addEventListener('drop', function (e) { if (hasFiles(e)) { e.preventDefault(); stop(); } });
         })();
       </script>
       <script>

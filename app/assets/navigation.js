@@ -5,7 +5,7 @@
   const desktop = window.matchMedia('(min-width: 1024px)');
   const background = [...document.querySelectorAll('[data-menu-background]')];
   const isOpen = () => document.body.classList.contains('menu-open');
-  const focusable = () => [...sidebar.querySelectorAll('a[href], button, input, select, textarea, [tabindex="0"]')]
+  const focusable = () => [...sidebar.querySelectorAll('a[href], summary, button, input, select, textarea, [tabindex="0"]')]
     .filter(el => !el.disabled && el.getClientRects().length);
 
   function closeMenu() {
@@ -54,7 +54,7 @@
   const root = document.documentElement;
   // Clave que eligió el script del <head> de base.html (Mensajes tiene la suya).
   const KEY = root.dataset.sidebarKey || 'hoss.sidebar.collapsed';
-  const links = [...sidebar.querySelectorAll('nav > a, #logout-link')];
+  const links = [...sidebar.querySelectorAll('nav a, nav summary, #logout-link')];
 
   function apply(collapsed) {
     root.classList.toggle('sidebar-collapsed', collapsed);
