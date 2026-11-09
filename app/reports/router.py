@@ -330,61 +330,54 @@ def _require_reports_access(current_user) -> None:
 
 # ── Resumen de Tareas ─────────────────────────────────────────────────────────
 
-# Vistas como las pestañas de Tareas. "dept" es el alcance de reportería (sus
-# departamentos, o todos para superadmin/auditor) con filtro de persona.
-TASK_REPORT_VIEWS = [
-    ("dept", "Departamento"),
-    ("assigned", "Asignadas a mí"),
-    ("shared", "Compartidas conmigo"),
+# Relación de la tarea con el usuario elegido en el filtro (como las pestañas
+# de Tareas: asignadas a, creadas por, compartidas con).
+TASK_USER_RELATIONS = [
+    ("assigned", "Asignadas al usuario"),
+    ("created", "Asignadas por el usuario"),
+    ("shared", "Compartidas con el usuario"),
 ]
 
 
-def _task_report_scope(current_user, view: str, department_id: str, user_id: str, db: Session) -> dict:
+def _task_report_scope(current_user, department_id: str, user_id: str, relation: str, db: Session) -> dict:
     """Condiciones de la consulta y estado de los filtros del Resumen de Tareas."""
-    if view not in dict(TASK_REPORT_VIEWS):
-        view = "dept"
-    dept_users, active_user = [], ""
-    if view == "dept":
-        dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
-        conds = []
-        if dept_ids is not None:
-            conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
-        if active_user:
-            conds.append(Task.assigned_to == active_user)
-        departments = _department_options(current_user, db)
-    else:
-        # Vistas personales: como en Tareas, filtro por cualquier departamento.
-        conds = [
-            Task.assigned_to == current_user.id if view == "assigned"
-            else Task.shares.any(TaskShare.user_id == current_user.id)
-        ]
-        departments = db.query(Department).order_by(Department.name).all()
-        active_dept = department_id if any(str(d.id) == department_id for d in departments) else ""
-        if active_dept:
-            conds.append(Task.department_id == active_dept)
+    if relation not in dict(TASK_USER_RELATIONS):
+        relation = "assigned"
+    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    conds = []
+    if dept_ids is not None:
+        conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
+    if active_user:
+        conds.append({
+            "assigned": Task.assigned_to == active_user,
+            "created": Task.created_by == active_user,
+            "shared": Task.shares.any(TaskShare.user_id == active_user),
+        }[relation])
+    departments = _department_options(current_user, db)
 
-    subtitle = [f"Vista: {dict(TASK_REPORT_VIEWS)[view]}"]
-    dept = next((d for d in departments if str(d.id) == active_dept), None)
-    if dept is None and active_dept:
-        dept = db.get(Department, active_dept)
+    subtitle = []
+    dept = next((d for d in departments if str(d.id) == active_dept), None) or (
+        db.get(Department, active_dept) if active_dept else None
+    )
     if dept:
         subtitle.append(f"Departamento: {dept.name}")
     for u in dept_users:
         if str(u.id) == active_user:
             subtitle.append(f"Usuario: {u.name or u.email}")
+            subtitle.append(dict(TASK_USER_RELATIONS)[relation])
     return {
-        "view": view, "conds": conds, "departments": departments,
+        "conds": conds, "departments": departments,
         "active_dept": active_dept, "dept_users": dept_users, "active_user": active_user,
-        "subtitle": subtitle,
+        "relation": relation, "subtitle": subtitle,
     }
 
 
 @router.get("/tasks/", response_class=HTMLResponse)
 def tasks_report(
     request: Request,
-    view: str = "dept",
     department_id: str = "",
     user_id: str = "",
+    relation: str = "assigned",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -392,7 +385,7 @@ def tasks_report(
         return RedirectResponse("/auth/login", status_code=302)
     _require_reports_access(current_user)
 
-    scope = _task_report_scope(current_user, view, department_id, user_id, db)
+    scope = _task_report_scope(current_user, department_id, user_id, relation, db)
     groups = _open_tasks(scope["conds"], db)
     all_tasks = [t for g in groups for t in g["tasks"]]
     return templates.TemplateResponse(
@@ -400,13 +393,13 @@ def tasks_report(
         "reports/tasks.html",
         {
             "current_user": current_user,
-            "views": TASK_REPORT_VIEWS,
-            "view": scope["view"],
+            "relations": TASK_USER_RELATIONS,
+            "relation": scope["relation"],
             "departments": scope["departments"],
             "active_dept": scope["active_dept"],
             "dept_users": scope["dept_users"],
             "active_user": scope["active_user"],
-            "subtitle": " · ".join(scope["subtitle"]),
+            "subtitle": " · ".join(scope["subtitle"]) or "Todos los departamentos",
             "open_tasks": groups,
             "totals": {
                 "pending": sum(g["pending"] for g in groups),
@@ -420,9 +413,9 @@ def tasks_report(
 @router.get("/tasks/export.{fmt}")
 def export_tasks_report(
     fmt: str,
-    view: str = "dept",
     department_id: str = "",
     user_id: str = "",
+    relation: str = "assigned",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -433,7 +426,7 @@ def export_tasks_report(
     if fmt not in ("xlsx", "pdf"):
         raise HTTPException(404)
 
-    scope = _task_report_scope(current_user, view, department_id, user_id, db)
+    scope = _task_report_scope(current_user, department_id, user_id, relation, db)
     groups = _open_tasks(scope["conds"], db)
     generated = datetime.now()
     subtitle = " · ".join(scope["subtitle"] + [f"Generado: {generated.strftime('%d/%m/%Y %H:%M')}"])

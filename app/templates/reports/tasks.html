@@ -13,7 +13,7 @@
         <p class="text-sm text-gray-500 mt-0.5">Pendientes y en progreso · estado actual, con seguimientos y último comentario</p>
       </div>
       {% if open_tasks %}
-      {% set export_qs = '?view=' ~ (view|urlencode) ~ '&department_id=' ~ (active_dept|urlencode) ~ '&user_id=' ~ (active_user|urlencode) %}
+      {% set export_qs = '?department_id=' ~ (active_dept|urlencode) ~ '&user_id=' ~ (active_user|urlencode) ~ '&relation=' ~ (relation|urlencode) %}
       <div class="flex gap-2 shrink-0">
         <a href="/reports/tasks/export.xlsx{{ export_qs }}" download
            class="px-4 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Exportar XLSX</a>
@@ -23,23 +23,14 @@
       {% endif %}
     </div>
 
-    <!-- Vistas (como las pestañas de Tareas) -->
-    <nav class="flex flex-wrap items-center gap-1 border-b border-gray-200 mb-4" aria-label="Vista">
-      {% for key, label in views %}
-      <a href="/reports/tasks/?view={{ key }}" {% if view == key %}aria-current="page"{% endif %}
-         class="px-4 py-2.5 text-sm font-medium -mb-px border-b-2 whitespace-nowrap transition-colors {% if view == key %}border-blue-600 text-blue-700{% else %}border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300{% endif %}">{{ label }}</a>
-      {% endfor %}
-    </nav>
-
     <!-- Filtros -->
     {% if departments or dept_users %}
     <form method="get" action="/reports/tasks/" class="flex flex-wrap gap-2 items-end mb-6">
-      <input type="hidden" name="view" value="{{ view }}" />
       {% if departments %}
       <div class="flex flex-col gap-1">
         <label for="f-dept" class="text-xs text-gray-500 font-medium">Departamento</label>
         <select id="f-dept" name="department_id"
-                onchange="var u=this.form.elements['user_id']; if (u) u.disabled=true; this.form.submit()"
+                onchange="['user_id','relation'].forEach(function(n){var e=this.form.elements[n]; if (e) e.disabled=true}, this); this.form.submit()"
                 class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
           <option value="">Todos</option>
           {% for d in departments %}
@@ -60,9 +51,20 @@
         </select>
       </div>
       {% endif %}
+      {% if active_user %}
+      <div class="flex flex-col gap-1">
+        <label for="f-relation" class="text-xs text-gray-500 font-medium">Tareas</label>
+        <select id="f-relation" name="relation" onchange="this.form.submit()"
+                class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+          {% for key, label in relations %}
+          <option value="{{ key }}" {% if key == relation %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
       <noscript><button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg">Aplicar</button></noscript>
       {% if active_dept or active_user %}
-      <a href="/reports/tasks/?view={{ view }}"
+      <a href="/reports/tasks/"
          class="px-4 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Limpiar</a>
       {% endif %}
     </form>
