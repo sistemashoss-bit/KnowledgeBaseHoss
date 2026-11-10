@@ -25,6 +25,7 @@ from app.permissions import (
     can_manage_folder,
 )
 from app import folders as folders_lib
+from app.announcements import reads as announcement_reads
 from app import rag, storage, audit
 from app import images
 from app import pdf_render
@@ -132,15 +133,15 @@ _NOTIFY_BATCH = 1000
 
 
 def _notify_announcement(db: Session, doc: Document, allowed_user_ids: list[str], actor: User) -> None:
-    """Aviso in-app de un comunicado nuevo a quienes pueden verlo: todos los
-    activos si es público o de empleados; si es de personas específicas, a ellas."""
-    q = db.query(User.id).filter(User.is_active == True, User.is_bot == False, User.id != actor.id)  # noqa: E712
-    if doc.status == STATUS_CUSTOM:
-        q = q.filter(User.id.in_(allowed_user_ids or []))
-    ids = [uid for (uid,) in q]
+    """Aviso in-app de un comunicado nuevo a sus destinatarios (los mismos de
+    quienes se espera el visto, ver app/announcements/reads.py)."""
+    ids = [uid for (uid,) in announcement_reads.audience_query(db, doc).filter(User.id != actor.id).with_entities(User.id)]
+    title = f"Nuevo comunicado: {doc.title}"
+    if doc.requires_ack:
+        title = f"Comunicado (confirma que lo leíste): {doc.title}"
     for i in range(0, len(ids), _NOTIFY_BATCH):
         realtime.notify_users(
-            ids[i:i + _NOTIFY_BATCH], title=f"Nuevo comunicado: {doc.title}",
+            ids[i:i + _NOTIFY_BATCH], title=title,
             body=doc.description or "", url="/announcements/", kind="announcement",
         )
 
@@ -441,6 +442,7 @@ def upload_document(
     allowed_user_ids: list[str] = Form(default=[]),
     drive_url: str = Form(default=""),
     kind: str = Form(default=DOC_KIND_DOCUMENT),
+    requires_ack: bool = Form(default=False),
     file: UploadFile = File(default=None),
     # Documento hecho en el editor (Herramientas → Editor de documentos, ver
     # app/tools/router.py). Llega como archivo porque los campos de texto de
@@ -557,6 +559,8 @@ def upload_document(
         )
         content_type_for_index = ctype or ""
 
+    # "Requiere confirmación" (Enterado) solo aplica a comunicados.
+    doc.requires_ack = bool(requires_ack and is_announcement)
     db.add(doc)
     for uid in allowed_user_ids:
         db.add(DocumentAllowedUser(document_id=doc_id, user_id=uid))
@@ -653,6 +657,7 @@ def edit_document(
     allowed_user_ids: list[str] = Form(default=[]),
     drive_url: str = Form(default=""),
     return_to: str = Form(default=""),
+    requires_ack: bool = Form(default=False),
     file: UploadFile = File(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_auth),
@@ -669,6 +674,8 @@ def edit_document(
     if doc.kind == DOC_KIND_ANNOUNCEMENT:
         is_work_document = False
         folder_id = ""
+        # Activarla después no vuelve a avisar; quien ya confirmó sigue contando.
+        doc.requires_ack = requires_ack
 
     # Solo quien subió el documento gestiona su carpeta; cualquier otro editor
     # (admin del depto gestionando algo ajeno) deja doc.folder_id tal cual
@@ -956,6 +963,7 @@ def view_document(
         raise HTTPException(404, "Document not found")
     if not can_access_document(user, doc):
         raise HTTPException(403 if user else 401, "Access denied")
+    announcement_reads.mark_seen(db, doc, user)
 
     if doc.drive_url:
         return RedirectResponse(doc.drive_url)
@@ -974,6 +982,7 @@ def download_document(
     if not can_access_document(user, doc):
         raise HTTPException(403 if user else 401, "Access denied")
 
+    announcement_reads.mark_seen(db, doc, user)
     if doc.drive_url:
         # Docs de Drive no se descargan localmente: se abre el link.
         return RedirectResponse(doc.drive_url)

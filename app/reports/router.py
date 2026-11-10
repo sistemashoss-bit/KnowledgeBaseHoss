@@ -4,18 +4,20 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.permissions import granted_department_ids, has_oversight
 from app.models import (
     AuditLog, Department, Project, SearchLog,
-    Task, TaskComment, TaskFollowUp, TaskShare, TaskStatusHistory, User,
+    Task, TaskComment, TaskFollowUp, TaskShare, TaskStatusHistory, Ticket, TicketComment, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
+    TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_IN_PROGRESS, TICKET_OPEN, TICKET_RESOLVED, TICKET_WAITING,
 )
-from app.reports.export import open_tasks_pdf, open_tasks_xlsx
+from app.reports.export import open_tasks_pdf, open_tasks_xlsx, open_tickets_pdf, open_tickets_xlsx
+from app.tickets import service as ticket_svc
 from app.calendar.reminders import to_local
 from app.tasks.business_hours import business_hours_label, business_seconds
 from app.templating import templates
@@ -176,6 +178,47 @@ def _dept_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, 
             "tasks": cnt,
             "hours": round(hours, 1),
             "avg_hours": round(hours / cnt, 1) if cnt else 0,
+        })
+    result.sort(key=lambda d: d["hours"], reverse=True)
+    return result
+
+
+def _dept_ticket_time_stats(dept_ids, dt_from: datetime, dt_to: datetime, db: Session, user_id: str = "") -> list[dict]:
+    """Lo mismo que _dept_time_stats pero de tickets: los levantados en el período
+    que ya están resueltos o cerrados, por departamento que los atendió. Las horas
+    son laborales y trabajadas (sin los tramos "En espera"), las mismas del SLA de
+    resolución. `user_id`: el responsable asignado."""
+    q = db.query(Ticket).options(selectinload(Ticket.status_history)).filter(
+        Ticket.created_at >= dt_from, Ticket.created_at < dt_to,
+        Ticket.status.in_([TICKET_RESOLVED, TICKET_CLOSED]),
+    )
+    if dept_ids is not None:
+        q = q.filter(Ticket.department_id.in_(dept_ids)) if dept_ids else q.filter(Ticket.id == None)  # noqa: E711
+    if user_id:
+        q = q.filter(Ticket.assigned_to == user_id)
+
+    agg: dict[str, dict] = defaultdict(lambda: {"seconds": 0.0, "tickets": 0, "sla_total": 0, "sla_met": 0})
+    for t in q.all():
+        a = agg[str(t.department_id)]
+        a["seconds"] += ticket_svc.resolution_seconds(t, t.resolved_at or t.closed_at)
+        a["tickets"] += 1
+        resolution = ticket_svc.sla_status(t)["resolution"]
+        if resolution:
+            a["sla_total"] += 1
+            a["sla_met"] += resolution["state"] == "met"
+
+    names = {str(d.id): d.name for d in db.query(Department).filter(Department.id.in_(list(agg))).all()} if agg else {}
+    result = []
+    for key, a in agg.items():
+        hours = a["seconds"] / 3600
+        result.append({
+            "department": names.get(key, "Sin departamento"),
+            "tickets": a["tickets"],
+            "hours": round(hours, 1),
+            "avg_hours": round(hours / a["tickets"], 1) if a["tickets"] else 0,
+            "sla_total": a["sla_total"],
+            "sla_met": a["sla_met"],
+            "sla_percent": round(a["sla_met"] * 100 / a["sla_total"]) if a["sla_total"] else None,
         })
     result.sort(key=lambda d: d["hours"], reverse=True)
     return result
@@ -447,6 +490,183 @@ def export_tasks_report(
     )
 
 
+# ── Resumen de Tickets ────────────────────────────────────────────────────────
+
+TICKET_USER_RELATIONS = [
+    ("all", "Todos"),
+    ("assigned", "Asignados al usuario"),
+    ("requested", "Levantados por el usuario"),
+]
+_TICKET_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
+_SLA_ORDER = {"breached": 0, "risk": 1, "ok": 2}
+
+
+def _open_tickets(conds: list, db: Session) -> list[dict]:
+    """Tickets activos (abiertos, en atención, en espera) que cumplen `conds`,
+    agrupados por el departamento que los atiende, con su SLA y su último
+    comentario. Es el estado actual: no se acota por fechas. Primero los de SLA
+    vencido, luego por vencer; dentro, por prioridad y antigüedad."""
+    tickets = (
+        db.query(Ticket)
+        .options(
+            joinedload(Ticket.assignee), joinedload(Ticket.requester), joinedload(Ticket.department),
+            selectinload(Ticket.status_history),
+        )
+        .filter(Ticket.status.in_(TICKET_ACTIVE_STATUSES), *conds)
+        .all()
+    )
+    if not tickets:
+        return []
+    last_comments = {
+        c.ticket_id: c
+        for c in db.query(TicketComment)
+        .options(joinedload(TicketComment.user))
+        .filter(TicketComment.ticket_id.in_([t.id for t in tickets]))
+        .order_by(TicketComment.ticket_id, TicketComment.created_at.desc())
+        .distinct(TicketComment.ticket_id)
+    }
+    now = datetime.utcnow()
+    groups: dict[str, dict] = {}
+    for t in tickets:
+        g = groups.setdefault(str(t.department_id), {
+            "department": t.department.name if t.department else "Sin departamento",
+            "tickets": [], TICKET_OPEN: 0, TICKET_IN_PROGRESS: 0, TICKET_WAITING: 0, "breached": 0,
+        })
+        g[t.status] += 1
+        sla = ticket_svc.sla_status(t, now)
+        g["breached"] += sla["worst"] == "breached"
+        # La meta que sigue corriendo: la respuesta mientras no haya, si no la resolución.
+        pending = next((m for m in (sla["response"], sla["resolution"]) if m and m["state"] in ("ok", "risk", "breached")), None)
+        c = last_comments.get(t.id)
+        g["tickets"].append({
+            "number": t.number,
+            "title": t.title,
+            "kind": t.kind,
+            "priority": t.priority,
+            "status": t.status,
+            "assignee": (t.assignee.name or t.assignee.email) if t.assignee else "",
+            "requester": (t.requester.name or t.requester.email) if t.requester else "",
+            "created_at": t.created_at,
+            "sla_state": sla["worst"],
+            "sla_metric": pending,
+            "sla_metric_name": (
+                "Primera respuesta" if pending is not None and pending is sla["response"] else "Resolución"
+            ) if pending else "",
+            "last_comment": c.content if c else "",
+            "last_comment_by": ((c.user.name or c.user.email) if c.user else "") if c else "",
+            "last_comment_at": c.created_at if c else None,
+        })
+    for g in groups.values():
+        g["tickets"].sort(key=lambda r: (
+            _SLA_ORDER.get(r["sla_state"], 3), _TICKET_PRIORITY_ORDER.get(r["priority"], 9), r["created_at"],
+        ))
+    return sorted(groups.values(), key=lambda g: g["department"].lower())
+
+
+def _ticket_report_scope(current_user, department_id: str, user_id: str, relation: str, db: Session) -> dict:
+    """Condiciones y estado de los filtros del Resumen de Tickets (como el de Tareas)."""
+    if relation not in dict(TICKET_USER_RELATIONS):
+        relation = "all"
+    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    conds = []
+    if dept_ids is not None:
+        conds.append(Ticket.department_id.in_(dept_ids) if dept_ids else Ticket.id == None)  # noqa: E711
+    if active_user:
+        by_relation = {"assigned": Ticket.assigned_to == active_user, "requested": Ticket.requester_id == active_user}
+        conds.append(or_(*by_relation.values()) if relation == "all" else by_relation[relation])
+    departments = _department_options(current_user, db)
+
+    subtitle = []
+    dept = next((d for d in departments if str(d.id) == active_dept), None) or (
+        db.get(Department, active_dept) if active_dept else None
+    )
+    if dept:
+        subtitle.append(f"Departamento: {dept.name}")
+    for u in dept_users:
+        if str(u.id) == active_user:
+            subtitle.append(f"Usuario: {u.name or u.email}")
+            if relation != "all":
+                subtitle.append(dict(TICKET_USER_RELATIONS)[relation])
+    return {
+        "conds": conds, "departments": departments,
+        "active_dept": active_dept, "dept_users": dept_users, "active_user": active_user,
+        "relation": relation, "subtitle": subtitle,
+    }
+
+
+@router.get("/tickets/", response_class=HTMLResponse)
+def tickets_report(
+    request: Request,
+    department_id: str = "",
+    user_id: str = "",
+    relation: str = "all",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    _require_reports_access(current_user)
+
+    scope = _ticket_report_scope(current_user, department_id, user_id, relation, db)
+    groups = _open_tickets(scope["conds"], db)
+    return templates.TemplateResponse(
+        request,
+        "reports/tickets.html",
+        {
+            "current_user": current_user,
+            "relations": TICKET_USER_RELATIONS,
+            "relation": scope["relation"],
+            "departments": scope["departments"],
+            "active_dept": scope["active_dept"],
+            "dept_users": scope["dept_users"],
+            "active_user": scope["active_user"],
+            "subtitle": " · ".join(scope["subtitle"]) or "Todos los departamentos",
+            "open_tickets": groups,
+            "business_hours_label": business_hours_label(),
+            "totals": {
+                "open": sum(g[TICKET_OPEN] for g in groups),
+                "in_progress": sum(g[TICKET_IN_PROGRESS] for g in groups),
+                "waiting": sum(g[TICKET_WAITING] for g in groups),
+                "breached": sum(g["breached"] for g in groups),
+            },
+        },
+    )
+
+
+@router.get("/tickets/export.{fmt}")
+def export_tickets_report(
+    fmt: str,
+    department_id: str = "",
+    user_id: str = "",
+    relation: str = "all",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Exporta el Resumen de Tickets con los mismos filtros de la página."""
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    _require_reports_access(current_user)
+    if fmt not in ("xlsx", "pdf"):
+        raise HTTPException(404)
+
+    scope = _ticket_report_scope(current_user, department_id, user_id, relation, db)
+    groups = _open_tickets(scope["conds"], db)
+    generated = datetime.now()
+    subtitle = " · ".join(scope["subtitle"] + [f"Generado: {generated.strftime('%d/%m/%Y %H:%M')}"])
+
+    filename = f"resumen-tickets-{generated.strftime('%Y%m%d-%H%M')}.{fmt}"
+    if fmt == "xlsx":
+        content = open_tickets_xlsx(groups, subtitle)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        content = open_tickets_pdf(groups, subtitle)
+        media = "application/pdf"
+    return Response(
+        content, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Resumen General ───────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
@@ -478,6 +698,7 @@ def reports_dashboard(
     # Aggregate
     task_stats = _task_stats(dept_ids, dt_from, dt_to, db, active_user)
     dept_time_stats = _dept_time_stats(dept_ids, dt_from, dt_to, db, active_user)
+    dept_ticket_stats = _dept_ticket_time_stats(dept_ids, dt_from, dt_to, db, active_user)
     tasks_timeline = _tasks_over_time(dept_ids, dt_from, dt_to, db, active_user)
 
     # Proyectos: superadmin y auditor. Usuarios más activos y búsquedas
@@ -526,6 +747,7 @@ def reports_dashboard(
             # KPIs
             "task_stats": task_stats,
             "dept_time_stats": dept_time_stats,
+            "dept_ticket_stats": dept_ticket_stats,
             "business_hours_label": business_hours_label(),
             "project_stats": project_stats,
             # tables

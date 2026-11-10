@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% from "tickets/_macros.html" import status_badge, kind_badge, priority_label, sla_badge, duration %}
+{% block title %}Resumen de Tickets — Reportería — HOSS Conocimiento{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
+  <div class="max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div>
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Reportería</p>
+        <h1 class="text-2xl font-bold text-gray-900">Resumen de Tickets</h1>
+        <p class="text-sm text-gray-500 mt-0.5">Abiertos, en atención y en espera · estado actual, con SLA y último comentario</p>
+      </div>
+      {% if open_tickets %}
+      {% set export_qs = '?department_id=' ~ (active_dept|urlencode) ~ '&user_id=' ~ (active_user|urlencode) ~ '&relation=' ~ (relation|urlencode) %}
+      <div class="flex gap-2 shrink-0">
+        <a href="/reports/tickets/export.xlsx{{ export_qs }}" download
+           class="px-4 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Exportar XLSX</a>
+        <a href="/reports/tickets/export.pdf{{ export_qs }}" download
+           class="px-4 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Exportar PDF</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Filtros -->
+    {% if departments or dept_users %}
+    <form method="get" action="/reports/tickets/" class="flex flex-wrap gap-2 items-end mb-6">
+      {% if departments %}
+      <div class="flex flex-col gap-1">
+        <label for="f-dept" class="text-xs text-gray-500 font-medium">Departamento</label>
+        <select id="f-dept" name="department_id"
+                onchange="['user_id','relation'].forEach(function(n){var e=this.form.elements[n]; if (e) e.disabled=true}, this); this.form.submit()"
+                class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <option value="">Todos</option>
+          {% for d in departments %}
+          <option value="{{ d.id }}" {% if d.id|string == active_dept %}selected{% endif %}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      {% if dept_users %}
+      <div class="flex flex-col gap-1">
+        <label for="f-user" class="text-xs text-gray-500 font-medium">Usuario</label>
+        <select id="f-user" name="user_id" onchange="this.form.submit()"
+                class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <option value="">Todos</option>
+          {% for u in dept_users %}
+          <option value="{{ u.id }}" {% if u.id|string == active_user %}selected{% endif %}>{{ u.name or u.email }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      {% if active_user %}
+      <div class="flex flex-col gap-1">
+        <label for="f-relation" class="text-xs text-gray-500 font-medium">Tickets</label>
+        <select id="f-relation" name="relation" onchange="this.form.submit()"
+                class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+          {% for key, label in relations %}
+          <option value="{{ key }}" {% if key == relation %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <noscript><button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg">Aplicar</button></noscript>
+      {% if active_dept or active_user %}
+      <a href="/reports/tickets/"
+         class="px-4 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">Limpiar</a>
+      {% endif %}
+    </form>
+    {% endif %}
+
+    <!-- Totales -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-xl border border-gray-200 px-4 sm:px-6 py-4">
+        <p class="text-xs text-gray-500 font-medium">Abiertos</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{{ totals.open }}</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 px-4 sm:px-6 py-4">
+        <p class="text-xs text-gray-500 font-medium">En atención</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{{ totals.in_progress }}</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 px-4 sm:px-6 py-4">
+        <p class="text-xs text-gray-500 font-medium">En espera</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{{ totals.waiting }}</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 px-4 sm:px-6 py-4">
+        <p class="text-xs text-gray-500 font-medium">SLA vencido</p>
+        <p class="text-2xl font-bold {{ 'text-red-500' if totals.breached else 'text-gray-900' }} mt-1">{{ totals.breached }}</p>
+      </div>
+    </div>
+
+    {% macro open_tickets_table(tickets) %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="text-left font-medium px-4 sm:px-6 py-2 min-w-[14rem]">Ticket</th>
+            <th class="text-left font-medium px-3 py-2">Estado</th>
+            <th class="text-left font-medium px-3 py-2">Responsable</th>
+            <th class="text-left font-medium px-3 py-2">SLA</th>
+            <th class="text-left font-medium px-3 py-2 min-w-[16rem]">Último comentario</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for t in tickets %}
+          <tr class="align-top">
+            <td class="px-4 sm:px-6 py-3">
+              <a href="/tickets/{{ t.number }}" class="font-medium text-gray-800 hover:text-blue-600"><span class="text-gray-400">#{{ t.number }}</span> {{ t.title }}</a>
+              <div class="flex flex-wrap items-center gap-2 mt-1">
+                {{ kind_badge(t.kind) }}
+                {{ priority_label(t.priority) }}
+              </div>
+              <p class="text-xs text-gray-400 mt-1">{{ t.requester }} · <time datetime="{{ t.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ t.created_at.strftime('%d/%m/%Y %H:%M') }}</time></p>
+            </td>
+            <td class="px-3 py-3 whitespace-nowrap">{{ status_badge(t.status) }}</td>
+            <td class="px-3 py-3 whitespace-nowrap {{ 'text-gray-700' if t.assignee else 'text-gray-400 italic' }}">{{ t.assignee or 'Sin asignar' }}</td>
+            <td class="px-3 py-3 whitespace-nowrap">
+              {{ sla_badge(t.sla_state) }}
+              {% if t.sla_metric %}
+              {% set m = t.sla_metric %}
+              <p class="text-xs text-gray-500 mt-1">{{ t.sla_metric_name }}</p>
+              <p class="text-xs {{ 'text-red-600' if m.state == 'breached' else 'text-gray-500' }}">
+                {% if m.state == 'breached' %}vencido hace {{ duration(m.remaining) }}{% else %}vence en {{ duration(m.remaining) }}{% endif %}
+                <span class="text-gray-300">· meta {{ duration(m.target) }}</span>
+              </p>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if t.last_comment_at %}
+              <p class="text-gray-700 line-clamp-2" title="{{ t.last_comment }}">{{ t.last_comment }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">{{ t.last_comment_by }} · <time datetime="{{ t.last_comment_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ t.last_comment_at.strftime('%d/%m/%Y %H:%M') }}</time></p>
+              {% else %}
+              <span class="text-gray-400 italic">Sin comentarios</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endmacro %}
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+        <h2 class="text-sm font-semibold text-gray-700">Tickets abiertos, en atención y en espera</h2>
+        <p class="text-xs text-gray-400 mt-0.5" title="Hora del centro: {{ business_hours_label }}">{{ subtitle }} · SLA en horas laborales; primero los vencidos y por vencer</p>
+      </div>
+      {% if open_tickets %}
+        {% if active_dept %}
+          {{ open_tickets_table(open_tickets[0].tickets) }}
+        {% else %}
+        <div class="divide-y divide-gray-100">
+          {% for g in open_tickets %}
+          <details class="group" {% if open_tickets|length == 1 %}open{% endif %}>
+            <summary class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 cursor-pointer list-none hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-sm font-medium text-gray-800 truncate">{{ g.department }}</span>
+              </span>
+              <span class="text-xs text-gray-500 shrink-0">
+                {{ g.open }} abierto{{ 's' if g.open != 1 else '' }} · {{ g.in_progress }} en atención · {{ g.waiting }} en espera
+                {% if g.breached %}· <span class="text-red-600 font-medium">{{ g.breached }} SLA vencido</span>{% endif %}
+              </span>
+            </summary>
+            <div class="border-t border-gray-100">
+              {{ open_tickets_table(g.tickets) }}
+            </div>
+          </details>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% else %}
+      <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin tickets abiertos, en atención ni en espera.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

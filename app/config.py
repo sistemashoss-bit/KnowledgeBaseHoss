@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     recurring_hour_local: int = 6  # las tareas recurrentes se generan a esta hora local
 
     # Audit / search log retention
-    audit_retention_days: int = 60
+    audit_retention_days: int = 30
 
     # Tareas: días en "Listo" antes de archivarse automáticamente del Kanban
     task_archive_after_days: int = 7

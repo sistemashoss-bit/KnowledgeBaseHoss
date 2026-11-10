@@ -78,6 +78,15 @@
       {% endif %}
       {% endif %}
 
+      <div x-show="kind === 'announcement'" x-cloak>
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="requires_ack" value="true" :disabled="kind !== 'announcement'"
+                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          Requiere confirmación de lectura
+        </label>
+        <p class="text-xs text-gray-400 mt-1">Cada destinatario verá un botón «Enterado» y quedará constancia de quién lo confirmó y cuándo. Úsalo para avisos que necesitan constancia (políticas, cambios de reglamento).</p>
+      </div>
+
       <!-- Visibility legend -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
         <div class="flex items-start gap-1.5 p-2 bg-green-50 rounded-lg border border-green-200">

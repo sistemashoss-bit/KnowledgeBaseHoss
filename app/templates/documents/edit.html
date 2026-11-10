@@ -145,6 +145,17 @@
         </select>
       </div>
 
+      {% if doc.kind == "announcement" %}
+      <div>
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="requires_ack" value="true" {{ 'checked' if doc.requires_ack }}
+                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          Requiere confirmación de lectura
+        </label>
+        <p class="text-xs text-gray-400 mt-1">Cada destinatario verá un botón «Enterado» y quedará constancia de quién lo confirmó y cuándo. Úsalo para avisos que necesitan constancia (políticas, cambios de reglamento). Activarla después no vuelve a avisar.</p>
+      </div>
+      {% endif %}
+
       {% if doc.kind != "announcement" %}
       <div>
         <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">

@@ -306,6 +306,9 @@ class Document(Base):
     # Tipo: documento normal o comunicado (sección Comunicados). Mismos
     # permisos; un comunicado solo puede ser PDF y no va en Documentos.
     kind = Column(String(20), nullable=False, default=DOC_KIND_DOCUMENT, server_default=DOC_KIND_DOCUMENT)
+    # Solo comunicados: cada destinatario debe confirmar "Enterado" (constancia,
+    # ver AnnouncementRead). Sin esto solo se registra que lo abrió.
+    requires_ack = Column(Boolean, nullable=False, default=False, server_default="false")
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     # Carpeta (solo docs de trabajo, ver Folder). Null = sin carpeta.
     folder_id = Column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
@@ -361,6 +364,18 @@ class FolderAllowedUser(Base):
 
     folder = relationship("Folder", back_populates="allowed_users")
     user = relationship("User")
+
+
+class AnnouncementRead(Base):
+    """Quién vio un comunicado (primera vez que lo abrió) y, si el comunicado
+    lo pide (Document.requires_ack), cuándo confirmó "Enterado". Una fila por
+    persona; ver app/announcements/reads.py."""
+    __tablename__ = "announcement_reads"
+
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    seen_at = Column(DateTime, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
 
 
 class DocumentAllowedUser(Base):

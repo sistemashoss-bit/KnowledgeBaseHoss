@@ -160,6 +160,11 @@ def _resolution_seconds(t: Ticket, now: datetime) -> float:
     return total
 
 
+def resolution_seconds(t: Ticket, now: datetime | None = None) -> float:
+    """Horas laborales trabajadas (sin "En espera"), en segundos; para reportería."""
+    return _resolution_seconds(t, now or datetime.utcnow())
+
+
 def _metric(target_minutes: int | None, elapsed: float, done: bool) -> dict | None:
     if not target_minutes:
         return None

@@ -91,7 +91,7 @@ VOYAGE_API_KEY=
 VALKEY_URL=valkeys://default:password@host:port
 HOSS_API_URL=                 # SSO con hoss-api
 # MESSAGE_RETENTION_DAYS=30
-# AUDIT_RETENTION_DAYS=60
+# AUDIT_RETENTION_DAYS=30
 # CLEANUP_HOUR_UTC=3
 ```
 

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Lecturas · {{ doc.title }}{% endblock %}
+
+{% block content %}
+{% set confirmed = people | selectattr("acknowledged_at") | list %}
+{% set seen_only = people | rejectattr("acknowledged_at") | selectattr("seen_at") | list %}
+{% set pending = people | rejectattr("seen_at") | list %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-6">
+  <div class="max-w-3xl mx-auto" x-data="{ tab: '{{ 'pending' if pending else ('confirmed' if doc.requires_ack else 'seen') }}' }">
+    <a href="/announcements/#a-{{ doc.id }}" class="text-xs text-gray-500 hover:text-blue-600">← Comunicados</a>
+    <h1 class="text-xl font-bold text-gray-900 mt-2">{{ doc.title }}</h1>
+    <p class="text-sm text-gray-500 mt-1">
+      Publicado <time datetime="{{ doc.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') }}</time>
+      · {% if doc.requires_ack %}requiere confirmación de lectura{% else %}sin confirmación de lectura (solo se registra quién lo abrió){% endif %}
+    </p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-{{ 3 if doc.requires_ack else 2 }} gap-3 mt-5">
+      <div class="bg-white border border-gray-200 rounded-xl p-4">
+        <p class="text-xs text-gray-500">Lo vieron</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{{ stats.seen }} <span class="text-sm font-normal text-gray-400">de {{ stats.total }}</span></p>
+      </div>
+      {% if doc.requires_ack %}
+      <div class="bg-white border border-gray-200 rounded-xl p-4">
+        <p class="text-xs text-gray-500">Confirmaron «Enterado»</p>
+        <p class="text-2xl font-bold text-green-700 mt-1">{{ stats.acked }} <span class="text-sm font-normal text-gray-400">de {{ stats.total }}</span></p>
+      </div>
+      {% endif %}
+      <div class="bg-white border border-gray-200 rounded-xl p-4">
+        <p class="text-xs text-gray-500">No lo han abierto</p>
+        <p class="text-2xl font-bold text-amber-600 mt-1">{{ pending | length }}</p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-1 mt-6 border-b border-gray-200" role="tablist">
+      {% set tabs = [("pending", "Pendientes", pending | length)] %}
+      {% if doc.requires_ack %}
+      {% set tabs = tabs + [("confirmed", "Enterados", confirmed | length), ("seen", "Lo vieron sin confirmar", seen_only | length)] %}
+      {% else %}
+      {% set tabs = tabs + [("seen", "Lo vieron", (seen_only + confirmed) | length)] %}
+      {% endif %}
+      {% for key, label, n in tabs %}
+      <button type="button" role="tab" @click="tab = '{{ key }}'" :aria-selected="tab === '{{ key }}'"
+              class="px-3 py-2 text-sm -mb-px border-b-2"
+              :class="tab === '{{ key }}' ? 'border-blue-600 text-blue-700 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'">
+        {{ label }} <span class="text-xs text-gray-400">{{ n }}</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    {% macro person_list(rows, empty, show) %}
+    {% if rows %}
+    <ul class="divide-y divide-gray-100 bg-white border border-gray-200 rounded-xl mt-3">
+      {% for r in rows %}
+      <li class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+        <div class="min-w-0">
+          <p class="text-sm text-gray-800 truncate">{{ r.user.name or r.user.email }}</p>
+          <p class="text-xs text-gray-400 truncate">{{ r.user.email }}{% if r.user.department %} · {{ r.user.department.name }}{% endif %}</p>
+        </div>
+        {% set at = r.acknowledged_at if show == "ack" else r.seen_at %}
+        {% if at %}
+        <p class="text-xs text-gray-500">{{ "Enterado" if show == "ack" else "Visto" }} <time datetime="{{ at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ at.strftime('%d/%m/%Y %H:%M') }}</time></p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-gray-400 text-center py-10">{{ empty }}</p>
+    {% endif %}
+    {% endmacro %}
+
+    <div x-show="tab === 'pending'">{{ person_list(pending, "Todos lo abrieron.", "seen") }}</div>
+    {% if doc.requires_ack %}
+    <div x-show="tab === 'confirmed'" x-cloak>{{ person_list(confirmed, "Nadie ha confirmado todavía.", "ack") }}</div>
+    <div x-show="tab === 'seen'" x-cloak>{{ person_list(seen_only, "Nadie lo ha abierto sin confirmar.", "seen") }}</div>
+    {% else %}
+    <div x-show="tab === 'seen'" x-cloak>{{ person_list(seen_only + confirmed, "Nadie lo ha abierto todavía.", "seen") }}</div>
+    {% endif %}
+  </div>
+</div>
+<style>[x-cloak] { display: none !important; }</style>
+{% endblock %}
