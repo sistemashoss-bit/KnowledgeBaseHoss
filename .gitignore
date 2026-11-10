@@ -22,3 +22,6 @@ node_modules/
 
 # Bundle de pizarras (se construye en el Dockerfile; en local: cd whiteboard && npm ci && npm run build)
 app/assets/whiteboard/
+
+# Bundle del editor de documentos (se construye en el Dockerfile; en local: cd doceditor && npm ci && npm run build)
+app/assets/doceditor/

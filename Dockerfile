@@ -16,7 +16,22 @@ COPY whiteboard/build.mjs ./
 COPY whiteboard/src ./src
 RUN npm run build
 
+# Editor de documentos: GrapesJS empaquetado con esbuild (doceditor/).
+FROM node:22-slim AS doceditor
+WORKDIR /src/doceditor
+COPY doceditor/package.json doceditor/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY doceditor/build.mjs ./
+COPY doceditor/src ./src
+RUN npm run build
+
 FROM python:3.11-slim
+
+# WeasyPrint (PDF del editor de documentos, app/pdf_render.py) usa Pango y
+# HarfBuzz del sistema; DejaVu es la fuente por defecto de esos PDF.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -31,6 +46,7 @@ RUN uv sync --frozen --no-dev --no-editable
 COPY . .
 COPY --from=css /out/tailwind.css app/assets/tailwind.css
 COPY --from=whiteboard /src/app/assets/whiteboard app/assets/whiteboard
+COPY --from=doceditor /src/app/assets/doceditor app/assets/doceditor
 
 EXPOSE 8080
 

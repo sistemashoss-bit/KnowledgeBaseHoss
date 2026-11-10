@@ -10,3 +10,4 @@ __pycache__/
 node_modules/
 app/assets/tailwind.css
 app/assets/whiteboard/
+app/assets/doceditor/

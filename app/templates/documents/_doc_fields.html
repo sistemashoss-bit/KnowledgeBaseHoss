@@ -1,0 +1,116 @@
+{# Campos del alta de un documento (título, departamento, visibilidad, carpeta,
+   personas). Los usan upload.html y editor.html; el x-data que los envuelve
+   debe tener deptId, visibility e isWork. #}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Título <span class="text-red-500">*</span></label>
+        <input type="text" name="title" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+               placeholder="Política de vacaciones 2024" />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+        <textarea name="description" rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 resize-none"
+                  placeholder="Breve descripción del contenido del documento..."></textarea>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Departamento <span class="text-red-500">*</span></label>
+          {% if current_user.role == "superadmin" %}
+          <select name="department_id" x-model="deptId" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+            <option value="">Seleccionar...</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+          {% elif departments %}
+          <input type="hidden" name="department_id" value="{{ departments[0].id }}" />
+          <div class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600">
+            {{ departments[0].name }}
+          </div>
+          {% else %}
+          <p class="text-xs text-red-500">No tienes un departamento asignado; no puedes subir documentos.</p>
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Visibilidad <span class="text-red-500">*</span></label>
+          <select name="status" x-model="visibility" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+            {% for s in statuses %}
+            <option value="{{ s }}">
+              {% if s == "public" %}Público (sin login)
+              {% elif s == "employee" %}Empleados (toda la empresa)
+              {% else %}Personas específicas{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="is_work_document" value="true" x-model="isWork"
+                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          Documento de trabajo
+        </label>
+        <p class="text-xs text-gray-400 mt-1">
+          Márcalo si es un archivo en el que estás trabajando (borrador propio), no un archivo de referencia común.
+          La visibilidad elegida arriba sigue aplicando igual.
+        </p>
+      </div>
+
+      {% if folders %}
+      <div x-show="isWork" x-cloak>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Carpeta <span class="text-gray-400 font-normal">(opcional)</span></label>
+        <select name="folder_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Sin carpeta</option>
+          {% for f in folders %}
+          <option value="{{ f.id }}">{{ "—" * (f.depth - 1) }} {{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <!-- Visibility legend -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+        <div class="flex items-start gap-1.5 p-2 bg-green-50 rounded-lg border border-green-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+          <span class="text-green-700"><strong>Público</strong> — Cualquiera, sin necesidad de iniciar sesión</span>
+        </div>
+        <div class="flex items-start gap-1.5 p-2 bg-blue-50 rounded-lg border border-blue-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+          <span class="text-blue-700"><strong>Empleados</strong> — Cualquier empleado de la empresa (todos los departamentos)</span>
+        </div>
+        <div class="flex items-start gap-1.5 p-2 bg-blue-50 rounded-lg border border-blue-200">
+          <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+          <span class="text-blue-700"><strong>Personas específicas</strong> — Solo quienes elijas, del departamento del documento. Para dar acceso a alguien de otro departamento, comparte el documento después de crearlo.</span>
+        </div>
+      </div>
+
+      <!-- Selección de personas (solo cuando la visibilidad es "personas específicas") -->
+      <div x-show="visibility === 'custom'" x-cloak>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Personas <span class="text-red-500">*</span>
+        </label>
+        {% if current_user.role == "superadmin" %}
+        <p class="text-xs text-gray-400 mb-1.5" x-show="deptId === ''">Elige primero el departamento arriba.</p>
+        {% endif %}
+        <div class="border border-gray-300 rounded-lg max-h-48 overflow-y-auto divide-y divide-gray-100">
+          {% for m in members %}
+          <label class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
+                 x-show="deptId !== '' && deptId === '{{ m.department_id or '' }}'">
+            <input type="checkbox" name="allowed_user_ids" value="{{ m.id }}"
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+            <span class="text-gray-700">{{ m.name or m.email }}</span>
+            <span class="text-xs text-gray-400">{{ m.email }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <p class="text-xs text-gray-400 mt-1.5">
+          Marca a las personas del departamento del documento que podrán verlo.
+          Para dar acceso a alguien de otro departamento, comparte el documento después de crearlo.
+        </p>
+      </div>

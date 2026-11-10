@@ -1,0 +1,14 @@
+{
+  "name": "hoss-doceditor",
+  "private": true,
+  "description": "Editor libre de documentos (GrapesJS). Se compila a app/assets/doceditor/ (ver Dockerfile).",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "grapesjs": "0.23.9"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

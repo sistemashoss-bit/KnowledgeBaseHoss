@@ -1,8 +1,10 @@
+import json
+import logging
 import re
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_auth, require_role
@@ -25,9 +27,11 @@ from app.permissions import (
 from app import folders as folders_lib
 from app import rag, storage, audit
 from app import images
+from app import pdf_render
 from app.templating import templates
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
 
 
 # ── Google Drive helpers ──────────────────────────────────────────────────────
@@ -105,6 +109,33 @@ def _own_folders(db: Session, owner_id) -> list[Folder]:
 
     walk(None)
     return ordered
+
+
+# ── Editor de documentos (doceditor/, GrapesJS) ──────────────────────────────
+
+def _read_editor_project(upload: UploadFile | None) -> str:
+    """Proyecto de GrapesJS como texto JSON (se guarda tal cual para reabrirlo)."""
+    try:
+        raw = upload.file.read().decode("utf-8") if upload else ""
+        if not isinstance(json.loads(raw), dict):
+            raise ValueError
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(400, "El proyecto del editor llegó dañado; vuelve a intentarlo.")
+    return raw
+
+
+def _editor_pdf(upload: UploadFile, title: str) -> bytes:
+    html = upload.file.read().decode("utf-8", errors="replace")
+    try:
+        return pdf_render.html_to_pdf(html)
+    except Exception:
+        logger.exception("No se pudo generar el PDF del editor (%s)", title)
+        raise HTTPException(400, "No se pudo generar el PDF del documento.")
+
+
+def _pdf_filename(title: str) -> str:
+    base = re.sub(r"[^\w\-]+", "-", title or "").strip("-")[:80]
+    return f"{base or 'documento'}.pdf"
 
 
 def _reindex_document_access(db: Session, doc: Document, background_tasks: BackgroundTasks) -> None:
@@ -328,12 +359,8 @@ def list_my_documents(
     )
 
 
-@router.get("/upload", response_class=HTMLResponse)
-def upload_form(
-    request: Request,
-    db: Session = Depends(get_db),
-    user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
-):
+def _upload_context(user: User, db: Session) -> dict:
+    """Departamentos, personas y carpetas para el form de alta (subir o editor)."""
     available_statuses = STATUSES
 
     if user.role == ROLE_SUPERADMIN:
@@ -359,18 +386,123 @@ def upload_form(
 
     own_folders = _own_folders(db, user.id) if user.role in (ROLE_ADMIN, ROLE_SUPERADMIN) else []
 
-    csrf = generate_csrf_token(str(user.id))
+    return {
+        "departments": available_depts,
+        "statuses": available_statuses,
+        "members": members,
+        "folders": own_folders,
+        "current_user": user,
+        "csrf_token": generate_csrf_token(str(user.id)),
+    }
+
+
+@router.get("/upload", response_class=HTMLResponse)
+def upload_form(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
+):
+    return templates.TemplateResponse(request, "documents/upload.html", _upload_context(user, db))
+
+
+@router.get("/editor", response_class=HTMLResponse)
+def new_editor_document(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
+):
     return templates.TemplateResponse(
-        request, "documents/upload.html",
-        {
-            "departments": available_depts,
-            "statuses": available_statuses,
-            "members": members,
-            "folders": own_folders,
-            "current_user": user,
-            "csrf_token": csrf,
-        },
+        request, "documents/editor.html", {**_upload_context(user, db), "doc": None},
     )
+
+
+def _editor_document(doc_id: str, db: Session, user: User) -> Document:
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc or doc.editor_project is None:
+        raise HTTPException(404)
+    if not can_manage_document(user, doc):
+        raise HTTPException(403)
+    return doc
+
+
+@router.get("/{doc_id}/editor", response_class=HTMLResponse)
+def edit_editor_document(
+    doc_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_auth),
+):
+    doc = _editor_document(doc_id, db, user)
+    return templates.TemplateResponse(request, "documents/editor.html", {"doc": doc, "current_user": user})
+
+
+@router.get("/{doc_id}/editor/project")
+def editor_document_project(doc_id: str, db: Session = Depends(get_db), user=Depends(require_auth)):
+    doc = _editor_document(doc_id, db, user)
+    return Response(doc.editor_project, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/{doc_id}/editor")
+def save_editor_document(
+    doc_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    editor_html: UploadFile = File(...),
+    editor_project: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Guarda los cambios del editor: regenera el PDF, reemplaza el archivo y
+    reindexa. Título, visibilidad y carpeta se cambian en /edit, como siempre."""
+    storage.check_upload_sizes(editor_html, editor_project)
+    doc = _editor_document(doc_id, db, user)
+    project_json = _read_editor_project(editor_project)
+    pdf = _editor_pdf(editor_html, doc.title)
+    text = rag.extract_text(pdf, "documento.pdf")
+
+    dept = db.query(Department).filter(Department.id == doc.department_id).first()
+    filename = _pdf_filename(doc.title)
+    new_file_key = f"{dept.slug if dept else 'misc'}/{doc_id}/{filename}"
+    storage.upload_file(new_file_key, pdf, "application/pdf")
+    if doc.file_key and doc.file_key != new_file_key:
+        storage.delete_file(doc.file_key)
+    doc.file_key = new_file_key
+    doc.filename = filename
+    doc.content_type = "application/pdf"
+    doc.file_size = len(pdf)
+    doc.editor_project = project_json
+    db.commit()
+
+    allowed_user_ids = [
+        str(au.user_id) for au in db.query(DocumentAllowedUser).filter(
+            DocumentAllowedUser.document_id == doc.id
+        ).all()
+    ]
+    folder_shared_user_ids = (
+        sorted(folders_lib.effective_shared_user_ids(db, doc.folder_id)) if doc.folder_id else []
+    )
+    rag.delete_document_from_index(doc_id)
+    background_tasks.add_task(
+        rag.index_document,
+        doc_id=doc_id,
+        title=doc.title,
+        description=doc.description,
+        department_id=str(doc.department_id),
+        department_name=dept.name if dept else "",
+        status=doc.status,
+        content_type=doc.content_type,
+        uploaded_by=str(doc.uploaded_by),
+        text=text,
+        allowed_user_ids=allowed_user_ids,
+        is_work_document=doc.is_work_document,
+        folder_shared_user_ids=folder_shared_user_ids,
+    )
+    audit.log_action(
+        "edit_document", user=user, request=request,
+        resource_type="document", resource_id=doc_id, resource_name=doc.title,
+        details="editor",
+    )
+    return JSONResponse({"ok": True})
 
 
 @router.post("/upload")
@@ -386,10 +518,14 @@ def upload_document(
     allowed_user_ids: list[str] = Form(default=[]),
     drive_url: str = Form(default=""),
     file: UploadFile = File(default=None),
+    # Documento hecho en el editor (documents/editor.html): llegan como
+    # archivos porque los campos de texto de un form tienen tope de 1 MB.
+    editor_html: UploadFile = File(default=None),
+    editor_project: UploadFile = File(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN, ROLE_ADMIN)),
 ):
-    storage.check_upload_sizes(file)
+    storage.check_upload_sizes(file, editor_html, editor_project)
     if status not in STATUSES:
         raise HTTPException(400, f"Status must be one of: {STATUSES}")
 
@@ -429,11 +565,14 @@ def upload_document(
     else:
         allowed_user_ids = []
 
-    # Un documento es un archivo subido O un link de Drive, no ambos ni ninguno.
+    # Un documento es un archivo subido, un link de Drive o un documento del
+    # editor: exactamente uno de los tres.
     drive_url = drive_url.strip()
     has_file = bool(file and file.filename)
-    if has_file == bool(drive_url):
+    from_editor = bool(editor_html and editor_html.filename)
+    if has_file + bool(drive_url) + from_editor != 1:
         raise HTTPException(400, "Proporciona un archivo o un link de Google Drive (uno de los dos).")
+    project_json = _read_editor_project(editor_project) if from_editor else None
 
     doc_id = str(uuid.uuid4())
 
@@ -458,9 +597,12 @@ def upload_document(
         content_type_for_index = "drive"
         text = ""  # sin archivo: indexable solo por título/descripción
     else:
-        original = file.file.read()
-        text = rag.extract_text(original, file.filename or "file")
-        content, filename, ctype = images.optimize_image(original, file.filename or "file", file.content_type)
+        if from_editor:
+            original, upload_name, upload_ctype = _editor_pdf(editor_html, title), _pdf_filename(title), "application/pdf"
+        else:
+            original, upload_name, upload_ctype = file.file.read(), file.filename or "file", file.content_type
+        text = rag.extract_text(original, upload_name)
+        content, filename, ctype = images.optimize_image(original, upload_name, upload_ctype)
         file_key = f"{dept.slug}/{doc_id}/{filename}"
         storage.upload_file(file_key, content, ctype or "application/octet-stream")
         doc = Document(
@@ -471,6 +613,7 @@ def upload_document(
             file_key=file_key,
             content_type=ctype,
             file_size=len(content),
+            editor_project=project_json,
             department_id=department_id,
             status=status,
             is_work_document=is_work_document,
@@ -653,6 +796,8 @@ def edit_document(
             doc.filename = filename
             doc.content_type = ctype
             doc.file_size = len(content)
+            # Un archivo subido a mano reemplaza al del editor: ya no se reabre ahí.
+            doc.editor_project = None
 
     db.commit()
 
