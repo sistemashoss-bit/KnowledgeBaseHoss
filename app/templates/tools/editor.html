@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Editor de documentos{% endblock %}
 
-{# Sin el botón flotante del asistente: tapa los paneles del editor. #}
-{% block ai_widget %}{% endblock %}
+{# El widget de MAX es el de base.html con max_widget (tools/router.py): sin botón
+   flotante (taparía los paneles), se abre con el botón "MAX" del encabezado. #}
 
 {% block content %}
 <link rel="stylesheet" href="{{ asset('doceditor/grapes.min.css') }}" />
@@ -24,6 +24,12 @@
       </p>
     </div>
 
+    <button type="button" @click="window.dispatchEvent(new CustomEvent('max-open'))" :disabled="!ready"
+            title="Pídele a MAX que redacte o edite el documento"
+            class="inline-flex items-center gap-1.5 pl-1 pr-3 py-1 border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50 rounded-lg text-xs font-medium">
+      <img src="{{ asset('mascota.webp') }}" alt="" class="w-5 h-5 rounded-full bg-blue-600 object-contain" />
+      MAX
+    </button>
     <button type="button" @click="discard()" :disabled="!ready"
             class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-50 rounded-lg text-xs font-medium">
       Nuevo documento
@@ -139,6 +145,59 @@
       },
     };
   }
+</script>
+<script>
+  // MAX del editor (/tools/editor/max): cada mensaje lleva el HTML actual; si la
+  // respuesta trae un documento nuevo, se carga en el lienzo y se puede deshacer.
+  // Las imágenes (data:) no viajan: van como img:N y se reponen al aplicar.
+  (function () {
+    const ENDPOINT = '/tools/editor/max';
+    let images = [];
+    const snapshots = new Map();
+
+    function currentHtml() {
+      images = [];
+      const html = window.docEditor.editor.getHtml()
+        .replace(/^\s*<body[^>]*>/i, '').replace(/<\/body>\s*$/i, '');
+      return html.replace(/src="(data:[^"]+)"/g, (m, src) => `src="img:${images.push(src) - 1}"`);
+    }
+    function restoreImages(html) {
+      return html.replace(/src="img:(\d+)"/g, (m, i) => images[+i] ? `src="${images[+i]}"` : m);
+    }
+
+    document.addEventListener('htmx:configRequest', (e) => {
+      if (e.detail.path !== ENDPOINT || !window.docEditor) return;
+      e.detail.parameters.html = currentHtml();
+    });
+    // El documento nuevo se saca de la respuesta antes de pintarla: así no
+    // queda guardado en el historial del widget.
+    document.addEventListener('htmx:beforeSwap', (e) => {
+      if (e.detail.requestConfig?.path !== ENDPOINT || !e.detail.xhr || e.detail.xhr.status !== 200) return;
+      const re = /<script type="application\/json" data-doc-update="(\w+)">([\s\S]*?)<\/script>/;
+      const m = e.detail.serverResponse.match(re);
+      if (!m) return;
+      e.detail.serverResponse = e.detail.serverResponse.replace(re, '');
+      const editor = window.docEditor.editor;
+      snapshots.clear();
+      snapshots.set(m[1], editor.getProjectData());
+      // Solo se puede deshacer el último cambio de MAX.
+      document.querySelectorAll('[data-doc-undo-row]').forEach((el) => el.remove());
+      editor.select(null);
+      editor.setComponents(restoreImages(JSON.parse(m[2])));
+    });
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-doc-undo]');
+      if (!btn) return;
+      const snap = snapshots.get(btn.dataset.docUndo);
+      if (snap) {
+        window.docEditor.editor.loadProjectData(snap);
+        snapshots.delete(btn.dataset.docUndo);
+        btn.replaceWith(Object.assign(document.createElement('span'), { className: 'text-xs text-gray-400', textContent: 'Cambio deshecho' }));
+      } else {
+        btn.replaceWith(Object.assign(document.createElement('span'), { className: 'text-xs text-gray-400', textContent: 'Ya no se puede deshacer' }));
+      }
+    });
+  })();
 </script>
 <script defer src="{{ asset('doceditor/editor.js') }}"></script>
 {% endblock %}

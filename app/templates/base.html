@@ -377,7 +377,12 @@
 
   {% block ai_widget %}
   <!-- ── Floating AI chat widget ─────────────────────────────────────────── -->
-  <div data-menu-background x-data="chatWidget('{{ current_user.id if current_user else '' }}')"
+  {# `max_widget` (opcional, desde el router): la página usa el mismo widget con
+     otro endpoint y otra memoria; p. ej. el editor de documentos (tools/router.py).
+     Con fab=False no hay botón flotante: la página lo abre con el evento max-open. #}
+  {% set mw = max_widget or {} %}
+  <div data-menu-background x-data="chatWidget('{{ current_user.id if current_user else '' }}', {{ {'storage': mw.storage or '', 'clearUrl': mw.clear_url or '/chat/clear', 'fab': mw.fab is not defined or mw.fab} | tojson | forceescape }})"
+       @max-open.window="openMax()"
        @htmx:before-request="loading = true"
        @htmx:after-request="loading = false"
        @htmx:after-swap="loading = false; if ($event.detail.target && $event.detail.target.id === 'widget-messages') { msgs++; scrollBottom(); $refs.form.reset(); } saveChat()"
@@ -403,7 +408,7 @@
         </div>
         <div class="flex-1 min-w-0">
           <p class="text-white font-semibold text-sm leading-tight">MAX</p>
-          <p class="text-blue-200 text-xs">{{ 'Documentos, tareas y chats' if current_user else 'Busca en los documentos' }}</p>
+          <p class="text-blue-200 text-xs">{{ mw.subtitle or ('Documentos, tareas y chats' if current_user else 'Busca en los documentos') }}</p>
         </div>
         <div class="flex items-center gap-1">
           <button x-show="msgs > 0" @click="clearChat()"
@@ -429,8 +434,8 @@
                       d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
               </svg>
             </div>
-            <p class="text-sm font-medium text-gray-700">¿En qué puedo ayudarte?</p>
-            <p class="text-xs text-gray-400 mt-1">{{ 'Pregunta por documentos, tus tareas, tus chats o lo que necesites' if current_user else 'Pregunta sobre políticas, procesos o cualquier documento' }}</p>
+            <p class="text-sm font-medium text-gray-700">{{ mw.empty_title or '¿En qué puedo ayudarte?' }}</p>
+            <p class="text-xs text-gray-400 mt-1">{{ mw.empty_text or ('Pregunta por documentos, tus tareas, tus chats o lo que necesites' if current_user else 'Pregunta sobre políticas, procesos o cualquier documento') }}</p>
           </div>
         </template>
         <div x-ref="messages" id="widget-messages"></div>
@@ -454,14 +459,14 @@
       <!-- Input -->
       <div class="border-t border-gray-100 px-3 py-3 shrink-0 bg-white">
         <form x-ref="form"
-              hx-post="/chat/?mode=widget"
+              hx-post="{{ mw.endpoint or '/chat/?mode=widget' }}"
               hx-target="#widget-messages"
               hx-swap="beforeend"
               class="flex gap-2 items-end">
           <textarea x-ref="input"
                     name="question"
                     rows="1"
-                    placeholder="Escribe tu pregunta..."
+                    placeholder="{{ mw.placeholder or 'Escribe tu pregunta...' }}"
                     :disabled="loading"
                     @keydown.enter.prevent="if (!loading && $event.target.value.trim()) $refs.form.dispatchEvent(new Event('submit', {bubbles:true}))"
                     class="flex-1 resize-none px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 placeholder-gray-400 transition-colors leading-snug"
@@ -514,7 +519,7 @@
     </div>
 
     <!-- Toggle FAB -->
-    <button type="button" @click="fabClick()"
+    <button type="button" @click="fabClick()" x-show="fab"
             :aria-label="(open || menu || report) ? 'Cerrar' : (canReport ? 'Abrir asistentes' : 'Abrir asistente de IA')"
             :aria-expanded="open || menu || report"
             class="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95">
@@ -539,13 +544,14 @@
     // apps). Sin botón propio: se abre desde el menú del botón de MAX.
     const REPORT_WIDGET_SRC = 'https://storage.googleapis.com/hoss-cdn/report-widget/v1/report-widget.js';
 
-    function chatWidget(userId) {
-      const key = userId ? `kb_chat_${userId}` : 'kb_chat_anon';
+    function chatWidget(userId, opts = {}) {
+      const base = userId ? `kb_chat_${userId}` : 'kb_chat_anon';
+      const key = opts.storage ? `${base}_${opts.storage}` : base;
       return {
         open: false, loading: false, msgs: 0,
-        menu: false, report: false, canReport: false,
+        menu: false, report: false, canReport: false, fab: opts.fab !== false,
         init() {
-          if (userId) this.loadReportWidget();
+          if (userId && this.fab) this.loadReportWidget();
           try {
             const saved = localStorage.getItem(key);
             if (saved) {
@@ -570,7 +576,7 @@
           this.msgs = 0;
           localStorage.removeItem(key);
           // MAX también olvida la conversación (memoria corta del servidor).
-          if (userId) fetch('/chat/clear', { method: 'POST' }).catch(() => {});
+          if (userId) fetch(opts.clearUrl || '/chat/clear', { method: 'POST' }).catch(() => {});
         },
         toggle() { this.open = !this.open; if (this.open) this.$nextTick(() => this.$refs.input.focus()); },
         // El botón cierra lo que esté abierto; si no hay nada, abre el menú

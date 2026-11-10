@@ -1,0 +1,11 @@
+{# Turno del MAX del editor: las mismas burbujas del widget y, si cambió el
+   documento, el HTML nuevo en JSON. tools/editor.html lo saca de la respuesta
+   antes de pintarla (no queda en el historial guardado) y lo carga en el lienzo. #}
+{% include "chat/_widget_response.html" %}
+{% if doc_html is not none %}
+<div class="flex justify-start" style="padding-left: 1.75rem; margin-top: 0.25rem;" data-doc-undo-row="{{ update_id }}">
+  <button type="button" data-doc-undo="{{ update_id }}"
+          class="text-xs text-blue-600 hover:text-blue-500 hover:underline">Deshacer este cambio</button>
+</div>
+<script type="application/json" data-doc-update="{{ update_id }}">{{ doc_html | tojson }}</script>
+{% endif %}
