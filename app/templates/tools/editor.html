@@ -8,15 +8,26 @@
 <link rel="stylesheet" href="{{ asset('doceditor/grapes.min.css') }}" />
 <div class="flex-1 min-h-0 flex flex-col bg-white"
      x-data="docEditorPage()"
-     @doc-editor-ready.window="ready = true">
+     @doc-editor-ready.window="ready = true"
+     @doc-draft.window="draft = $event.detail.state">
 
   <!-- Encabezado -->
   <div class="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-gray-200">
     <div class="min-w-0 flex-1">
       <h1 class="text-base font-semibold text-gray-900 truncate">Editor de documentos</h1>
-      <p class="text-xs text-gray-400 truncate">Hoja A4 · no se guarda: descarga el PDF{% if can_upload %} o súbelo a Documentos{% endif %} antes de salir</p>
+      <p class="text-xs truncate" :class="draft === 'error' ? 'text-amber-600' : 'text-gray-400'">
+        Hoja A4 ·
+        <span x-show="draft === 'restored'" x-cloak>se recuperó tu borrador de este navegador</span>
+        <span x-show="draft === 'saved'" x-cloak>borrador guardado en este navegador</span>
+        <span x-show="draft === 'error'" x-cloak>el borrador no cabe en este navegador (¿imágenes pesadas?): descarga o sube antes de salir</span>
+        <span x-show="!draft">el borrador se guarda solo en este navegador{% if can_upload %} hasta que lo subas{% endif %}</span>
+      </p>
     </div>
 
+    <button type="button" @click="discard()" :disabled="!ready"
+            class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-50 rounded-lg text-xs font-medium">
+      Nuevo documento
+    </button>
     <button type="button" @click="preview()" :disabled="!ready"
             title="Abre la vista de impresión: desde ahí puedes ver el PDF o guardarlo en tu equipo"
             class="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 rounded-lg text-xs font-medium">
@@ -25,12 +36,12 @@
     {% if can_upload %}
     <button type="button" @click="panel = true; error = ''" :disabled="!ready"
             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white rounded-lg text-xs font-medium">
-      Subir a Documentos
+      Subir
     </button>
     {% endif %}
   </div>
 
-  <div id="doceditor" class="flex-1 min-h-0"></div>
+  <div id="doceditor" class="flex-1 min-h-0" data-draft-key="doceditor:draft:{{ current_user.id }}"></div>
 
   {% if can_upload %}
   <!-- Datos del documento al subirlo (los mismos campos que "Subir documento") -->
@@ -41,8 +52,10 @@
           class="relative w-full max-w-lg h-full overflow-y-auto bg-white shadow-2xl p-5 sm:p-6 space-y-5">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-base font-semibold text-gray-900">Subir a Documentos</h2>
-          <p class="text-xs text-gray-500 mt-1">Se sube como PDF y se indexa para búsqueda e IA, igual que un archivo subido.</p>
+          <h2 class="text-base font-semibold text-gray-900" x-text="kind === 'announcement' ? 'Publicar comunicado' : 'Subir a Documentos'"></h2>
+          <p class="text-xs text-gray-500 mt-1" x-text="kind === 'announcement'
+            ? 'Se publica como PDF en Comunicados y se avisa a quienes pueden verlo.'
+            : 'Se sube como PDF y se indexa para búsqueda e IA, igual que un archivo subido.'"></p>
         </div>
         <button type="button" @click="panel = false" :disabled="busy" aria-label="Cerrar"
                 class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
@@ -51,13 +64,27 @@
       </div>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
 
+      <div>
+        <span class="block text-sm font-medium text-gray-700 mb-1">Tipo</span>
+        <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="radiogroup" aria-label="Tipo">
+          <label class="px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer"
+                 :class="kind === 'document' ? 'bg-blue-600 text-white' : 'text-gray-600'">
+            <input type="radio" name="kind" value="document" x-model="kind" class="sr-only" /> Documento
+          </label>
+          <label class="px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer"
+                 :class="kind === 'announcement' ? 'bg-blue-600 text-white' : 'text-gray-600'">
+            <input type="radio" name="kind" value="announcement" x-model="kind" class="sr-only" /> Comunicado
+          </label>
+        </div>
+      </div>
+
       {% include "documents/_doc_fields.html" %}
 
       <p x-show="error" x-cloak x-text="error" class="text-sm text-red-600"></p>
       <div class="flex gap-3 pt-2">
         <button type="submit" :disabled="busy"
                 class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white rounded-lg text-sm font-medium">
-          <span x-show="!busy">Generar PDF y subir</span><span x-show="busy" x-cloak>Generando PDF…</span>
+          <span x-show="!busy" x-text="kind === 'announcement' ? 'Generar PDF y publicar' : 'Generar PDF y subir'"></span><span x-show="busy" x-cloak>Generando PDF…</span>
         </button>
         <button type="button" @click="panel = false" :disabled="busy"
                 class="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Cancelar</button>
@@ -75,9 +102,15 @@
 <script>
   function docEditorPage() {
     return {
-      ready: false, busy: false, panel: false, error: '',
+      ready: false, busy: false, panel: false, error: '', draft: '',
+      kind: '{{ kind }}',
       deptId: '{% if can_upload and current_user.role != "superadmin" and departments %}{{ departments[0].id }}{% endif %}',
       visibility: '', isWork: false,
+      discard() {
+        if (!confirm('¿Empezar un documento nuevo? Se borra el borrador actual.')) return;
+        window.docEditor.clearDraft();
+        window.location.reload();
+      },
       preview() {
         const title = (this.$refs.form && this.$refs.form.elements.title.value) || 'Documento';
         window.docEditor.printDocument(title);
@@ -95,8 +128,9 @@
               : r.status === 413 ? 'El documento es demasiado grande (revisa el tamaño de las imágenes).' : `Error ${r.status}`;
             return;
           }
-          window.docEditor.markSaved();
-          window.location.href = '/documents/mine';
+          window.docEditor.clearDraft();
+          // El servidor redirige a /announcements/ o /documents/ según el tipo.
+          window.location.href = r.redirected ? r.url : '/documents/mine';
         } catch (e) {
           this.error = 'No se pudo subir: ' + e.message;
         } finally {

@@ -275,6 +275,11 @@ class User(Base):
     sent_messages = relationship("Message", back_populates="sender", passive_deletes=True, foreign_keys="Message.sender_id")
 
 
+DOC_KIND_DOCUMENT = "document"
+DOC_KIND_ANNOUNCEMENT = "announcement"
+DOC_KINDS = (DOC_KIND_DOCUMENT, DOC_KIND_ANNOUNCEMENT)
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -298,6 +303,9 @@ class Document(Base):
     # persona está trabajando (p.ej. un borrador propio). No es un nivel de
     # visibilidad: hereda el mismo control de acceso selectivo de `status`.
     is_work_document = Column(Boolean, nullable=False, default=False)
+    # Tipo: documento normal o comunicado (sección Comunicados). Mismos
+    # permisos; un comunicado solo puede ser PDF y no va en Documentos.
+    kind = Column(String(20), nullable=False, default=DOC_KIND_DOCUMENT, server_default=DOC_KIND_DOCUMENT)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     # Carpeta (solo docs de trabajo, ver Folder). Null = sin carpeta.
     folder_id = Column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)

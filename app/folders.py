@@ -76,4 +76,5 @@ def reindex_folder_subtree(db: Session, folder_id, background_tasks) -> None:
             allowed_user_ids=allowed_user_ids,
             is_work_document=doc.is_work_document,
             folder_shared_user_ids=shared_ids,
+            kind=doc.kind,
         )

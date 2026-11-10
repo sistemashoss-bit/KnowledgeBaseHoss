@@ -1,5 +1,7 @@
 // Editor de documentos (GrapesJS), en Herramientas. Lo monta tools/editor.html.
-// No guarda nada propio: el mismo HTML (buildDocument) sirve para las dos salidas.
+// No guarda nada en el servidor: el borrador vive en localStorage de este
+// navegador (uno por usuario) hasta que se sube a Documentos o se descarta.
+// El mismo HTML (buildDocument) sirve para las dos salidas.
 //   - Vista previa / PDF en el navegador: se imprime en un iframe oculto
 //     (el usuario elige "Guardar como PDF"); no toca el servidor.
 //   - Subir a Documentos: se manda a /documents/upload, que lo convierte con
@@ -92,15 +94,61 @@ function init(el) {
     editor.Blocks.add(id, { label, content, category: 'Documento', media: icon(ICONS[id]) });
   }
 
-  // Nada se guarda: si hay cambios sin subir ni descargar, avisa antes de salir.
+  // Borrador en localStorage: se escribe poco después de cada cambio y al
+  // salir. `dirty` = hay cambios que no quedaron en el borrador (pendientes o
+  // porque no cupieron, p. ej. imágenes pesadas): solo entonces se avisa al salir.
+  const draftKey = el.dataset.draftKey;
   let dirty = false;
+  let timer = null;
+  const emitDraft = (state) => window.dispatchEvent(new CustomEvent('doc-draft', { detail: { state } }));
+
+  function readDraft() {
+    try {
+      const raw = draftKey && localStorage.getItem(draftKey);
+      return raw ? JSON.parse(raw).project : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveDraft() {
+    clearTimeout(timer);
+    timer = null;
+    if (!dirty || !draftKey) return;
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ v: 1, savedAt: Date.now(), project: editor.getProjectData() }));
+      dirty = false;
+      emitDraft('saved');
+    } catch {
+      emitDraft('error');
+    }
+  }
+
+  function clearDraft() {
+    clearTimeout(timer);
+    timer = null;
+    dirty = false;
+    try { if (draftKey) localStorage.removeItem(draftKey); } catch { /* sin almacenamiento */ }
+  }
+
   editor.on('load', () => {
-    editor.setComponents('<h1>Título del documento</h1><p>Escribe aquí el texto del documento.</p>');
+    const draft = readDraft();
+    let restored = false;
+    if (draft) {
+      try { editor.loadProjectData(draft); restored = true; } catch { clearDraft(); }
+    }
+    if (!restored) editor.setComponents('<h1>Título del documento</h1><p>Escribe aquí el texto del documento.</p>');
+    if (restored) emitDraft('restored');
     editor.Blocks.render();
     editor.Panels.getButton('views', 'open-blocks')?.set('active', true);
-    editor.on('update', () => { dirty = true; });
+    editor.on('update', () => {
+      dirty = true;
+      clearTimeout(timer);
+      timer = setTimeout(saveDraft, 800);
+    });
   });
   window.addEventListener('beforeunload', (e) => {
+    saveDraft();
     if (dirty) e.preventDefault();
   });
 
@@ -132,14 +180,11 @@ function init(el) {
       frame.contentWindow.print();
       document.title = prevTitle;
       setTimeout(() => frame.remove(), 1000);
-      dirty = false;
     });
   }
 
   const html = (title) => new Blob([buildDocument(title)], { type: 'text/html' });
-  const markSaved = () => { dirty = false; };
-
-  window.docEditor = { editor, buildDocument, printDocument, html, markSaved };
+  window.docEditor = { editor, buildDocument, printDocument, html, clearDraft };
   window.dispatchEvent(new CustomEvent('doc-editor-ready'));
 }
 

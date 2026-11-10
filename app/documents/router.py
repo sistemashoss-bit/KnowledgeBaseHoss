@@ -11,6 +11,7 @@ from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app.models import (
     Branch, Department, Document, DocumentAllowedUser, Folder, FolderAllowedUser, User, Zone,
+    DOC_KIND_ANNOUNCEMENT, DOC_KIND_DOCUMENT, DOC_KINDS,
     FOLDER_MAX_DEPTH, ROLE_ADMIN, ROLE_SUPERADMIN, STATUSES, STATUS_CUSTOM,
 )
 from app.permissions import (
@@ -27,6 +28,7 @@ from app import folders as folders_lib
 from app import rag, storage, audit
 from app import images
 from app import pdf_render
+from app.messaging import realtime
 from app.templating import templates
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -83,10 +85,10 @@ def _preview_meta(doc_id: str, content_type: str, drive_url: str | None) -> dict
 
 
 def _safe_return_to(value: str) -> str:
-    """Solo permite volver a una ruta interna de /documents/ (evita open
-    redirect); cualquier otra cosa cae al listado general."""
+    """Solo permite volver a una ruta interna de /documents/ o /announcements/
+    (evita open redirect); cualquier otra cosa cae al listado general."""
     value = (value or "").strip()
-    if value.startswith("/documents/") and not value.startswith("//"):
+    if value.startswith(("/documents/", "/announcements/")) and not value.startswith("//"):
         return value
     return "/documents/"
 
@@ -121,6 +123,28 @@ def _editor_pdf(upload: UploadFile, title: str) -> bytes:
         raise HTTPException(400, "No se pudo generar el PDF del documento.")
 
 
+def _is_pdf(content: bytes, filename: str) -> bool:
+    return (filename or "").lower().endswith(".pdf") and content[:5] == b"%PDF-"
+
+
+# Tope de destinatarios por evento en notificationservice (consumer.go).
+_NOTIFY_BATCH = 1000
+
+
+def _notify_announcement(db: Session, doc: Document, allowed_user_ids: list[str], actor: User) -> None:
+    """Aviso in-app de un comunicado nuevo a quienes pueden verlo: todos los
+    activos si es público o de empleados; si es de personas específicas, a ellas."""
+    q = db.query(User.id).filter(User.is_active == True, User.is_bot == False, User.id != actor.id)  # noqa: E712
+    if doc.status == STATUS_CUSTOM:
+        q = q.filter(User.id.in_(allowed_user_ids or []))
+    ids = [uid for (uid,) in q]
+    for i in range(0, len(ids), _NOTIFY_BATCH):
+        realtime.notify_users(
+            ids[i:i + _NOTIFY_BATCH], title=f"Nuevo comunicado: {doc.title}",
+            body=doc.description or "", url="/announcements/", kind="announcement",
+        )
+
+
 def _pdf_filename(title: str) -> str:
     base = re.sub(r"[^\w\-]+", "-", title or "").strip("-")[:80]
     return f"{base or 'documento'}.pdf"
@@ -151,6 +175,7 @@ def _reindex_document_access(db: Session, doc: Document, background_tasks: Backg
         allowed_user_ids=allowed_user_ids,
         folder_shared_user_ids=folder_shared_user_ids,
         is_work_document=doc.is_work_document,
+        kind=doc.kind,
     )
 
 
@@ -164,14 +189,19 @@ def list_documents(
     user=Depends(get_current_user),
 ):
     access_filter = build_access_filter(user)
-    raw_docs = rag.search_documents(q, access_filter, department_id or None)
+    raw_docs = rag.search_documents(q, access_filter, department_id or None, kind=DOC_KIND_DOCUMENT)
 
     # OpenSearch no guarda drive_url; se enriquece desde la BD por id.
     ids = [d["id"] for d in raw_docs if d.get("id")]
     drive_map: dict[str, str | None] = {}
     if ids:
-        for row in db.query(Document.id, Document.drive_url).filter(Document.id.in_(ids)).all():
+        # Solo documentos según la BD: si el índice quedara desfasado, un
+        # comunicado no se cuela aquí (Comunicados hace el mismo cruce).
+        for row in db.query(Document.id, Document.drive_url).filter(
+            Document.id.in_(ids), Document.kind == DOC_KIND_DOCUMENT,
+        ).all():
             drive_map[str(row.id)] = row.drive_url
+    raw_docs = [d for d in raw_docs if str(d.get("id")) in drive_map]
 
     docs = []
     for d in raw_docs:
@@ -296,14 +326,19 @@ def list_my_documents(
 
     raw_docs = rag.search_documents(
         q, access_filter, search_department_id, size=200,
-        work_only=(tab == "work"), uploaded_by=search_uploaded_by,
+        work_only=(tab == "work"), uploaded_by=search_uploaded_by, kind=DOC_KIND_DOCUMENT,
     )
 
     ids = [d["id"] for d in raw_docs if d.get("id")]
     drive_map: dict[str, str | None] = {}
     if ids:
-        for row in db.query(Document.id, Document.drive_url).filter(Document.id.in_(ids)).all():
+        # Solo documentos según la BD: si el índice quedara desfasado, un
+        # comunicado no se cuela aquí (Comunicados hace el mismo cruce).
+        for row in db.query(Document.id, Document.drive_url).filter(
+            Document.id.in_(ids), Document.kind == DOC_KIND_DOCUMENT,
+        ).all():
             drive_map[str(row.id)] = row.drive_url
+    raw_docs = [d for d in raw_docs if str(d.get("id")) in drive_map]
 
     can_drag_to_folder = tab == "work" and user.role in (ROLE_ADMIN, ROLE_SUPERADMIN)
 
@@ -405,6 +440,7 @@ def upload_document(
     folder_id: str = Form(default=""),
     allowed_user_ids: list[str] = Form(default=[]),
     drive_url: str = Form(default=""),
+    kind: str = Form(default=DOC_KIND_DOCUMENT),
     file: UploadFile = File(default=None),
     # Documento hecho en el editor (Herramientas → Editor de documentos, ver
     # app/tools/router.py). Llega como archivo porque los campos de texto de
@@ -416,6 +452,13 @@ def upload_document(
     storage.check_upload_sizes(file, editor_html)
     if status not in STATUSES:
         raise HTTPException(400, f"Status must be one of: {STATUSES}")
+    if kind not in DOC_KINDS:
+        raise HTTPException(400, "Tipo de documento inválido.")
+    is_announcement = kind == DOC_KIND_ANNOUNCEMENT
+    if is_announcement:
+        # Un comunicado no es un borrador ni va en carpetas.
+        is_work_document = False
+        folder_id = ""
 
     if user.role == ROLE_ADMIN:
         # Un admin solo puede crear documentos en su propio departamento,
@@ -460,6 +503,8 @@ def upload_document(
     from_editor = bool(editor_html and editor_html.filename)
     if has_file + bool(drive_url) + from_editor != 1:
         raise HTTPException(400, "Proporciona un archivo o un link de Google Drive (uno de los dos).")
+    if is_announcement and drive_url:
+        raise HTTPException(400, "Un comunicado debe ser un PDF, no un link de Drive.")
 
     doc_id = str(uuid.uuid4())
 
@@ -488,6 +533,8 @@ def upload_document(
             original, upload_name, upload_ctype = _editor_pdf(editor_html, title), _pdf_filename(title), "application/pdf"
         else:
             original, upload_name, upload_ctype = file.file.read(), file.filename or "file", file.content_type
+            if is_announcement and not _is_pdf(original, upload_name):
+                raise HTTPException(400, "Un comunicado solo puede ser un archivo PDF.")
         text = rag.extract_text(original, upload_name)
         content, filename, ctype = images.optimize_image(original, upload_name, upload_ctype)
         file_key = f"{dept.slug}/{doc_id}/{filename}"
@@ -500,6 +547,7 @@ def upload_document(
             file_key=file_key,
             content_type=ctype,
             file_size=len(content),
+            kind=kind,
             department_id=department_id,
             status=status,
             is_work_document=is_work_document,
@@ -529,12 +577,16 @@ def upload_document(
         allowed_user_ids=allowed_user_ids,
         is_work_document=is_work_document,
         folder_shared_user_ids=folder_shared_user_ids,
+        kind=kind,
     )
 
     audit.log_action(
-        "upload_document", user=user, request=request,
+        "upload_announcement" if is_announcement else "upload_document", user=user, request=request,
         resource_type="document", resource_id=doc_id, resource_name=title,
     )
+    if is_announcement:
+        _notify_announcement(db, doc, allowed_user_ids, user)
+        return RedirectResponse("/announcements/", status_code=302)
     return RedirectResponse("/documents/", status_code=302)
 
 
@@ -613,6 +665,9 @@ def edit_document(
         raise HTTPException(403)
     if status not in STATUSES:
         raise HTTPException(400)
+    if doc.kind == DOC_KIND_ANNOUNCEMENT:
+        is_work_document = False
+        folder_id = ""
 
     # Solo quien subió el documento gestiona su carpeta; cualquier otro editor
     # (admin del depto gestionando algo ajeno) deja doc.folder_id tal cual
@@ -671,6 +726,8 @@ def edit_document(
             doc.drive_url = drive_url
     elif file and file.filename:
         original = file.file.read()
+        if original and doc.kind == DOC_KIND_ANNOUNCEMENT and not _is_pdf(original, file.filename):
+            raise HTTPException(400, "Un comunicado solo puede ser un archivo PDF.")
         if original:
             new_text = rag.extract_text(original, file.filename)
             content, filename, ctype = images.optimize_image(original, file.filename, file.content_type)
@@ -713,6 +770,7 @@ def edit_document(
             allowed_user_ids=full_allowed_user_ids,
             is_work_document=doc.is_work_document,
             folder_shared_user_ids=folder_shared_user_ids,
+            kind=doc.kind,
         )
     else:
         # Metadata only — update title/status/dept in existing chunks
@@ -729,6 +787,7 @@ def edit_document(
             allowed_user_ids=full_allowed_user_ids,
             is_work_document=doc.is_work_document,
             folder_shared_user_ids=folder_shared_user_ids,
+            kind=doc.kind,
         )
 
     audit.log_action(

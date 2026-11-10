@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Editar documento{% endblock %}
+{% block title %}{% if doc.kind == "announcement" %}Editar comunicado{% else %}Editar documento{% endif %}{% endblock %}
 
 {% block content %}
 <div class="flex-1 overflow-y-auto p-4 sm:p-6"
@@ -104,7 +104,7 @@
     <div class="mb-6 flex items-start justify-between">
       <div>
         <a href="{{ return_to or '/documents/' }}" class="text-sm text-blue-600 hover:text-blue-500">← Volver a documentos</a>
-        <h1 class="text-xl font-bold text-gray-900 mt-2">Editar documento</h1>
+        <h1 class="text-xl font-bold text-gray-900 mt-2">{% if doc.kind == "announcement" %}Editar comunicado{% else %}Editar documento{% endif %}</h1>
         <p class="text-sm text-gray-500 mt-0.5">Los cambios re-indexarán el documento automáticamente</p>
       </div>
       <a href="/documents/{{ doc.id }}/share"
@@ -145,6 +145,7 @@
         </select>
       </div>
 
+      {% if doc.kind != "announcement" %}
       <div>
         <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
           <input type="checkbox" name="is_work_document" value="true" x-model="isWork"
@@ -156,6 +157,7 @@
           La visibilidad elegida arriba sigue aplicando igual.
         </p>
       </div>
+      {% endif %}
 
       {% if can_assign_folder %}
       <div x-show="isWork" x-cloak>
@@ -222,7 +224,7 @@
             <span x-show="!newFile">Seleccionar nuevo archivo…</span>
             <span x-show="newFile" x-text="newFile"></span>
           </span>
-          <input type="file" name="file" class="hidden"
+          <input type="file" name="file" class="hidden"{% if doc.kind == "announcement" %} accept="application/pdf,.pdf"{% endif %}
                  @change="newFile = $event.target.files[0]?.name || ''" />
         </label>
         <p class="text-xs text-gray-400 mt-1.5" x-show="newFile">

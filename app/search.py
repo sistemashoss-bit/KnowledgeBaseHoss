@@ -51,6 +51,7 @@ def ensure_indices() -> None:
                         "allowed_user_ids": {"type": "keyword"},
                         "folder_shared_user_ids": {"type": "keyword"},
                         "is_work_document": {"type": "boolean"},
+                        "kind": {"type": "keyword"},
                         "created_at": {"type": "date"},
                     }
                 }
@@ -63,6 +64,9 @@ def ensure_indices() -> None:
         _add_field_mapping(client, DOCUMENTS_INDEX, "is_work_document", {"type": "boolean"})
         # Índice preexistente de antes de carpetas compartidas: agrega el campo.
         _add_field_mapping(client, DOCUMENTS_INDEX, "folder_shared_user_ids", {"type": "keyword"})
+        # Índice preexistente de antes de Comunicados: agrega el campo. Los
+        # documentos ya indexados no lo tienen y cuentan como "document".
+        _add_field_mapping(client, DOCUMENTS_INDEX, "kind", {"type": "keyword"})
 
     _ensure_chunks_index(client)
 

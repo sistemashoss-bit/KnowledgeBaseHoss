@@ -144,6 +144,10 @@ def index_document(
     allowed_user_ids: list[str] | None = None,
     is_work_document: bool = False,
     folder_shared_user_ids: list[str] | None = None,
+    *,
+    # Obligatorio (sin default): este registro reemplaza al anterior completo;
+    # si se omitiera, un comunicado volvería a quedar como documento.
+    kind: str,
 ) -> None:
     client = search_module.get_client()
     allowed_user_ids = allowed_user_ids or []
@@ -164,6 +168,7 @@ def index_document(
             "allowed_user_ids": allowed_user_ids,
             "folder_shared_user_ids": folder_shared_user_ids,
             "is_work_document": bool(is_work_document),
+            "kind": kind or "document",
         },
     )
 
@@ -212,6 +217,10 @@ def update_document_metadata(
     allowed_user_ids: list[str] | None = None,
     is_work_document: bool = False,
     folder_shared_user_ids: list[str] | None = None,
+    *,
+    # Obligatorio (sin default): este registro reemplaza al anterior completo;
+    # si se omitiera, un comunicado volvería a quedar como documento.
+    kind: str,
 ) -> None:
     """Update metadata fields in OpenSearch without touching chunk content."""
     client = search_module.get_client()
@@ -233,6 +242,7 @@ def update_document_metadata(
             "allowed_user_ids": allowed_user_ids,
             "folder_shared_user_ids": folder_shared_user_ids,
             "is_work_document": bool(is_work_document),
+            "kind": kind or "document",
         },
     )
 
@@ -284,6 +294,10 @@ def delete_document_from_index(doc_id: str) -> None:
 
 # ── Document search (BM25 — listing/filtering, not Q&A) ──────────────────────
 
+def _kind_must_not(kind: str | None) -> list[dict]:
+    return [{"term": {"kind": "announcement"}}] if kind == "document" else []
+
+
 def search_documents(
     query: str,
     access_filter: dict,
@@ -291,12 +305,15 @@ def search_documents(
     size: int = 24,
     work_only: bool | None = None,
     uploaded_by: str | None = None,
+    kind: str | None = None,
 ) -> list[dict]:
     """`work_only`: None = sin filtro; True = solo documentos de trabajo;
     False = solo archivos comunes (incluye los indexados antes de este campo,
     que no lo tienen seteado — must_not sobre `true` los deja pasar).
     `uploaded_by`: filtra por autor (usado por el filtro de empleado en
-    /documents/mine, pestaña de trabajo)."""
+    /documents/mine, pestaña de trabajo).
+    `kind`: None = todos; "announcement" = solo comunicados; "document" = el
+    resto (incluye los indexados antes de este campo)."""
     client = search_module.get_client()
 
     must: list[dict] = (
@@ -314,6 +331,9 @@ def search_documents(
         filters.append({"term": {"is_work_document": True}})
     elif work_only is False:
         must_not.append({"term": {"is_work_document": True}})
+    must_not.extend(_kind_must_not(kind))
+    if kind == "announcement":
+        filters.append({"term": {"kind": "announcement"}})
 
     bool_query: dict = {"must": must, "filter": filters}
     if must_not:
@@ -343,7 +363,8 @@ def document_department_counts(query: str, access_filter: dict) -> dict[str, int
         res = client.search(
             index=search_module.DOCUMENTS_INDEX,
             body={
-                "query": {"bool": {"must": must, "filter": [access_filter]}},
+                # Solo documentos: los comunicados tienen su propia sección.
+                "query": {"bool": {"must": must, "filter": [access_filter], "must_not": _kind_must_not("document")}},
                 "size": 0,
                 "aggs": {"departments": {"terms": {"field": "department_id", "size": 1000}}},
             },

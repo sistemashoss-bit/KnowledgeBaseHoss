@@ -167,6 +167,7 @@ from app.messaging.router import router as messaging_router
 from app.reports.router import router as reports_router
 from app.whiteboards.router import router as whiteboards_router
 from app.tools.router import router as tools_router
+from app.announcements.router import router as announcements_router
 from app.trainings.router import router as trainings_router
 from app.notifications.router import router as notifications_router
 from app.issue_reports.router import router as issue_reports_router
@@ -198,6 +199,7 @@ app.include_router(issue_reports_router)
 app.include_router(calendar_router)
 app.include_router(whiteboards_router)
 app.include_router(tools_router)
+app.include_router(announcements_router)
 app.include_router(trainings_router)
 app.include_router(assistant_router)
 app.include_router(tickets_router)
