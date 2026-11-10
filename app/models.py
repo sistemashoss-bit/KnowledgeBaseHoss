@@ -430,6 +430,15 @@ task_projects = Table(
     Column("project_id", UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True, index=True),
 )
 
+# Dependencias entre tareas (Gantt): task_id espera a que depends_on_id termine.
+task_dependencies = Table(
+    "task_dependencies",
+    Base.metadata,
+    Column("task_id", UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
+    Column("depends_on_id", UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True, index=True),
+    CheckConstraint("task_id <> depends_on_id", name="ck_task_dependencies_not_self"),
+)
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -447,6 +456,8 @@ class Project(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
+    # Activa la pestaña Gantt y, en sus tareas, el inicio y las dependencias.
+    gantt_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -480,6 +491,9 @@ class Task(Base):
     # el documento se elimina para no borrar la tarea.
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
 
+    # Inicio planeado (solo se usa en proyectos con Gantt); si falta, el Gantt
+    # usa created_at.
+    start_date = Column(Date, nullable=True)
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -495,6 +509,19 @@ class Task(Base):
 
     projects = relationship(
         "Project", secondary=task_projects, back_populates="tasks", order_by="Project.name", passive_deletes=True,
+    )
+    # Tareas que deben terminar antes que esta / tareas que esperan a esta.
+    depends_on = relationship(
+        "Task", secondary=task_dependencies,
+        primaryjoin=lambda: Task.id == task_dependencies.c.task_id,
+        secondaryjoin=lambda: Task.id == task_dependencies.c.depends_on_id,
+        back_populates="blocks", passive_deletes=True,
+    )
+    blocks = relationship(
+        "Task", secondary=task_dependencies,
+        primaryjoin=lambda: Task.id == task_dependencies.c.depends_on_id,
+        secondaryjoin=lambda: Task.id == task_dependencies.c.task_id,
+        back_populates="depends_on", passive_deletes=True,
     )
     department = relationship("Department", back_populates="tasks")
     document = relationship("Document", foreign_keys=[document_id])

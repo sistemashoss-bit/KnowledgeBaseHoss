@@ -101,6 +101,14 @@
                 Archivada
               </span>
               {% endif %}
+              {% if is_blocked %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-600" title="Depende de tareas que aún no están listas">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+                Bloqueada
+              </span>
+              {% endif %}
             </div>
             {% if task.projects %}
             <p class="text-xs text-gray-400 mt-1">
@@ -157,10 +165,24 @@
               <textarea name="description" rows="4"
                         class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-y">{{ task.description or "" }}</textarea>
             </div>
-            <div class="sm:w-1/2">
-              <label class="block text-xs font-medium text-gray-700 mb-1">Fecha límite</label>
-              <input type="date" name="due_date" value="{{ task.due_date.isoformat() if task.due_date else '' }}"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+            <div class="{% if has_gantt %}grid grid-cols-1 sm:grid-cols-2 gap-3{% else %}sm:w-1/2{% endif %}">
+              {% if has_gantt %}
+              <div>
+                <input type="hidden" name="has_start" value="1" />
+                <label class="block text-xs font-medium text-gray-700 mb-1">Inicio <span class="font-normal text-gray-400">(Gantt; si se deja vacío, cuenta desde que se creó)</span></label>
+                <input type="date" name="start_date" value="{{ task.start_date.isoformat() if task.start_date else '' }}"
+                       {% if task.due_date %}max="{{ task.due_date.isoformat() }}"{% endif %}
+                       onchange="this.form.due_date.min = this.value"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+              </div>
+              {% endif %}
+              <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Fecha límite</label>
+                <input type="date" name="due_date" value="{{ task.due_date.isoformat() if task.due_date else '' }}"
+                       {% if has_gantt and task.start_date %}min="{{ task.start_date.isoformat() }}"{% endif %}
+                       {% if has_gantt %}onchange="this.form.start_date.max = this.value"{% endif %}
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+              </div>
             </div>
             <div class="flex justify-end gap-2">
               <button type="button" onclick="document.getElementById('panel-edit').classList.add('hidden')"
@@ -231,8 +253,78 @@
           <p class="text-sm font-medium {% if task.due_date and task.due_date.isoformat() < today %}text-red-500{% else %}text-gray-800{% endif %}">
             {{ task.due_date.strftime('%d/%m/%Y') if task.due_date else "—" }}
           </p>
+          {% if has_gantt and task.start_date %}
+          <p class="text-xs text-gray-400 mt-0.5">Inicio {{ task.start_date.strftime('%d/%m/%Y') }}</p>
+          {% endif %}
         </div>
       </div>
+
+      {% if has_gantt and (task.depends_on or task.blocks or (can_edit and dependency_candidates)) %}
+      <!-- Dependencias: solo en tareas de proyectos con Gantt -->
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+        {% if task.depends_on %}
+        <p class="text-xs text-gray-400 mb-1.5">Depende de</p>
+        <ul class="space-y-1 mb-3">
+          {% for d in task.depends_on|sort(attribute='title') %}
+          <li class="flex items-center gap-2 text-sm">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 {{ status_dot[d.status] }}"></span>
+            <a href="/tasks/{{ d.id }}" class="min-w-0 truncate text-gray-800 hover:text-blue-600 {% if d.status == 'done' %}line-through text-gray-400{% endif %}">{{ d.title }}</a>
+            <span class="text-xs text-gray-400 shrink-0">{{ status_labels[d.status] }}</span>
+            {% if can_edit %}
+            <button hx-post="/tasks/{{ task.id }}/dependencies/{{ d.id }}/delete" hx-target="body"
+                    hx-confirm="¿Quitar la dependencia de «{{ d.title }}»?"
+                    class="ml-auto shrink-0 w-5 h-5 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 leading-none"
+                    aria-label="Quitar dependencia de {{ d.title }}">×</button>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if task.blocks %}
+        <p class="text-xs text-gray-400 mb-1.5">Bloquea a</p>
+        <ul class="space-y-1 mb-3">
+          {% for b in task.blocks|sort(attribute='title') %}
+          <li class="flex items-center gap-2 text-sm">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 {{ status_dot[b.status] }}"></span>
+            <a href="/tasks/{{ b.id }}" class="min-w-0 truncate text-gray-800 hover:text-blue-600 {% if b.status == 'done' %}line-through text-gray-400{% endif %}">{{ b.title }}</a>
+            <span class="text-xs text-gray-400 shrink-0">{{ status_labels[b.status] }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if can_edit and dependency_candidates %}
+        <button type="button" onclick="document.getElementById('panel-dependency').classList.toggle('hidden')"
+                class="text-xs text-gray-400 hover:text-blue-600">+ Agregar dependencia</button>
+        <div id="panel-dependency" class="hidden mt-2">
+          <form id="form-dependency" hx-post="/tasks/{{ task.id }}/dependencies" hx-target="body"
+                class="flex flex-col sm:flex-row gap-2">
+            <select name="depends_on_id" required
+                    class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Esta tarea espera a…</option>
+              {% for c in dependency_candidates %}
+              <option value="{{ c.id }}">{{ c.title }} · {{ status_labels[c.status] }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
+              Agregar
+            </button>
+          </form>
+          <p class="text-[11px] text-gray-400 mt-1">Solo tareas de los mismos proyectos con Gantt.</p>
+          <script>
+          // htmx no muestra errores; el servidor explica por qué no se pudo (p. ej. un ciclo).
+          document.getElementById('form-dependency').addEventListener('htmx:responseError', function (e) {
+            var msg = 'No se pudo agregar la dependencia.';
+            try { msg = JSON.parse(e.detail.xhr.responseText).detail || msg; } catch (err) {}
+            alert(msg);
+          });
+          </script>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
 
       <!-- Time in status -->
       {% if status_durations.breakdown or status_durations.total_seconds is not none %}

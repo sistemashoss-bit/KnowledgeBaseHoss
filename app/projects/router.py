@@ -3,7 +3,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
@@ -13,8 +13,9 @@ from app.permissions import managed_department_ids, visible_projects_query as _p
 from app.models import (
     Branch, Department, Project, Task, User, Zone,
     ROLE_SUPERADMIN,
-    PROJECT_STATUSES, TASK_STATUSES, TASK_PRIORITIES,
+    PROJECT_STATUSES, TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_IN_PROGRESS, TASK_REVIEW,
 )
+from app.tasks.service import is_blocked
 from app.templating import templates
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -30,6 +31,42 @@ def _can_edit_project(user: User, project: Project) -> bool:
     if project.department_id and project.department_id in managed_department_ids(user):
         return True
     return False
+
+
+# ── Gantt ─────────────────────────────────────────────────────────────────────
+
+_GANTT_PROGRESS = {TASK_IN_PROGRESS: 50, TASK_REVIEW: 75, TASK_DONE: 100}
+_STATUS_LABELS = {"pending": "Pendiente", "in_progress": "En progreso", "review": "Revisión", "done": "Listo"}
+
+
+def _gantt_data(tasks: list[Task]) -> tuple[list[dict], list[Task]]:
+    """Barras para Frappe Gantt y las tareas que no se pueden dibujar (sin
+    vencimiento). Inicio = start_date o created_at; fin = due_date. Si el inicio
+    queda después del fin (p. ej. se creó ya vencida) la barra es de un día."""
+    ids = {t.id for t in tasks}
+    bars, undated = [], []
+    for t in tasks:
+        if not t.due_date:
+            undated.append(t)
+            continue
+        start = t.start_date or (t.created_at.date() if t.created_at else t.due_date)
+        start = min(start, t.due_date)
+        blocked = is_blocked(t)
+        who = t.assignee.name or t.assignee.email if t.assignee else (t.department.name if t.department else "")
+        bars.append({
+            "id": str(t.id),
+            "name": t.title,
+            "start": start.isoformat(),
+            "end": t.due_date.isoformat(),
+            "progress": _GANTT_PROGRESS.get(t.status, 0),
+            "dependencies": ",".join(str(d.id) for d in t.depends_on if d.id in ids),
+            "custom_class": f"g-{t.status}" + ("-blocked" if blocked else ""),
+            "status": _STATUS_LABELS.get(t.status, t.status),
+            "who": who,
+            "estimated": t.start_date is None,
+        })
+    bars.sort(key=lambda b: (b["start"], b["end"]))
+    return bars, undated
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -120,6 +157,7 @@ def project_detail(
     project_id: str,
     request: Request,
     task_status: str = "",
+    view: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -164,6 +202,17 @@ def project_detail(
     total = len(all_tasks)
     done_pct = round((stats.get("done", 0) / total) * 100) if total else 0
 
+    view = "gantt" if view == "gantt" and project.gantt_enabled else "list"
+    gantt_tasks, gantt_undated = [], []
+    if view == "gantt":
+        gantt_source = (
+            db.query(Task)
+            .options(joinedload(Task.assignee), joinedload(Task.department), selectinload(Task.depends_on))
+            .filter(Task.projects.any(Project.id == project_id))
+            .all()
+        )
+        gantt_tasks, gantt_undated = _gantt_data(gantt_source)
+
     departments = db.query(Department).order_by(Department.name).all()
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
     can_edit = _can_edit_project(current_user, project)
@@ -188,6 +237,9 @@ def project_detail(
             "task_priorities": TASK_PRIORITIES,
             "project_statuses": PROJECT_STATUSES,
             "filter_task_status": task_status,
+            "view": view,
+            "gantt_tasks": gantt_tasks,
+            "gantt_undated": gantt_undated,
             "can_edit": can_edit,
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),
@@ -208,6 +260,7 @@ def edit_project(
     zone_id: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
+    gantt_enabled: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -233,6 +286,7 @@ def edit_project(
     project.zone_id = zone_id or None
     project.start_date = start
     project.end_date = end
+    project.gantt_enabled = bool(gantt_enabled)
     db.commit()
     audit.log_action(
         "project_edit", user=current_user, request=request,

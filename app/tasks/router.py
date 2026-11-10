@@ -158,6 +158,13 @@ def _status_durations(task: Task) -> dict:
     }
 
 
+def _parse_date(value: str, error: str) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        raise HTTPException(422, error)
+
+
 # ── Document reference helpers ─────────────────────────────────────────────────
 
 def _accessible_documents(user: User) -> list[dict]:
@@ -418,6 +425,7 @@ def create_task(
     project_ids: list[str] = Form(default=[]),
     document_id: str = Form(""),
     due_date: str = Form(""),
+    start_date: str = Form(""),
     next_url: str = Form(""),
     tag_ids: list[str] = Form(default=[]),
     shared_with: list[str] = Form(default=[]),
@@ -439,7 +447,8 @@ def create_task(
         assigned_to=assigned_to,
         project_ids=project_ids,
         document_id=document_id,
-        due_date=date.fromisoformat(due_date) if due_date else None,
+        due_date=_parse_date(due_date, "Fecha límite inválida"),
+        start_date=_parse_date(start_date, "Fecha de inicio inválida"),
     )
     for tid in _validated_tag_ids(tag_ids, task.department_id, db):
         db.add(TaskTagAssignment(task_id=task.id, tag_id=tid))
@@ -534,6 +543,7 @@ def task_detail(
     )
     selected_tag_ids = {str(tt.tag_id) for tt in task.tags}
     can_edit = _can_edit_task(current_user, task, db)
+    has_gantt = task_service.has_gantt(task)
     project_options = (
         task_service.visible_projects(current_user, db).order_by(Project.name).all() if can_edit else []
     )
@@ -562,6 +572,9 @@ def task_detail(
             "can_edit": can_edit,
             "project_options": project_options,
             "selected_project_ids": {str(p.id) for p in task.projects},
+            "has_gantt": has_gantt,
+            "is_blocked": has_gantt and task_service.is_blocked(task),
+            "dependency_candidates": task_service.dependency_candidates(task, db) if has_gantt and can_edit else [],
             "can_update_status": _can_update_status(current_user, task, db),
             "is_admin": is_manager(current_user),
             "can_approve": _can_approve_task(current_user, task),
@@ -871,6 +884,11 @@ def edit_task(
     title: str = Form(...),
     description: str = Form(""),
     due_date: str = Form(""),
+    # El campo de inicio solo se pinta en tareas de proyectos con Gantt y va con
+    # has_start=1; sin él no se toca el inicio guardado (un campo vacío llega
+    # como None, así que no basta con revisar start_date).
+    start_date: str = Form(""),
+    has_start: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -886,6 +904,10 @@ def edit_task(
         new_due = date.fromisoformat(due_date) if due_date else None
     except ValueError:
         raise HTTPException(422, "Fecha límite inválida")
+    new_start = task.start_date
+    if has_start and task_service.has_gantt(task):
+        new_start = _parse_date(start_date, "Fecha de inicio inválida")
+    task_service.check_start_due(new_start, new_due)
 
     changed = []
     if title[:255] != task.title:
@@ -894,6 +916,9 @@ def edit_task(
         changed.append("description")
     if new_due != task.due_date:
         changed.append("due_date")
+    if new_start != task.start_date:
+        changed.append("start_date")
+    task.start_date = new_start
     task.title = title[:255]
     task.description = description.strip() or None
     task.due_date = new_due
@@ -1018,6 +1043,62 @@ def set_task_projects(
         resource_type="task", resource_id=task_id, resource_name=task.title,
         details=f"projects={len(names)} names={','.join(names[:5])}",
     )
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
+# ── Dependencias (Gantt) ──────────────────────────────────────────────────────
+
+@router.post("/{task_id}/dependencies", response_class=HTMLResponse)
+def add_task_dependency(
+    task_id: str,
+    request: Request,
+    depends_on_id: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """La tarea pasa a esperar a `depends_on_id` (mismo proyecto con Gantt, sin ciclos)."""
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).options(joinedload(Task.projects)).filter(Task.id == task_id).first()
+    if not task or not _can_edit_task(current_user, task, db):
+        raise HTTPException(403)
+    other = task_service.add_dependency(task, depends_on_id, db)
+    db.commit()
+    realtime.notify_tasks()
+    realtime.notify_task(task_id)
+    realtime.notify_task(other.id)
+    audit.log_action(
+        "task_dependency_add", user=current_user, request=request,
+        resource_type="task", resource_id=task_id, resource_name=task.title,
+        details=f"depends_on={other.id} {other.title[:80]}",
+    )
+    return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
+
+
+@router.post("/{task_id}/dependencies/{depends_on_id}/delete", response_class=HTMLResponse)
+def remove_task_dependency(
+    task_id: str,
+    depends_on_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task or not _can_edit_task(current_user, task, db):
+        raise HTTPException(403)
+    removed = task_service.remove_dependency(task, depends_on_id)
+    if removed:
+        db.commit()
+        realtime.notify_tasks()
+        realtime.notify_task(task_id)
+        realtime.notify_task(removed.id)
+        audit.log_action(
+            "task_dependency_remove", user=current_user, request=request,
+            resource_type="task", resource_id=task_id, resource_name=task.title,
+            details=f"depends_on={removed.id} {removed.title[:80]}",
+        )
     return HTMLResponse(headers={"HX-Redirect": f"/tasks/{task_id}"})
 
 

@@ -18,7 +18,7 @@ from app.messaging import realtime
 from app.models import (
     Document, Project, Task, TaskFollowUp, TaskShare, TaskStatusHistory, TaskTagAssignment, User,
     CALENDAR_REMINDER_OPTIONS, ROLE_AUDITOR, ROLE_SUPERADMIN,
-    TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
+    TASK_DONE, TASK_PRIORITIES, TASK_STATUSES, task_dependencies,
 )
 from app.permissions import (
     branch_user_ids as _branch_user_ids, can_access_document, granted_department_ids, is_manager,
@@ -324,12 +324,15 @@ def create_task(
     project_ids: list[str] | None = None,
     document_id: str = "",
     due_date: date | None = None,
+    start_date: date | None = None,
     source_app: str | None = None,
     context: dict | None = None,
 ) -> Task:
     """Crea la tarea con su primer registro de historial, validando a quién la
     puede dirigir `actor` (HTTPException si no). Sin commit ni avisos."""
     _validate_target_scope(actor, db, department_id, assigned_to, required=False)
+    # Antes de crear el objeto: al enlazarlo a sus proyectos ya queda en la sesión.
+    check_start_due(start_date, due_date)
 
     task = Task(
         id=uuid.uuid4(),
@@ -346,6 +349,9 @@ def create_task(
         source_app=source_app,
         context=context,
     )
+    # El inicio solo existe en tareas de proyectos con Gantt.
+    if start_date and has_gantt(task):
+        task.start_date = start_date
     db.add(task)
     db.flush()
     if task.status == TASK_DONE:
@@ -434,3 +440,89 @@ def notify_follow_ups_created(task: Task, actor: User, result: dict) -> None:
             kind="task_follow_up",
         )
     realtime.notify_task(task.id)
+
+
+# ── Gantt: inicio y dependencias ──────────────────────────────────────────────
+# Solo aplican a tareas que están en algún proyecto con Gantt activado. Si la
+# tarea sale de esos proyectos, sus datos se conservan pero no se muestran.
+
+def gantt_project_ids(task: Task) -> set:
+    return {p.id for p in task.projects if p.gantt_enabled}
+
+
+def has_gantt(task: Task) -> bool:
+    return any(p.gantt_enabled for p in task.projects)
+
+
+def check_start_due(start: date | None, due: date | None) -> None:
+    if start and due and start > due:
+        raise HTTPException(422, "La fecha de inicio no puede ser posterior a la fecha límite")
+
+
+def is_blocked(task: Task) -> bool:
+    """Bloqueada: no está lista y alguna tarea de la que depende tampoco."""
+    return task.status != TASK_DONE and any(d.status != TASK_DONE for d in task.depends_on)
+
+
+def dependency_candidates(task: Task, db: Session) -> list[Task]:
+    """Tareas de los mismos proyectos con Gantt de las que `task` puede depender:
+    sin ella misma, sin las que ya tiene y sin las que dependen directamente de
+    ella (eso sería un ciclo inmediato)."""
+    project_ids = gantt_project_ids(task)
+    if not project_ids:
+        return []
+    exclude = {task.id} | {d.id for d in task.depends_on} | {b.id for b in task.blocks}
+    rows = (
+        db.query(Task)
+        .filter(Task.projects.any(Project.id.in_(project_ids)), Task.archived_at.is_(None))
+        .order_by(Task.title)
+        .all()
+    )
+    return [t for t in rows if t.id not in exclude]
+
+
+def _reaches(db: Session, start_id, target_id) -> bool:
+    """¿Desde start_id, siguiendo "depende de", se llega a target_id?"""
+    seen, frontier = {start_id}, [start_id]
+    while frontier:
+        rows = db.execute(
+            select(task_dependencies.c.depends_on_id).where(task_dependencies.c.task_id.in_(frontier))
+        ).scalars().all()
+        frontier = []
+        for nid in rows:
+            if nid == target_id:
+                return True
+            if nid not in seen:
+                seen.add(nid)
+                frontier.append(nid)
+    return False
+
+
+def add_dependency(task: Task, depends_on_id: str, db: Session) -> Task:
+    """`task` pasa a depender de `depends_on_id`. Ambas deben compartir un proyecto
+    con Gantt y no puede formarse un ciclo. Sin commit."""
+    try:
+        dep_uuid = uuid.UUID(str(depends_on_id))
+    except ValueError:
+        raise HTTPException(422, "Tarea inválida")
+    if dep_uuid == task.id:
+        raise HTTPException(422, "Una tarea no puede depender de sí misma")
+    other = db.query(Task).options(joinedload(Task.projects)).filter(Task.id == dep_uuid).first()
+    if not other:
+        raise HTTPException(404, "La tarea ya no existe")
+    if not gantt_project_ids(task) & gantt_project_ids(other):
+        raise HTTPException(422, "Solo puede depender de tareas del mismo proyecto con Gantt")
+    if any(d.id == dep_uuid for d in task.depends_on):
+        return other
+    if _reaches(db, dep_uuid, task.id):
+        raise HTTPException(422, f"«{other.title}» ya depende de esta tarea (directa o indirectamente); se formaría un ciclo")
+    task.depends_on.append(other)
+    return other
+
+
+def remove_dependency(task: Task, depends_on_id: str) -> Task | None:
+    for d in list(task.depends_on):
+        if str(d.id) == str(depends_on_id):
+            task.depends_on.remove(d)
+            return d
+    return None
