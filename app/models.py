@@ -292,10 +292,6 @@ class Document(Base):
     # Rich-text source when the document was authored in-app (TipTap). Null for uploads.
     # Columna heredada: la autoría TipTap se retiró; se conserva por los docs ya creados.
     content_html = Column(Text, nullable=True)
-    # Proyecto de GrapesJS (JSON) cuando el PDF se hizo en el editor de
-    # documentos (doceditor/): permite volver a abrirlo y regenerar el PDF.
-    # Null para archivos subidos y links de Drive.
-    editor_project = Column(Text, nullable=True)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
     status = Column(String(20), nullable=False, default=STATUS_EMPLOYEE)
     # Distingue un archivo de referencia común de un documento en el que la

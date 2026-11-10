@@ -1,8 +1,8 @@
-// Editor libre de documentos (GrapesJS). Lo monta documents/editor.html.
-// El mismo HTML (buildDocument) sirve para las dos salidas:
+// Editor de documentos (GrapesJS), en Herramientas. Lo monta tools/editor.html.
+// No guarda nada propio: el mismo HTML (buildDocument) sirve para las dos salidas.
 //   - Vista previa / PDF en el navegador: se imprime en un iframe oculto
 //     (el usuario elige "Guardar como PDF"); no toca el servidor.
-//   - Subir a Documentos: se manda al servidor, que lo convierte con
+//   - Subir a Documentos: se manda a /documents/upload, que lo convierte con
 //     WeasyPrint (app/pdf_render.py) y lo guarda e indexa como un PDF más.
 import grapesjs from 'grapesjs';
 import es from 'grapesjs/locale/es.mjs';
@@ -92,18 +92,16 @@ function init(el) {
     editor.Blocks.add(id, { label, content, category: 'Documento', media: icon(ICONS[id]) });
   }
 
+  // Nada se guarda: si hay cambios sin subir ni descargar, avisa antes de salir.
+  let dirty = false;
   editor.on('load', () => {
-    const url = el.dataset.projectUrl;
-    if (url) {
-      fetch(url, { credentials: 'same-origin' })
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then((data) => editor.loadProjectData(data))
-        .catch((e) => window.dispatchEvent(new CustomEvent('doc-error', { detail: { message: `No se pudo cargar el documento: ${e.message}` } })));
-    } else if (!editor.getComponents().length) {
-      editor.setComponents('<h1>Título del documento</h1><p>Escribe aquí el texto del documento.</p>');
-    }
+    editor.setComponents('<h1>Título del documento</h1><p>Escribe aquí el texto del documento.</p>');
     editor.Blocks.render();
     editor.Panels.getButton('views', 'open-blocks')?.set('active', true);
+    editor.on('update', () => { dirty = true; });
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (dirty) e.preventDefault();
   });
 
   // Documento HTML completo: lo que se imprime y lo que convierte WeasyPrint.
@@ -134,17 +132,14 @@ function init(el) {
       frame.contentWindow.print();
       document.title = prevTitle;
       setTimeout(() => frame.remove(), 1000);
+      dirty = false;
     });
   }
 
-  function payload(title) {
-    return {
-      project: new Blob([JSON.stringify(editor.getProjectData())], { type: 'application/json' }),
-      html: new Blob([buildDocument(title)], { type: 'text/html' }),
-    };
-  }
+  const html = (title) => new Blob([buildDocument(title)], { type: 'text/html' });
+  const markSaved = () => { dirty = false; };
 
-  window.docEditor = { editor, buildDocument, printDocument, payload };
+  window.docEditor = { editor, buildDocument, printDocument, html, markSaved };
   window.dispatchEvent(new CustomEvent('doc-editor-ready'));
 }
 

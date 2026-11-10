@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if doc %}{{ doc.title }} — Editor{% else %}Nuevo documento — Editor{% endif %}{% endblock %}
+{% block title %}Editor de documentos{% endblock %}
 
 {# Sin el botón flotante del asistente: tapa los paneles del editor. #}
 {% block ai_widget %}{% endblock %}
@@ -7,35 +7,22 @@
 {% block content %}
 <link rel="stylesheet" href="{{ asset('doceditor/grapes.min.css') }}" />
 <div class="flex-1 min-h-0 flex flex-col bg-white"
-     x-data="docEditorPage({{ (doc.title if doc else '') | tojson | forceescape }})"
-     @doc-editor-ready.window="ready = true"
-     @doc-error.window="error = $event.detail.message">
+     x-data="docEditorPage()"
+     @doc-editor-ready.window="ready = true">
 
   <!-- Encabezado -->
   <div class="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-gray-200">
-    <a href="{% if doc %}/documents/{{ doc.id }}/edit{% else %}/documents/{% endif %}" title="Volver" aria-label="Volver"
-       class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-    </a>
     <div class="min-w-0 flex-1">
-      <h1 class="text-base font-semibold text-gray-900 truncate">{% if doc %}{{ doc.title }}{% else %}Nuevo documento{% endif %}</h1>
-      <p class="text-xs text-gray-400 truncate">Hoja A4 · lo que ves es lo que sale en el PDF</p>
+      <h1 class="text-base font-semibold text-gray-900 truncate">Editor de documentos</h1>
+      <p class="text-xs text-gray-400 truncate">Hoja A4 · no se guarda: descarga el PDF{% if can_upload %} o súbelo a Documentos{% endif %} antes de salir</p>
     </div>
-
-    <p x-show="error" x-cloak x-text="error" class="w-full sm:w-auto order-last sm:order-none text-xs text-red-600"></p>
-    <p x-show="saved" x-cloak class="text-xs text-green-600">Guardado</p>
 
     <button type="button" @click="preview()" :disabled="!ready"
             title="Abre la vista de impresión: desde ahí puedes ver el PDF o guardarlo en tu equipo"
             class="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 rounded-lg text-xs font-medium">
       Vista previa / Descargar PDF
     </button>
-    {% if doc %}
-    <button type="button" @click="saveExisting()" :disabled="!ready || busy"
-            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white rounded-lg text-xs font-medium">
-      <span x-show="!busy">Guardar en Documentos</span><span x-show="busy" x-cloak>Generando PDF…</span>
-    </button>
-    {% else %}
+    {% if can_upload %}
     <button type="button" @click="panel = true; error = ''" :disabled="!ready"
             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white rounded-lg text-xs font-medium">
       Subir a Documentos
@@ -43,10 +30,9 @@
     {% endif %}
   </div>
 
-  <div id="doceditor" class="flex-1 min-h-0"
-       {% if doc %}data-project-url="/documents/{{ doc.id }}/editor/project"{% endif %}></div>
+  <div id="doceditor" class="flex-1 min-h-0"></div>
 
-  {% if not doc %}
+  {% if can_upload %}
   <!-- Datos del documento al subirlo (los mismos campos que "Subir documento") -->
   <div x-show="panel" x-cloak class="fixed inset-0 z-50 flex justify-end" style="background: rgba(15,23,42,0.45);"
        @keydown.escape.window="if (!busy) panel = false">
@@ -56,7 +42,7 @@
       <div class="flex items-start justify-between gap-3">
         <div>
           <h2 class="text-base font-semibold text-gray-900">Subir a Documentos</h2>
-          <p class="text-xs text-gray-500 mt-1">Se guarda como PDF y se indexa para búsqueda e IA. Podrás volver a abrirlo en el editor.</p>
+          <p class="text-xs text-gray-500 mt-1">Se sube como PDF y se indexa para búsqueda e IA, igual que un archivo subido.</p>
         </div>
         <button type="button" @click="panel = false" :disabled="busy" aria-label="Cerrar"
                 class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
@@ -87,33 +73,29 @@
   #doceditor .gjs-devices-c { display: none; }
 </style>
 <script>
-  function docEditorPage(docTitle) {
+  function docEditorPage() {
     return {
-      ready: false, busy: false, panel: false, saved: false, error: '',
-      deptId: '{% if current_user.role != "superadmin" and departments %}{{ departments[0].id }}{% endif %}',
+      ready: false, busy: false, panel: false, error: '',
+      deptId: '{% if can_upload and current_user.role != "superadmin" and departments %}{{ departments[0].id }}{% endif %}',
       visibility: '', isWork: false,
       preview() {
-        const title = (this.$refs.form && this.$refs.form.elements.title.value) || docTitle || 'Documento';
+        const title = (this.$refs.form && this.$refs.form.elements.title.value) || 'Documento';
         window.docEditor.printDocument(title);
-      },
-      async errorOf(r) {
-        const j = await r.json().catch(() => ({}));
-        if (typeof j.detail === 'string') return j.detail;
-        return r.status === 413 ? 'El documento es demasiado grande (revisa el tamaño de las imágenes).' : `Error ${r.status}`;
-      },
-      withPayload(fd, title) {
-        const { project, html } = window.docEditor.payload(title);
-        fd.append('editor_html', html, 'documento.html');
-        fd.append('editor_project', project, 'proyecto.json');
-        return fd;
       },
       async upload() {
         const form = this.$refs.form;
         this.busy = true; this.error = '';
         try {
-          const fd = this.withPayload(new FormData(form), form.elements.title.value);
+          const fd = new FormData(form);
+          fd.append('editor_html', window.docEditor.html(form.elements.title.value), 'documento.html');
           const r = await fetch('/documents/upload', { method: 'POST', body: fd });
-          if (!r.ok) { this.error = await this.errorOf(r); return; }
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}));
+            this.error = typeof j.detail === 'string' ? j.detail
+              : r.status === 413 ? 'El documento es demasiado grande (revisa el tamaño de las imágenes).' : `Error ${r.status}`;
+            return;
+          }
+          window.docEditor.markSaved();
           window.location.href = '/documents/mine';
         } catch (e) {
           this.error = 'No se pudo subir: ' + e.message;
@@ -121,21 +103,6 @@
           this.busy = false;
         }
       },
-      {% if doc %}
-      async saveExisting() {
-        this.busy = true; this.error = ''; this.saved = false;
-        try {
-          const fd = this.withPayload(new FormData(), docTitle);
-          const r = await fetch('/documents/{{ doc.id }}/editor', { method: 'POST', body: fd });
-          if (!r.ok) { this.error = await this.errorOf(r); return; }
-          this.saved = true; setTimeout(() => this.saved = false, 4000);
-        } catch (e) {
-          this.error = 'No se pudo guardar: ' + e.message;
-        } finally {
-          this.busy = false;
-        }
-      },
-      {% endif %}
     };
   }
 </script>

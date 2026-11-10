@@ -158,14 +158,37 @@
         </svg>
         <span class="nav-label">Calendario</span>
       </a>
-      <a href="/whiteboards/" {{ nav_current('/whiteboards') }}
-         class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
-        <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 5a1 1 0 011-1h14a1 1 0 011 1v10a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM12 16v4m-4 0h8M8 12l2.5-3 2 2L15 8" />
-        </svg>
-        <span class="nav-label">Pizarras</span>
-      </a>
+      {% set tools_active = current_path.startswith('/whiteboards') or current_path.startswith('/tools') %}
+      <details class="nav-group" {% if tools_active %}open{% endif %}>
+        <summary class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium cursor-pointer">
+          <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M11.42 15.17l-5.1 5.1a2.12 2.12 0 01-3-3l5.1-5.1m3 3l3.18-3.18a4.5 4.5 0 005.66-5.66l-2.83 2.83-2.12-.7-.7-2.12 2.83-2.83a4.5 4.5 0 00-5.66 5.66L8.42 12.17m3 3l-3-3" />
+          </svg>
+          <span class="nav-label flex-1">Herramientas</span>
+          <svg class="nav-group-chevron w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </summary>
+        <div class="nav-group-items space-y-1 mt-1">
+          <a href="/whiteboards/" {{ nav_current('/whiteboards') }}
+             class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+            <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 5a1 1 0 011-1h14a1 1 0 011 1v10a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM12 16v4m-4 0h8M8 12l2.5-3 2 2L15 8" />
+            </svg>
+            <span class="nav-label">Pizarras</span>
+          </a>
+          <a href="/tools/editor" {{ nav_current('/tools/editor') }}
+             class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+            <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span class="nav-label">Editor de documentos</span>
+          </a>
+        </div>
+      </details>
       <a href="/messaging/" {{ nav_current('/messaging') }}
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
         <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
