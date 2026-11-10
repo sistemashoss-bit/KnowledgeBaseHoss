@@ -23,6 +23,7 @@ img { max-width: 100%; }
 table { border-collapse: collapse; width: 100%; margin: 0 0 8pt; }
 th, td { border: 1px solid #9ca3af; padding: 4pt 6pt; text-align: left; vertical-align: top; }
 th { background: #f3f4f6; }
+th:empty::after, td:empty::after { content: "\\00a0"; }
 hr { border: 0; border-top: 1px solid #d1d5db; margin: 10pt 0; }
 .cols { display: flex; gap: 12pt; }
 .cols > .col { flex: 1 1 0; min-height: 20pt; }
@@ -64,6 +65,77 @@ function icon(d) {
   return `<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path fill="none" d="${d}"/></svg>`;
 }
 
+// Filas y columnas: botones en la barra de la celda seleccionada.
+const TABLE_TOOLS = [
+  ['tbl-row-add', 'Agregar fila debajo', 'M4 5h16v6H4zM12 15v6M9 18h6'],
+  ['tbl-col-add', 'Agregar columna a la derecha', 'M5 4h6v16H5zM15 12h6M18 9v6'],
+  ['tbl-row-del', 'Eliminar fila', 'M4 9h16v6H4zM9 12h6'],
+  ['tbl-col-del', 'Eliminar columna', 'M9 4h6v16H9zM12 9v6'],
+];
+
+function addTableTools(editor) {
+  const tableOf = (cell) => cell.closest('table');
+  const rowsOf = (table) => table.find('tr');
+  // Quita la tabla si se quedó sin filas o sin columnas.
+  const pruneTable = (table) => {
+    rowsOf(table).forEach((tr) => { if (!tr.components().length) tr.remove(); });
+    table.find('thead, tbody, tfoot').forEach((s) => { if (!s.components().length) s.remove(); });
+    if (!rowsOf(table).length) table.remove();
+  };
+  const cmds = {
+    'tbl-row-add': (cell) => {
+      const row = cell.parent();
+      const n = row.components().length;
+      const tds = Array.from({ length: n }, () => ({ type: 'cell', tagName: 'td' }));
+      const section = row.parent();
+      if (section.get('tagName') === 'thead') {
+        // Debajo del encabezado: primera fila del cuerpo.
+        const table = section.parent();
+        const body = table.find('tbody')[0] || table.components().add({ type: 'tbody' });
+        body.components().add({ type: 'row', components: tds }, { at: 0 });
+      } else {
+        section.components().add({ type: 'row', components: tds }, { at: row.index() + 1 });
+      }
+    },
+    'tbl-col-add': (cell) => {
+      const at = cell.index() + 1;
+      rowsOf(tableOf(cell)).forEach((tr) => {
+        const tag = tr.parent().get('tagName') === 'thead' ? 'th' : 'td';
+        tr.components().add({ type: 'cell', tagName: tag }, { at });
+      });
+    },
+    'tbl-row-del': (cell) => {
+      const table = tableOf(cell);
+      editor.select(null);
+      cell.parent().remove();
+      pruneTable(table);
+    },
+    'tbl-col-del': (cell) => {
+      const table = tableOf(cell);
+      const at = cell.index();
+      editor.select(null);
+      rowsOf(table).forEach((tr) => tr.components().at(at)?.remove());
+      pruneTable(table);
+    },
+  };
+  for (const [id] of TABLE_TOOLS) {
+    editor.Commands.add(id, { run: (ed) => { const c = ed.getSelected(); if (c && c.get('type') === 'cell') cmds[id](c); } });
+  }
+  editor.on('component:selected', (c) => {
+    if (c.get('type') !== 'cell') return;
+    const tb = c.get('toolbar') || [];
+    if (tb.some((t) => t.command === TABLE_TOOLS[0][0])) return;
+    const extra = TABLE_TOOLS.map(([command, title, d]) => ({
+      command, attributes: { title },
+      label: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path fill="none" d="${d}"/></svg>`,
+    }));
+    // Duplicar, mover o borrar una celda suelta descuadra la tabla: en las
+    // celdas solo queda "seleccionar contenedor" (para llegar a la tabla).
+    const keep = tb.filter((t) => typeof t.command === 'function' || t.command === 'core:component-exit');
+    c.set('toolbar', [...extra, ...keep]);
+  });
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -89,6 +161,19 @@ function init(el) {
       },
     },
   });
+
+  // Celdas editables: en GrapesJS una celda (td/th) es un contenedor y su texto
+  // no se puede escribir. Se redefine 'cell' como texto (doble clic para
+  // editar), conservando td/th; también aplica a las tablas de borradores ya guardados.
+  editor.DomComponents.addType('cell', {
+    extend: 'text',
+    isComponent: (node) => {
+      const tag = node.tagName && node.tagName.toLowerCase();
+      return tag === 'td' || tag === 'th' ? { type: 'cell', tagName: tag } : false;
+    },
+    model: { defaults: { name: 'Celda', tagName: 'td', draggable: ['tr'], droppable: false } },
+  });
+  addTableTools(editor);
 
   for (const [id, label, content] of BLOCKS) {
     editor.Blocks.add(id, { label, content, category: 'Documento', media: icon(ICONS[id]) });

@@ -20,8 +20,9 @@ from app import rag
 from app.assistant import scope as scope_lib
 from app.calendar.reminders import to_local
 from app.models import (
-    Conversation, Document, Message, Task, TaskFollowUp, User,
-    PROPOSAL_FOLLOW_UP, PROPOSAL_TASK, TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
+    Conversation, Department, Document, Message, Task, TaskFollowUp, User,
+    PROPOSAL_FOLLOW_UP, PROPOSAL_TASK, PROPOSAL_TICKET, TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
+    TICKET_INCIDENT, TICKET_KINDS, TICKET_REQUEST,
 )
 from app.tasks import service as task_service
 
@@ -151,6 +152,28 @@ TOOL_DEFINITIONS = [
             "note": {"type": "string", "description": "Nota (opcional)"},
         },
         ["day", "start"],
+    ),
+    _fn(
+        "propose_ticket",
+        "Propone levantar un ticket a un departamento: una incidencia (algo que dejó de funcionar o "
+        "falla) o una solicitud (algo que se pide: acceso, alta, cambio, compra…). NO lo crea: aparece "
+        "una tarjeta para que quien te invocó lo confirme; el ticket queda a su nombre. Si no sabes a "
+        "qué departamento va, llámala sin department y te devuelve la lista con lo que atiende cada uno.",
+        {
+            "kind": {"type": "string", "enum": TICKET_KINDS, "description": "incident = incidencia, request = solicitud"},
+            "title": {"type": "string", "description": "Título corto que diga qué pasa o qué se pide"},
+            "description": {
+                "type": "string",
+                "description": "Detalle: qué pasa o qué se necesita, desde cuándo, a quién afecta, lo que ya se intentó",
+            },
+            "department": {"type": "string", "description": "Nombre del departamento que lo atiende"},
+            "priority": {
+                "type": "string", "enum": TASK_PRIORITIES,
+                "description": "Por los hechos, no por el tono: urgent solo si detiene ventas u operación; "
+                               "high si impide trabajar sin alternativa; medium por defecto",
+            },
+        },
+        ["kind", "title"],
     ),
 ]
 
@@ -487,6 +510,65 @@ def propose_followup(
     return {"ok": True, "note": "Se mostrará una tarjeta para que quien te invocó lo confirme."}
 
 
+_KIND_ALIASES = {"incidencia": TICKET_INCIDENT, "solicitud": TICKET_REQUEST}
+
+
+def _departments_hint(ctx: ToolContext) -> str:
+    rows = ctx.db.query(Department).order_by(Department.name).all()
+    return "; ".join(
+        f"{d.name}" + (f" ({_clip(d.triage_description, 160)})" if (d.triage_description or "").strip() else "")
+        for d in rows
+    )
+
+
+def _resolve_department(ctx: ToolContext, ref: str) -> Department | None:
+    uid = _uuid(ref)
+    if uid:
+        return ctx.db.get(Department, uid)
+    wanted = _norm(ref)
+    if not wanted:
+        return None
+    rows = ctx.db.query(Department).all()
+    for match in (lambda d: _norm(d.name) == wanted, lambda d: wanted in _norm(d.name)):
+        found = [d for d in rows if match(d)]
+        if len(found) == 1:
+            return found[0]
+    return None
+
+
+def propose_ticket(
+    ctx: ToolContext, kind: str, title: str, description: str = "", department: str = "",
+    priority: str = "medium",
+) -> dict:
+    kind = _KIND_ALIASES.get(_norm(kind), kind)
+    if kind not in TICKET_KINDS:
+        return {"error": "kind debe ser incident (incidencia) o request (solicitud)"}
+    title = _clip(title, 255)
+    if not title:
+        return {"error": "Falta el título"}
+    dept = _resolve_department(ctx, department) if department else None
+    if dept is None:
+        hint = _departments_hint(ctx)
+        if not hint:
+            return {"error": "No hay departamentos configurados para recibir tickets."}
+        lead = f"No encontré el departamento «{department}». " if department else "Falta el departamento. "
+        return {"error": (
+            f"{lead}Elige uno de estos según lo que atiende (si no es claro, pregunta a quién va): {hint}"
+        )}
+    ctx.proposals.append({
+        "kind": PROPOSAL_TICKET,
+        "payload": {
+            "kind": kind,
+            "title": title,
+            "description": _clip(description, 4000),
+            "department_id": str(dept.id),
+            "department_name": dept.name,
+            "priority": priority if priority in TASK_PRIORITIES else "medium",
+        },
+    })
+    return {"ok": True, "note": "Se mostrará una tarjeta para que quien te invocó confirme el ticket."}
+
+
 _IMPLEMENTATIONS = {
     "search_documents": search_documents,
     "search_passages": search_passages,
@@ -496,6 +578,7 @@ _IMPLEMENTATIONS = {
     "get_conversation": get_conversation,
     "propose_task": propose_task,
     "propose_followup": propose_followup,
+    "propose_ticket": propose_ticket,
 }
 
 

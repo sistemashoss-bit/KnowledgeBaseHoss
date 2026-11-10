@@ -1,4 +1,4 @@
-{#- Tarjeta de una propuesta de MAX (tarea o seguimiento). `p` = AssistantProposal,
+{#- Tarjeta de una propuesta de MAX (tarea, seguimiento o ticket). `p` = AssistantProposal,
     `card_mode` = "chat" (en el mensaje; el botón re-pinta el mensaje) o "widget"
     (el botón re-pinta solo la tarjeta). Solo quien invocó confirma o descarta. -#}
 {% set d = p.payload %}
@@ -7,9 +7,16 @@
 {% set btn_qs = '?mode=widget' if is_widget else '' %}
 <div data-proposal-id="{{ p.id }}" class="{{ 'w-full' if is_widget else 'w-72' }} max-w-full rounded-2xl border border-gray-200 bg-white shadow-sm px-3 py-2.5 text-xs text-gray-700">
   <p class="text-[11px] font-medium text-blue-600 mb-0.5">
-    {{ 'Nueva tarea' if p.kind == 'task' else 'Nuevo seguimiento' }}
+    {% if p.kind == 'task' %}Nueva tarea{% elif p.kind == 'ticket' %}Nuevo ticket · {{ 'Solicitud' if d.kind == 'request' else 'Incidencia' }}{% else %}Nuevo seguimiento{% endif %}
   </p>
-  {% if p.kind == 'task' %}
+  {% if p.kind == 'ticket' %}
+  <p class="font-semibold text-sm text-gray-800 [overflow-wrap:anywhere]">{{ d.title }}</p>
+  {% if d.description %}<p class="mt-0.5 text-gray-500 line-clamp-3 [overflow-wrap:anywhere]">{{ d.description }}</p>{% endif %}
+  <p class="mt-1 text-gray-500">
+    Para {{ d.department_name }}
+    · prioridad {{ {'low': 'baja', 'medium': 'media', 'high': 'alta', 'urgent': 'urgente'}.get(d.priority, d.priority) }}
+  </p>
+  {% elif p.kind == 'task' %}
   <p class="font-semibold text-sm text-gray-800 [overflow-wrap:anywhere]">{{ d.title }}</p>
   {% if d.description %}<p class="mt-0.5 text-gray-500 line-clamp-3 [overflow-wrap:anywhere]">{{ d.description }}</p>{% endif %}
   <p class="mt-1 text-gray-500">
@@ -40,8 +47,13 @@
     {% endif %}
   {% elif p.status == 'confirmed' %}
     <p class="mt-1.5 text-green-700 font-medium">
+      {% if p.kind == 'ticket' %}
+      ✓ Ticket #{{ d.ticket_number }} levantado
+      {% if d.ticket_number %}· <a href="/tickets/{{ d.ticket_number }}" class="underline hover:text-green-800">ver ticket</a>{% endif %}
+      {% else %}
       ✓ {{ 'Tarea creada' if p.kind == 'task' else 'Seguimiento programado' }}
       {% if p.task_id %}· <a href="/tasks/{{ p.task_id }}" class="underline hover:text-green-800">ver tarea</a>{% endif %}
+      {% endif %}
     </p>
   {% elif p.status == 'discarded' %}
     <p class="mt-1.5 text-gray-400">Descartada</p>

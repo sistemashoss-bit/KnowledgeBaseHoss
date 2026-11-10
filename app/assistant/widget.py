@@ -1,6 +1,6 @@
 """MAX en el widget flotante, con sesión: conversación privada con quien
 pregunta, con sus propios permisos y las mismas tools que en el chat
-(documentos, tareas, seguimientos, sus chats y proponer tareas/seguimientos).
+(documentos, tareas, seguimientos, sus chats y proponer tareas/seguimientos/tickets).
 Las propuestas se guardan sin mensaje ni conversación y la tarjeta se pinta
 debajo de la respuesta del widget.
 
@@ -42,6 +42,8 @@ def _proposals_note(items: list[dict]) -> str:
         d = p["payload"]
         if p["kind"] == "task":
             parts.append(f"tarea «{d.get('title')}» para {d.get('assignee_name') or 'nadie'}")
+        elif p["kind"] == "ticket":
+            parts.append(f"ticket «{d.get('title')}» para {d.get('department_name')}")
         else:
             parts.append(f"seguimiento de «{d.get('task_title')}» el {d.get('day')} {d.get('start')}")
     return f"\n[Propuse (pendiente de confirmar): {'; '.join(parts)}]" if parts else ""
@@ -76,7 +78,8 @@ Con tus herramientas puedes, con los permisos de {name}:
 - consultar tareas y seguimientos (search_tasks, search_followups); "mis tareas"
   son las asignadas a su id;
 - buscar en sus chats (search_messages) y leer uno (get_conversation);
-- proponer tareas y seguimientos (propose_task, propose_followup).
+- proponer tareas y seguimientos (propose_task, propose_followup);
+- proponer tickets a un departamento (propose_ticket): incidencias y solicitudes.
 
 Reglas:
 - Lo que sea de la empresa (políticas, procesos, tareas, personas, chats) sale solo
@@ -88,6 +91,12 @@ Reglas:
   propose_followup. La tarjeta para confirmar SOLO aparece si llamas esa
   herramienta y no devuelve error: nunca la describas sin llamarla. Nunca digas
   que ya lo creaste: di que dejaste la propuesta para que la confirme abajo.
+- Si {name} reporta una falla (algo que no funciona) o pide algo a otra área
+  (acceso, alta, cambio, compra), o te pide levantar un ticket, llama
+  propose_ticket (incident = incidencia, request = solicitud); queda a su nombre.
+  Si no sabes a qué departamento va, llámala sin department: te devuelve la
+  lista con lo que atiende cada uno; elige el que corresponda o pregunta. Pon en
+  la descripción los datos que dio (qué pasa, desde cuándo, a quién afecta).
 - Háblale de tú a {name} (no en tercera persona).
 - "Ponme", "mi tarea", "recuérdame": la tarea es para {name} (assignee_id = su id).
 - Para asignar usa el nombre o el id de la persona; si la herramienta dice que

@@ -455,8 +455,10 @@ def upload_document(
     if kind not in DOC_KINDS:
         raise HTTPException(400, "Tipo de documento inválido.")
     is_announcement = kind == DOC_KIND_ANNOUNCEMENT
-    if is_announcement:
-        # Un comunicado no es un borrador ni va en carpetas.
+    from_editor = bool(editor_html and editor_html.filename)
+    if is_announcement or from_editor:
+        # Un comunicado no es un borrador ni va en carpetas; lo del editor se
+        # sube solo como documento o comunicado, nunca como documento de trabajo.
         is_work_document = False
         folder_id = ""
 
@@ -500,7 +502,6 @@ def upload_document(
     # editor: exactamente uno de los tres.
     drive_url = drive_url.strip()
     has_file = bool(file and file.filename)
-    from_editor = bool(editor_html and editor_html.filename)
     if has_file + bool(drive_url) + from_editor != 1:
         raise HTTPException(400, "Proporciona un archivo o un link de Google Drive (uno de los dos).")
     if is_announcement and drive_url:

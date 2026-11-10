@@ -31,16 +31,19 @@ REPLY_MAX_CHARS = 3500
 MAX_SOURCES = 4  # documentos consultados que se muestran bajo la respuesta (igual que el widget)
 LLM_TIMEOUT_SECONDS = 40
 # El modelo dice que dejó una propuesta (o una tarjeta) sin haber llamado propose_*.
-_CLAIMS_PROPOSAL = re.compile(r"propuest|tarjeta|confirm|cre[eé] la tarea|qued[oó] (cread|registrad)", re.I)
+_CLAIMS_PROPOSAL = re.compile(
+    r"propuest|tarjeta|confirm|cre[eé] la tarea|levant[eé] el ticket|qued[oó] (cread|registrad|levantad)", re.I
+)
 _NUDGE = (
     "Aviso del sistema: no se registró ninguna propuesta. La tarjeta para confirmar solo "
-    "aparece si llamas propose_task o propose_followup. Llámala ahora si corresponde; si no, "
+    "aparece si llamas propose_task, propose_followup o propose_ticket. Llámala ahora si corresponde; si no, "
     "responde sin mencionar propuestas ni tarjetas."
 )
-# El mensaje pide una acción (crear/asignar una tarea o un seguimiento): la primera
+# El mensaje pide una acción (crear/asignar una tarea, un seguimiento o un ticket): la primera
 # vuelta obliga a usar una herramienta, para que no conteste solo con texto.
 _ASKS_ACTION = re.compile(
-    r"\b(tareas?|seguimientos?|recordatorios?|pendientes?|asign\w*|agend\w*|recu[eé]rda\w*|propuest\w*)\b", re.I
+    r"\b(tareas?|seguimientos?|recordatorios?|pendientes?|asign\w*|agend\w*|recu[eé]rda\w*|propuest\w*"
+    r"|tickets?|incidencias?|levant\w*|report\w*)\b", re.I
 )
 _NOT_SAVED = "(No pude registrar la propuesta; pídemelo de nuevo con más detalle.)"
 _WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -166,7 +169,14 @@ Reglas:
 - Para preguntas sobre políticas, procesos o documentos usa search_passages y menciona
   el título del documento de donde sale la respuesta.
 - Si te piden crear una tarea o un seguimiento, o el mensaje de {invoker} plantea un
-  pendiente claro, llama propose_task / propose_followup. La tarjeta para confirmar
+  pendiente claro, llama propose_task / propose_followup.
+- Si {invoker} reporta una falla (algo que no funciona) o pide algo a otra área
+  (acceso, alta, cambio, compra), o te pide levantar un ticket, llama propose_ticket
+  (incident = incidencia, request = solicitud). El ticket queda a nombre de {invoker}.
+  Si no sabes a qué departamento va, llámala sin department: te devuelve la lista
+  con lo que atiende cada uno; elige el que corresponda o pregunta. Pon en la
+  descripción los datos que dio (qué pasa, desde cuándo, a quién afecta).
+- La tarjeta para confirmar
   SOLO aparece si llamas esa herramienta y no devuelve error: nunca la describas sin
   llamarla. Nunca digas que ya lo creaste: di que dejaste la propuesta para que
   {invoker} la confirme.

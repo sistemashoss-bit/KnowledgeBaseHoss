@@ -1111,7 +1111,8 @@ class MessageAttachment(Base):
 
 PROPOSAL_TASK = "task"
 PROPOSAL_FOLLOW_UP = "follow_up"
-PROPOSAL_KINDS = [PROPOSAL_TASK, PROPOSAL_FOLLOW_UP]
+PROPOSAL_TICKET = "ticket"
+PROPOSAL_KINDS = [PROPOSAL_TASK, PROPOSAL_FOLLOW_UP, PROPOSAL_TICKET]
 
 PROPOSAL_PENDING = "pending"
 PROPOSAL_CONFIRMED = "confirmed"
@@ -1120,7 +1121,7 @@ PROPOSAL_FAILED = "failed"
 
 
 class AssistantProposal(Base):
-    """Acción que MAX propone (crear tarea o seguimiento). No se ejecuta hasta
+    """Acción que MAX propone (crear tarea, seguimiento o ticket). No se ejecuta hasta
     que quien lo invocó la confirma desde la tarjeta; entonces se crea con los
     permisos de esa persona. En el chat va con su mensaje y se borra con él
     (retención del chat). Desde el widget no hay mensaje ni conversación

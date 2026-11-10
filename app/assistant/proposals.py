@@ -1,5 +1,6 @@
-"""Propuestas de MAX: se guardan con su mensaje y se ejecutan solo cuando quien
-lo invocó las confirma, con SUS permisos (las mismas validaciones que la web)."""
+"""Propuestas de MAX (tarea, seguimiento, ticket): se guardan con su mensaje y se
+ejecutan solo cuando quien lo invocó las confirma, con SUS permisos (las mismas
+validaciones que la web)."""
 import uuid
 from datetime import date, datetime
 
@@ -11,8 +12,11 @@ from app.calendar.reminders import to_local
 from app.models import (
     AssistantProposal, ConversationParticipant, Message, Task, User,
     PROPOSAL_CONFIRMED, PROPOSAL_DISCARDED, PROPOSAL_FAILED, PROPOSAL_FOLLOW_UP, PROPOSAL_PENDING, PROPOSAL_TASK,
+    PROPOSAL_TICKET,
 )
+from app.messaging import realtime
 from app.tasks import service as task_service
+from app.tickets import service as ticket_service
 
 SOURCE_APP = "assistant"
 
@@ -116,6 +120,8 @@ def confirm(db: Session, proposal_id: str, user: User, request=None) -> Assistan
             _confirm_task(db, p, user, request)
         elif p.kind == PROPOSAL_FOLLOW_UP:
             _confirm_follow_up(db, p, user, request)
+        elif p.kind == PROPOSAL_TICKET:
+            _confirm_ticket(db, p, user, request)
         else:
             raise HTTPException(422, "Propuesta desconocida")
     except HTTPException as exc:
@@ -175,6 +181,38 @@ def _confirm_follow_up(db: Session, p: AssistantProposal, user: User, request) -
         "task_follow_up_add", user=user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
         details=f"{to_local(result['start_at']):%Y-%m-%d %H:%M}-{to_local(result['end_at']):%H:%M} via=assistant",
+    )
+
+
+def _confirm_ticket(db: Session, p: AssistantProposal, user: User, request) -> None:
+    """Igual que levantarlo desde /tickets/new: queda a nombre de quien confirma
+    y avisa a los admins del departamento (nace sin asignar)."""
+    data = p.payload
+    t = ticket_service.create_ticket(
+        db, user,
+        kind=data.get("kind", ""),
+        title=data.get("title", ""),
+        description=data.get("description", ""),
+        department_id=data.get("department_id", ""),
+        priority=data.get("priority", "medium"),
+        source_app=SOURCE_APP,
+        context=_source_context(p, db),
+    )
+    p.status = PROPOSAL_CONFIRMED
+    # La tarjeta enlaza al ticket por su número (no hay columna para tickets).
+    p.payload = {**data, "ticket_number": t.number}
+    p.resolved_at = datetime.utcnow()
+    db.commit()
+    admin_ids = ticket_service.department_admin_ids(t.department_id, db, exclude=user.id)
+    if admin_ids:
+        realtime.notify_users(
+            admin_ids, title=f"Nuevo ticket de {user.name or user.email}",
+            body=f"#{t.number} {t.title}", url=f"/tickets/{t.number}", kind="ticket_created",
+        )
+    audit.log_action(
+        "ticket_create", user=user, request=request,
+        resource_type="ticket", resource_id=t.id, resource_name=f"#{t.number} {t.title}",
+        details=f"kind={t.kind} priority={t.priority} via=assistant proposal={p.id}",
     )
 
 
