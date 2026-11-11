@@ -1,0 +1,117 @@
+<style>
+  #flow-wrap svg { max-width: none; }
+  #flow-wrap g.node { cursor: pointer; }
+  #flow-wrap g.node:hover rect { filter: brightness(0.96); }
+</style>
+
+<div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+  <div class="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-100">
+    <h2 class="text-sm font-semibold text-gray-700">Flujo de dependencias</h2>
+    {% if flow_src %}
+    <div class="flex items-center gap-1" id="flow-dirs">
+      <button type="button" data-dir="LR" class="px-2 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600">Horizontal</button>
+      <button type="button" data-dir="TD" class="px-2 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600">Vertical</button>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if flow_src %}
+  <div id="flow-wrap" class="overflow-auto px-4 sm:px-6 py-6" style="max-height: 70vh">
+    <p class="text-sm text-gray-400 italic">Cargando diagrama…</p>
+  </div>
+  <div class="flex flex-wrap gap-4 px-4 sm:px-6 py-3 border-t border-gray-100 text-xs text-gray-500">
+    <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm inline-block bg-gray-100 border border-gray-200"></span>Pendiente</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm inline-block bg-blue-100"></span>En progreso</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm inline-block bg-yellow-100"></span>Revisión</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm inline-block bg-green-100"></span>Listo</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm inline-block border border-dashed border-red-500"></span>Bloqueada</span>
+    <span class="text-gray-400">La flecha va de la tarea que hay que terminar primero a la que la espera.</span>
+  </div>
+  {% else %}
+  <div class="px-4 sm:px-6 py-10 text-center">
+    <p class="text-sm text-gray-400 italic">Ninguna tarea tiene dependencias todavía; agrégalas desde el detalle de la tarea para ver el flujo.</p>
+  </div>
+  {% endif %}
+
+  {% if flow_loose %}
+  <div class="border-t border-gray-100">
+    <p class="px-4 sm:px-6 pt-4 pb-2 text-xs font-medium text-gray-500">Sin dependencias ({{ flow_loose|length }})</p>
+    <div class="divide-y divide-gray-100">
+      {% for task in flow_loose %}
+      <a href="/tasks/{{ task.id }}" class="flex items-center gap-3 px-4 sm:px-6 py-2.5 hover:bg-gray-50 transition-colors">
+        {{ priority_dot(task.priority) }}
+        <span class="flex-1 min-w-0 text-sm text-gray-700 truncate {% if task.status == 'done' %}line-through text-gray-400{% endif %}">{{ task.title }}</span>
+        {{ task_status_badge(task.status) }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% if flow_src %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  var src = {{ flow_src|tojson }};
+  var nodes = {{ flow_nodes|tojson }};
+  var byKey = {};
+  nodes.forEach(function (n) { byKey[n.key] = n; });
+  var wrap = document.getElementById('flow-wrap');
+
+  // strict: Mermaid codifica el HTML de las etiquetas y desactiva sus "click";
+  // la navegación se engancha a mano después de pintar.
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {fontFamily: 'inherit', fontSize: '13px', lineColor: '#9ca3af'},
+    flowchart: {useMaxWidth: false, curve: 'basis', nodeSpacing: 30, rankSpacing: 50},
+  });
+
+  var STORE = 'flow-direction';
+  var dir = 'LR';
+  try { dir = localStorage.getItem(STORE) || dir; } catch (e) {}
+  var seq = 0;
+
+  function draw() {
+    var code = src.replace(/^flowchart \w+/, 'flowchart ' + dir);
+    mermaid.render('flow-svg-' + (++seq), code).then(function (res) {
+      wrap.innerHTML = res.svg;
+      wrap.querySelectorAll('g.node').forEach(function (g) {
+        var m = /flowchart-(t\d+)-\d+$/.exec(g.id);
+        var n = m && byKey[m[1]];
+        if (!n) return;
+        var t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        t.textContent = n.title;
+        g.insertBefore(t, g.firstChild);
+        g.addEventListener('click', function () { window.location.href = '/tasks/' + n.id; });
+      });
+    }).catch(function () {
+      wrap.innerHTML = '<p class="text-sm text-red-500">No se pudo dibujar el diagrama.</p>';
+    });
+  }
+
+  var buttons = document.querySelectorAll('#flow-dirs button');
+  function mark() {
+    buttons.forEach(function (b) {
+      var on = b.dataset.dir === dir;
+      b.classList.toggle('bg-gray-100', on);
+      b.classList.toggle('text-gray-700', on);
+      b.classList.toggle('font-medium', on);
+      b.classList.toggle('text-gray-400', !on);
+    });
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      dir = b.dataset.dir;
+      try { localStorage.setItem(STORE, dir); } catch (e) {}
+      mark();
+      draw();
+    });
+  });
+  mark();
+  draw();
+})();
+</script>
+{% endif %}

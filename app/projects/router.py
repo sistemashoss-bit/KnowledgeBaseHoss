@@ -69,6 +69,59 @@ def _gantt_data(tasks: list[Task]) -> tuple[list[dict], list[Task]]:
     return bars, undated
 
 
+# ── Flujo (Mermaid) ───────────────────────────────────────────────────────────
+
+# estado: (relleno, borde, texto), mismos colores que el Gantt.
+_FLOW_STYLES = {
+    "pending": ("#f3f4f6", "#d1d5db", "#374151"),
+    "in_progress": ("#dbeafe", "#93c5fd", "#1e3a8a"),
+    "review": ("#fef9c3", "#fde047", "#713f12"),
+    "done": ("#dcfce7", "#86efac", "#14532d"),
+}
+
+
+def _flow_label(title: str) -> str:
+    """Texto seguro dentro de ["..."]: Mermaid interpreta #xx; como entidades,
+    las comillas cierran la etiqueta y las comillas invertidas activan markdown."""
+    title = " ".join((title or "").split())
+    if len(title) > 60:
+        title = title[:57].rstrip() + "…"
+    out = []
+    for ch in title:
+        out.append(f"#{ord(ch)};" if ch in '#"`<>&;' else ch)
+    return "".join(out)
+
+
+def _flow_data(tasks: list[Task]) -> tuple[str, list[dict], list[Task]]:
+    """Diagrama de flujo de las dependencias del proyecto. Solo dibuja las
+    tareas con alguna dependencia dentro del proyecto; las demás van aparte.
+    Las flechas van de la tarea que se espera a la que espera."""
+    by_id = {t.id: t for t in tasks}
+    edges = [(d.id, t.id) for t in tasks for d in t.depends_on if d.id in by_id]
+    linked = {i for e in edges for i in e}
+    nodes = sorted((t for t in tasks if t.id in linked), key=lambda t: str(t.created_at or ""))
+    loose = [t for t in tasks if t.id not in linked]
+    if not nodes:
+        return "", [], loose
+
+    key = {t.id: f"t{i}" for i, t in enumerate(nodes)}
+    lines = ["flowchart LR"]
+    meta = []
+    for t in nodes:
+        cls = t.status if t.status in _FLOW_STYLES else "pending"
+        if is_blocked(t):
+            cls += "_blocked"
+        lines.append(f'  {key[t.id]}["{_flow_label(t.title)}"]:::{cls}')
+        meta.append({"key": key[t.id], "id": str(t.id), "title": t.title})
+    for a, b in edges:
+        lines.append(f"  {key[a]} --> {key[b]}")
+    for status, (fill, stroke, color) in _FLOW_STYLES.items():
+        lines.append(f"  classDef {status} fill:{fill},stroke:{stroke},color:{color}")
+        lines.append(f"  classDef {status}_blocked fill:{fill},stroke:#ef4444,color:{color},"
+                     "stroke-width:1.5px,stroke-dasharray:4 3")
+    return "\n".join(lines), meta, loose
+
+
 # ── List ──────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
@@ -202,16 +255,20 @@ def project_detail(
     total = len(all_tasks)
     done_pct = round((stats.get("done", 0) / total) * 100) if total else 0
 
-    view = "gantt" if view == "gantt" and project.gantt_enabled else "list"
+    view = view if view in ("gantt", "flow") and project.gantt_enabled else "list"
     gantt_tasks, gantt_undated = [], []
-    if view == "gantt":
+    flow_src, flow_nodes, flow_loose = "", [], []
+    if view in ("gantt", "flow"):
         gantt_source = (
             db.query(Task)
             .options(joinedload(Task.assignee), joinedload(Task.department), selectinload(Task.depends_on))
             .filter(Task.projects.any(Project.id == project_id))
             .all()
         )
-        gantt_tasks, gantt_undated = _gantt_data(gantt_source)
+        if view == "gantt":
+            gantt_tasks, gantt_undated = _gantt_data(gantt_source)
+        else:
+            flow_src, flow_nodes, flow_loose = _flow_data(gantt_source)
 
     departments = db.query(Department).order_by(Department.name).all()
     users = db.query(User).filter(User.is_active == True).order_by(User.email).all()
@@ -240,6 +297,9 @@ def project_detail(
             "view": view,
             "gantt_tasks": gantt_tasks,
             "gantt_undated": gantt_undated,
+            "flow_src": flow_src,
+            "flow_nodes": flow_nodes,
+            "flow_loose": flow_loose,
             "can_edit": can_edit,
             "today": date.today().isoformat(),
             "csrf_token": generate_csrf_token(str(current_user.id)),

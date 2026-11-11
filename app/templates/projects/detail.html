@@ -138,11 +138,17 @@
          class="px-3 py-1.5 rounded-lg text-sm transition-colors {% if view == 'gantt' %}bg-white border border-gray-200 text-gray-800 font-medium{% else %}text-gray-500 hover:text-gray-700{% endif %}">
         Gantt
       </a>
+      <a href="/projects/{{ project.id }}?view=flow"
+         class="px-3 py-1.5 rounded-lg text-sm transition-colors {% if view == 'flow' %}bg-white border border-gray-200 text-gray-800 font-medium{% else %}text-gray-500 hover:text-gray-700{% endif %}">
+        Flujo
+      </a>
     </div>
     {% endif %}
 
     {% if view == "gantt" %}
     {% include "projects/_gantt.html" %}
+    {% elif view == "flow" %}
+    {% include "projects/_flow.html" %}
     {% else %}
     <!-- Tasks section -->
     <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
