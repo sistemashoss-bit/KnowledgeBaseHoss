@@ -1287,7 +1287,16 @@ def send_message(
             resource_type="conversation", resource_id=conv_id,
             details=f"files={len(valid_files)} names={','.join(f.filename for f in valid_files[:5])}",
         )
-    return HTMLResponse("", headers={"HX-Trigger": "refreshFeed"})
+    # Se devuelve el mensaje ya dibujado: el formulario lo agrega al feed sin
+    # esperar otro viaje a /poll (el poll que dispara el SSE llega vacío o, si
+    # gana la carrera, el feed descarta el repetido).
+    sent = db.query(Message).options(*_FEED_LOAD).filter(Message.id == msg.id).one()
+    conv_type = db.query(Conversation.type).filter(Conversation.id == conv_id).scalar()
+    return templates.TemplateResponse(
+        request,
+        "messaging/_messages.html",
+        _feed_context([sent], current_user, db, conv_type == CONV_GROUP, conv_id),
+    )
 
 
 @router.post("/{conv_id}/whiteboard")

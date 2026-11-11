@@ -1369,8 +1369,8 @@
     <div class="chat-composer relative bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
-            hx-target="#send-form"
-            hx-swap="none"
+            hx-target="#message-feed"
+            hx-swap="beforeend"
             hx-encoding="multipart/form-data"
             hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('file-input').dispatchEvent(new Event('files-changed')); clearReply(); } document.getElementById('msg-input').focus()"
             class="flex flex-col gap-2">
@@ -1504,6 +1504,49 @@
           </button>
         </div>
       </form>
+      <script>
+        // Envío optimista: el texto aparece en el feed al instante como "Enviando…"
+        // y se reemplaza por el mensaje real que devuelve /send (se agrega al feed).
+        (function () {
+          var form = document.getElementById('send-form');
+          var feed = document.getElementById('message-feed');
+          var input = document.getElementById('msg-input');
+          var pending = null;
+          form.addEventListener('htmx:beforeRequest', function (e) {
+            if (e.target !== form) return;
+            var text = input.value.trim();
+            if (!text || document.getElementById('file-input').files.length) return;
+            var empty = document.getElementById('feed-empty');
+            if (empty) empty.remove();
+            pending = document.createElement('div');
+            pending.setAttribute('data-pending', '');
+            pending.className = 'flex justify-end mb-2';
+            pending.innerHTML =
+              '<div class="min-w-0 max-w-[85%] sm:max-w-xs lg:max-w-md xl:max-w-lg">' +
+              '<div data-pending-text class="w-fit max-w-full px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] ml-auto bg-blue-500 text-white rounded-br-sm" style="opacity:.6"></div>' +
+              '<p data-pending-label class="text-xs text-gray-400 mt-1 text-right mr-1">Enviando…</p></div>';
+            pending.querySelector('[data-pending-text]').textContent = text;
+            feed.appendChild(pending);
+            feed.scrollTop = feed.scrollHeight;
+            // Los datos del formulario ya se tomaron: se puede vaciar para seguir escribiendo.
+            input.value = '';
+            input.style.height = 'auto';
+            pending.dataset.text = text;
+          });
+          form.addEventListener('htmx:afterRequest', function (e) {
+            if (e.target !== form || !pending) return;
+            var p = pending;
+            pending = null;
+            if (e.detail.successful) { p.remove(); return; }
+            // Falló: se avisa y el texto vuelve al cuadro si la persona no escribió otro.
+            if (!input.value) input.value = p.dataset.text;
+            var label = p.querySelector('[data-pending-label]');
+            label.textContent = 'No se envió';
+            label.className = 'text-xs text-red-500 mt-1 text-right mr-1';
+            setTimeout(function () { p.remove(); }, 4000);
+          });
+        })();
+      </script>
       <script>
         (function () {
           var form = document.getElementById('send-form');

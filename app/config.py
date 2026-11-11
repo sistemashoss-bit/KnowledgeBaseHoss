@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Valkey / Redis-compatible cache
     valkey_url: str = ""
 
+    # Peticiones que tardan más que esto (ms) se registran como WARNING (app.timing).
+    slow_request_ms: int = 500
+
     # Chat retention
     message_retention_days: int = 30
     cleanup_hour_utc: int = 3  # daily purge runs at this UTC hour

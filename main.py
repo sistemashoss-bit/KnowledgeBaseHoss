@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
 limiter = Limiter(key_func=get_remote_address)
 from app.auth.deps import require_csrf  # noqa: E402
 from app.static_assets import CachedStaticFiles  # noqa: E402
+from app.timing import TimingMiddleware  # noqa: E402
 
 app = FastAPI(
     title="Knowledge Base",
@@ -96,6 +97,7 @@ class ReportsCORSMiddleware:
 
 
 app.add_middleware(ReportsCORSMiddleware)
+app.add_middleware(TimingMiddleware)
 app.mount("/assets", CachedStaticFiles(directory=Path(__file__).resolve().parent / "app" / "assets"), name="assets")
 app.state.limiter = limiter
 

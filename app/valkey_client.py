@@ -24,10 +24,23 @@ def _get():
         url = settings.valkey_url.replace("valkeys://", "rediss://", 1)
         _client = redis.from_url(url, decode_responses=True, socket_timeout=2)
         _client.ping()
+        _time_commands(_client)
     except Exception as exc:
         logger.warning("Valkey unavailable: %s — caching disabled", exc)
         _client = None
     return _client
+
+
+def _time_commands(client) -> None:
+    """Cada comando suma a `vk` en el Server-Timing de la petición (app.timing)."""
+    from app import timing
+    raw = client.execute_command
+
+    def timed(*args, **kwargs):
+        with timing.span("vk"):
+            return raw(*args, **kwargs)
+
+    client.execute_command = timed
 
 
 def available() -> bool:
