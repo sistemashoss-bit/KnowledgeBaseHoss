@@ -170,92 +170,123 @@
       {% endif %}
 
       <!-- Acciones de estado -->
+      {% set confirming = is_requester and not can_attend and ticket.status == "resolved" %}
       {% if allowed_statuses %}
-      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-wrap items-center gap-2">
-        <span class="text-xs text-gray-400 mr-1">
-          {% if is_requester and not can_attend and ticket.status == "resolved" %}¿Quedó resuelto?{% else %}Mover a{% endif %}
-        </span>
-        {% for s in allowed_statuses %}
-        <form method="post" action="/tickets/{{ ticket.number }}/status"
-              {% if s == "closed" and is_requester and not can_attend and ticket.status != "resolved" %}onsubmit="return confirm('¿Retirar este ticket? Se cerrará sin atenderse.')"{% endif %}>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <input type="hidden" name="status" value="{{ s }}" />
-          {% if is_requester and not can_attend and ticket.status == "resolved" %}
-          <button type="submit"
-                  class="text-xs px-3 py-1.5 rounded-lg transition-colors {% if s == 'closed' %}bg-green-600 text-white hover:bg-green-500{% else %}border border-gray-300 text-gray-600 hover:bg-gray-50{% endif %}">
-            {% if s == "closed" %}Sí, cerrar ticket{% else %}No, reabrir{% endif %}
-          </button>
-          {% elif is_requester and not can_attend and s == "closed" %}
-          <button type="submit" class="text-xs px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">Retirar ticket</button>
-          {% else %}
-          <button type="submit"
-                  class="text-xs px-3 py-1.5 rounded-lg transition-colors {% if s == 'resolved' %}bg-green-600 text-white hover:bg-green-500{% else %}border border-gray-300 text-gray-600 hover:bg-gray-50{% endif %}">
-            {{ status_actions[s] }}
-          </button>
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 {% if confirming %}bg-green-50/60{% endif %}">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2.5">
+          {% if confirming %}¿Quedó resuelto?{% else %}Cambiar estado{% endif %}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          {% if not confirming %}
+          {{ tk.status_badge(ticket.status) }}
+          <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+          </svg>
           {% endif %}
-        </form>
-        {% endfor %}
+          {% for s in allowed_statuses %}
+          <form method="post" action="/tickets/{{ ticket.number }}/status"
+                {% if s == "closed" and is_requester and not can_attend and ticket.status != "resolved" %}onsubmit="return confirm('¿Retirar este ticket? Se cerrará sin atenderse.')"{% endif %}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="status" value="{{ s }}" />
+            {% if confirming %}
+            <button type="submit"
+                    class="text-sm px-3.5 py-1.5 rounded-lg font-medium transition-colors {% if s == 'closed' %}bg-green-600 text-white hover:bg-green-500{% else %}border border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
+              {% if s == "closed" %}Sí, cerrar ticket{% else %}No, reabrir{% endif %}
+            </button>
+            {% elif is_requester and not can_attend and s == "closed" %}
+            <button type="submit" class="text-sm px-3.5 py-1.5 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">Retirar ticket</button>
+            {% else %}
+            <button type="submit"
+                    class="text-sm px-3.5 py-1.5 rounded-lg font-medium transition-colors {% if s == 'resolved' %}bg-green-600 text-white hover:bg-green-500{% else %}border border-gray-300 bg-white text-gray-700 hover:bg-gray-50{% endif %}">
+              {{ status_actions[s] }}
+            </button>
+            {% endif %}
+          </form>
+          {% endfor %}
+        </div>
       </div>
       {% endif %}
 
       <!-- Atención: asignar, clasificar, transferir -->
       {% if can_attend %}
-      <div class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="space-y-1.5">
-          <form method="post" action="/tickets/{{ ticket.number }}/assign" class="space-y-1.5">
+      <div class="bg-gray-50/70">
+        <p class="px-4 sm:px-6 pt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Atención</p>
+        <div class="divide-y divide-gray-200/70">
+
+          <div class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-[10rem_1fr] items-start gap-x-6 gap-y-2">
+            <div>
+              <label for="a-user" class="block text-sm font-medium text-gray-800">Asignado a</label>
+              <p class="text-xs text-gray-400">Quién lo atiende</p>
+            </div>
+            <div class="space-y-1.5">
+              <form method="post" action="/tickets/{{ ticket.number }}/assign" class="flex gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <select id="a-user" name="assigned_to"
+                        class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— Sin asignar —</option>
+                  {% for u in assignable_users %}
+                  <option value="{{ u.id }}" {% if ticket.assigned_to == u.id %}selected{% endif %}>{{ u.name or u.email }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="shrink-0 w-24 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">Asignar</button>
+              </form>
+              {% if not ticket.assigned_to and current_user.department_id == ticket.department_id %}
+              <form method="post" action="/tickets/{{ ticket.number }}/assign">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="assigned_to" value="{{ current_user.id }}" />
+                <button type="submit" class="text-xs font-medium text-blue-600 hover:text-blue-500">o tomarlo yo</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+
+          <form method="post" action="/tickets/{{ ticket.number }}/classify"
+                class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-[10rem_1fr] items-start gap-x-6 gap-y-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <label for="a-user" class="block text-xs font-medium text-gray-500">Asignado a</label>
-            <div class="flex gap-2">
-              <select id="a-user" name="assigned_to"
-                      class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-                <option value="">— Sin asignar —</option>
-                {% for u in assignable_users %}
-                <option value="{{ u.id }}" {% if ticket.assigned_to == u.id %}selected{% endif %}>{{ u.name or u.email }}</option>
-                {% endfor %}
-              </select>
-              <button type="submit" class="px-2.5 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">Guardar</button>
+            <div>
+              <p class="text-sm font-medium text-gray-800">Clasificación</p>
+              <p class="text-xs text-gray-400">Tipo y prioridad</p>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+              <div class="flex-1 min-w-0">
+                <label for="c-kind" class="block text-xs text-gray-500 mb-1">Tipo</label>
+                <select id="c-kind" name="kind" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {% for k in kinds %}
+                  <option value="{{ k }}" {% if ticket.kind == k %}selected{% endif %}>{{ kind_labels[k] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="flex-1 min-w-0">
+                <label for="c-prio" class="block text-xs text-gray-500 mb-1">Prioridad</label>
+                <select id="c-prio" name="priority" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {% for p in priorities | reverse %}
+                  <option value="{{ p }}" {% if ticket.priority == p %}selected{% endif %}>{{ priority_labels[p] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <button type="submit" class="shrink-0 sm:w-24 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">Guardar</button>
             </div>
           </form>
-          {% if not ticket.assigned_to and current_user.department_id == ticket.department_id %}
-          <form method="post" action="/tickets/{{ ticket.number }}/assign">
+
+          <form method="post" action="/tickets/{{ ticket.number }}/transfer"
+                class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-[10rem_1fr] items-start gap-x-6 gap-y-2"
+                onsubmit="return confirm('¿Transferir el ticket? Se quitará la asignación actual.')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <input type="hidden" name="assigned_to" value="{{ current_user.id }}" />
-            <button type="submit" class="text-xs text-blue-600 hover:text-blue-500">Tomarlo yo</button>
+            <div>
+              <label for="t-dept" class="block text-sm font-medium text-gray-800">Transferir a</label>
+              <p class="text-xs text-gray-400">Otro departamento; quita la asignación</p>
+            </div>
+            <div class="flex gap-2">
+              <select id="t-dept" name="department_id" class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {% for d in departments %}
+                <option value="{{ d.id }}" {% if ticket.department_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="shrink-0 w-24 px-3 py-2 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">Transferir</button>
+            </div>
           </form>
-          {% endif %}
+
         </div>
-
-        <form method="post" action="/tickets/{{ ticket.number }}/classify" class="space-y-1.5">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <span class="block text-xs font-medium text-gray-500">Tipo y prioridad</span>
-          <div class="flex gap-2">
-            <select name="kind" aria-label="Tipo" class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-              {% for k in kinds %}
-              <option value="{{ k }}" {% if ticket.kind == k %}selected{% endif %}>{{ kind_labels[k] }}</option>
-              {% endfor %}
-            </select>
-            <select name="priority" aria-label="Prioridad" class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-              {% for p in priorities | reverse %}
-              <option value="{{ p }}" {% if ticket.priority == p %}selected{% endif %}>{{ priority_labels[p] }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <button type="submit" class="px-2.5 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">Guardar</button>
-        </form>
-
-        <form method="post" action="/tickets/{{ ticket.number }}/transfer" class="space-y-1.5"
-              onsubmit="return confirm('¿Transferir el ticket? Se quitará la asignación actual.')">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <label for="t-dept" class="block text-xs font-medium text-gray-500">Transferir a</label>
-          <div class="flex gap-2">
-            <select id="t-dept" name="department_id" class="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-              {% for d in departments %}
-              <option value="{{ d.id }}" {% if ticket.department_id == d.id %}selected{% endif %}>{{ d.name }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="px-2.5 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">Mover</button>
-          </div>
-        </form>
       </div>
       {% endif %}
     </div>
