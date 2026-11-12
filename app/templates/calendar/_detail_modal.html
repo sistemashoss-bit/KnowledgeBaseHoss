@@ -1,0 +1,204 @@
+{# Detalle de un evento (clic / toque); usa el estado Alpine de calendarPage(). Se incluye desde calendar/index.html. #}
+  <!-- Detalle (clic / toque) -->
+  <div x-show="detail" x-cloak class="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+       @click.self="detail = null" @keydown.escape.window="detail = null">
+    <div class="responsive-modal bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" role="dialog" aria-modal="true">
+      <template x-if="detail">
+        <div>
+          <div x-effect="$el.replaceChildren(detailNodes(detail))"></div>
+
+          <!-- Archivos / evidencias (solo eventos; en una serie aplican a todas sus fechas) -->
+          <template x-if="detail.kind === 'event'">
+            <div class="mt-4 border-t border-gray-100 pt-3">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <h3 class="text-xs font-semibold text-gray-600">
+                  Archivos <span class="font-normal text-gray-400" x-show="attachments.length" x-text="`(${attachments.length})`"></span>
+                </h3>
+                <label class="text-xs font-medium text-blue-600 hover:text-blue-500 cursor-pointer"
+                       :class="attachmentUploading && 'opacity-60 pointer-events-none'">
+                  <span x-text="attachmentUploading ? 'Subiendo…' : '+ Adjuntar'"></span>
+                  <input type="file" multiple class="hidden" @change="uploadAttachments($event.target)" />
+                </label>
+              </div>
+              <p x-show="attachmentsLoading" class="text-xs text-gray-400">Cargando…</p>
+              <p x-show="!attachmentsLoading && !attachments.length" class="text-xs text-gray-400">Sin archivos adjuntos.</p>
+              <ul class="space-y-1.5 max-h-48 overflow-y-auto" x-show="attachments.length">
+                <template x-for="a in attachments" :key="a.id">
+                  <li class="flex items-center gap-2">
+                    <template x-if="a.is_image">
+                      <img :src="`${a.url}?inline=1`" :alt="a.filename" loading="lazy" data-lightbox
+                           class="w-9 h-9 shrink-0 rounded object-cover border border-gray-200 cursor-zoom-in" />
+                    </template>
+                    <template x-if="!a.is_image">
+                      <span class="w-9 h-9 shrink-0 rounded bg-gray-100 text-gray-400 flex items-center justify-center">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                        </svg>
+                      </span>
+                    </template>
+                    <div class="flex-1 min-w-0">
+                      <a :href="a.url" target="_blank" rel="noopener"
+                         class="block text-sm text-gray-800 hover:text-blue-600 truncate" x-text="a.filename" :title="a.filename"></a>
+                      <p class="text-[11px] text-gray-400 truncate" x-text="`${calFmtSize(a.size)} · ${a.uploader} · ${calFmtStamp(a.created_at)}`"></p>
+                    </div>
+                    <button type="button" x-show="a.can_delete" @click="deleteAttachment(a)"
+                            class="text-gray-400 hover:text-red-600 text-xs leading-none px-1" title="Eliminar archivo" aria-label="Eliminar archivo">✕</button>
+                  </li>
+                </template>
+              </ul>
+              <p x-show="attachmentError" x-text="attachmentError" class="text-xs text-red-600 mt-1"></p>
+            </div>
+          </template>
+
+          <!-- Comentarios (solo eventos; en una serie aplican a todas sus fechas) -->
+          <template x-if="detail.kind === 'event'">
+            <div class="mt-4 border-t border-gray-100 pt-3">
+              <h3 class="text-xs font-semibold text-gray-600 mb-2">
+                Comentarios <span class="font-normal text-gray-400" x-show="comments.length" x-text="`(${comments.length})`"></span>
+              </h3>
+              <p x-show="commentsLoading" class="text-xs text-gray-400">Cargando…</p>
+              <p x-show="!commentsLoading && !comments.length" class="text-xs text-gray-400">Sin comentarios todavía.</p>
+             <ul class="space-y-2 min-h-32 max-h-80 overflow-y-auto mb-3" x-show="comments.length">
+                <template x-for="c in comments" :key="c.id">
+                  <li class="flex items-start gap-2">
+                    <img x-show="c.avatar_url" :src="c.avatar_url" alt="" loading="lazy" class="w-6 h-6 shrink-0 rounded-full object-cover">
+                    <span x-show="!c.avatar_url" class="w-6 h-6 shrink-0 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold flex items-center justify-center" x-text="c.initials"></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs text-gray-500">
+                        <span class="font-medium text-gray-700" x-text="c.author"></span>
+                        · <span x-text="calFmtStamp(c.created_at)"></span>
+                        <span x-show="c.edited" class="text-gray-400">(editado)</span>
+                      </p>
+                      <template x-if="editingId !== c.id && c.sticker">
+                        <img :src="c.sticker" alt="Sticker" loading="lazy" width="112" height="112" class="block w-28 h-28 object-contain">
+                      </template>
+                      <template x-if="editingId !== c.id && !c.sticker">
+                        <p class="text-sm text-gray-800 whitespace-pre-line break-words" x-text="c.content"></p>
+                      </template>
+                      <div class="flex flex-wrap items-center gap-1 mt-1" x-show="editingId !== c.id">
+                        <template x-for="r in c.reactions" :key="r.emoji">
+                          <button type="button" @click="toggleReaction(c, r.emoji)" :title="r.names"
+                                  class="rx-chip" :class="{ 'rx-mine': r.mine }">
+                            <span x-text="r.emoji"></span><span x-text="r.count"></span>
+                          </button>
+                        </template>
+                        <button type="button" @click="reactingId = reactingId === c.id ? null : c.id"
+                                title="Reaccionar" aria-label="Reaccionar" class="rx-add"></button>
+                        <span x-show="reactingId === c.id" x-cloak class="inline-flex gap-0.5 px-1 bg-white border border-gray-200 rounded-full shadow-sm">
+                          <template x-for="emoji in reactionEmojis" :key="emoji">
+                            <button type="button" @click="toggleReaction(c, emoji)" x-text="emoji"
+                                    :class="{ 'bg-blue-100': c.reactions.some(r => r.mine && r.emoji === emoji) }"
+                                    :aria-pressed="c.reactions.some(r => r.mine && r.emoji === emoji)"
+                                    class="w-7 h-7 rounded-full text-base leading-none hover:bg-gray-100"></button>
+                          </template>
+                        </span>
+                      </div>
+                      <template x-if="editingId === c.id">
+                        <div class="mt-1">
+                          <textarea x-model="editText" rows="2" maxlength="5000" x-init="$nextTick(() => $el.focus())"
+                                    @keydown.enter.ctrl.prevent="saveComment(c)" @keydown.escape.stop="editingId = null"
+                                    class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+                          <div class="flex justify-end gap-2 mt-1">
+                            <button type="button" @click="editingId = null"
+                                    class="px-2 py-1 border border-gray-300 text-gray-600 rounded-lg text-xs hover:bg-gray-50">Cancelar</button>
+                            <button type="button" @click="saveComment(c)" :disabled="commentSaving || !editText.trim()"
+                                    class="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-xs">Guardar</button>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                    <button type="button" x-show="c.can_edit && editingId !== c.id" @click="editingId = c.id; editText = c.content"
+                            class="text-gray-400 hover:text-blue-600 text-xs leading-none px-1" title="Editar comentario" aria-label="Editar comentario">✎</button>
+                    <button type="button" x-show="c.can_delete && editingId !== c.id" @click="deleteComment(c)"
+                            class="text-gray-400 hover:text-red-600 text-xs leading-none px-1" title="Eliminar comentario" aria-label="Eliminar comentario">✕</button>
+                  </li>
+                </template>
+              </ul>
+              <form @submit.prevent="addComment()" class="flex items-end gap-2">
+                <textarea   x-model="commentText"
+                            rows="4"
+                            maxlength="5000"
+                            placeholder="Escribe un comentario…"
+                            @keydown.enter.ctrl.prevent="addComment()"
+                            @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                            class="flex-1 min-w-0 px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-hidden"></textarea>
+                <button type="button" data-emoji-picker aria-expanded="false" title="Emojis"
+                        class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 transition-colors shrink-0">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </button>
+                {% if stickers_enabled() %}
+                <!-- Stickers (app/assets/stickers.js): se envían solos, sin el texto -->
+                <button type="button" data-sticker-picker aria-expanded="false" title="Stickers"
+                        @sticker-pick="addSticker($event.detail.id)" :disabled="commentSaving"
+                        class="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 transition-colors shrink-0">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M15 3H7a4 4 0 00-4 4v10a4 4 0 004 4h6l8-8V7a4 4 0 00-4-4h-2zm0 18v-4a4 4 0 014-4h2M9 10h.01M15 10h.01M9.5 14.5a3.5 3.5 0 004 .5"/>
+                  </svg>
+                </button>
+                {% endif %}
+                <button type="submit" :disabled="commentSaving || !commentText.trim()"
+                        class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white rounded-lg text-sm">Enviar</button>
+              </form>
+              <p x-show="commentError" x-text="commentError" class="text-xs text-red-600 mt-1"></p>
+            </div>
+          </template>
+
+          <!-- Reunión: confirmar asistencia (invitados) -->
+          <template x-if="detail.isMeeting && detail.sharedToMe">
+            <div class="mt-4 border-t border-gray-100 pt-3">
+              <h3 class="text-xs font-semibold text-gray-600 mb-2">¿Asistirás?</h3>
+              <div class="flex flex-wrap gap-2">
+                <template x-for="opt in [['yes', 'Asistiré', 'bg-green-600 border-green-600'], ['maybe', 'Tal vez', 'bg-amber-500 border-amber-500'], ['no', 'No asistiré', 'bg-red-600 border-red-600']]" :key="opt[0]">
+                  <button type="button" @click="rsvp(detail, opt[0])" :disabled="rsvpSaving"
+                          :aria-pressed="detail.myResponse === opt[0]"
+                          :class="detail.myResponse === opt[0] ? opt[2] + ' text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'"
+                          class="px-3 py-1.5 border rounded-lg text-sm font-medium transition-colors disabled:opacity-60" x-text="opt[1]"></button>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <div class="flex flex-wrap justify-end gap-2 mt-5">
+            <template x-if="detail.isMeeting">
+              <a :href="detail.meetingUrl"
+                 class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.869v6.262a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                Ir a la reunión
+              </a>
+            </template>
+            <template x-if="detail.url">
+              <a :href="detail.url" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">Abrir</a>
+            </template>
+            <!-- Derivar: abre el formulario de Tareas prellenado con el evento -->
+            <template x-if="detail.kind === 'event'">
+              <a :href="taskUrl(detail)" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Crear tarea</a>
+            </template>
+            {% if can_recurring %}
+            <template x-if="detail.kind === 'event'">
+              <a :href="recurringUrl(detail)" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Crear tarea recurrente</a>
+            </template>
+            {% endif %}
+            <template x-if="detail.sharedToMe">
+              <button type="button" @click="leaveEvent(detail)"
+                      class="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50"
+                      x-text="detail.isMeeting ? 'Salir de la reunión' : 'Quitar de mi calendario'"></button>
+            </template>
+            <template x-if="detail.mine">
+              <button type="button" @click="deleteEvent(detail)"
+                      class="px-3 py-1.5 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50">Eliminar</button>
+            </template>
+            <template x-if="detail.mine">
+              <button type="button" @click="openEdit(detail)"
+                      class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">Editar</button>
+            </template>
+            <button type="button" @click="detail = null"
+                    class="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cerrar</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>

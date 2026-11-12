@@ -1,0 +1,15 @@
+/* Estilos de FullCalendar en app/templates/calendar/index.html. */
+#calendar .fc-event { cursor: pointer; }
+#calendar .fc-ev-done .fc-ev-title { text-decoration: line-through; opacity: .7; }
+#calendar .fc-ev-inner { display: flex; align-items: center; gap: .25rem; overflow: hidden; padding: 0 2px; }
+#calendar .fc-ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* En Semana/Día el bloque es alto pero angosto: hora y título en varias líneas. */
+#calendar .fc-timegrid-event .fc-ev-inner { flex-wrap: wrap; align-items: flex-start; }
+#calendar .fc-timegrid-event .fc-ev-title { white-space: normal; word-break: break-word; line-height: 1.2; }
+#calendar .fc-ev-badge { flex-shrink: 0; font-size: 9px; font-weight: 700; line-height: 1; padding: 2px 3px; border-radius: 3px; background: rgba(255,255,255,.35); }
+#calendar .fc-toolbar-title { font-size: 1.1rem; font-weight: 700; }
+#calendar .fc-button { font-size: .8rem; padding: .3rem .6rem; }
+@media (max-width: 639px) {
+  #calendar .fc-header-toolbar { flex-wrap: wrap; gap: .5rem; }
+  #calendar .fc-toolbar-title { font-size: 1rem; }
+}
