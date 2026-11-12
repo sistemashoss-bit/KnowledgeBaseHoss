@@ -241,6 +241,9 @@ from app.audit import action_label as _action_label
 from app.auth.utils import generate_csrf_token as _generate_csrf_token
 
 templates.env.filters["action_label"] = _action_label
+
+from app.assistant.limits import format_wait as _format_wait
+templates.env.filters["wait"] = _format_wait
 templates.env.globals["csrf_for"] = lambda user_id: _generate_csrf_token(str(user_id)) if user_id else ""
 
 from app.models import REACTION_EMOJIS as _REACTION_EMOJIS

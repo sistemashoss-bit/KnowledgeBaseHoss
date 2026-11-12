@@ -16,6 +16,7 @@ from app.auth.utils import (
 )
 from app.database import get_db
 from app import valkey_client as vk
+from app.assistant import limits as assistant_limits
 from app.auth import hoss
 from app.models import Department
 from app.templating import templates
@@ -170,7 +171,7 @@ def profile_page(
     csrf = generate_csrf_token(str(user.id))
     return templates.TemplateResponse(
         request, "profile.html",
-        {"current_user": user, "dept": dept, "csrf_token": csrf},
+        {"current_user": user, "dept": dept, "csrf_token": csrf, "ai_usage": assistant_limits.daily_usage(user.id)},
     )
 
 

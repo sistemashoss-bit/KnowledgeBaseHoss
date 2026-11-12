@@ -166,6 +166,16 @@ def copy_chat_file(src_key: str, dst_key: str) -> None:
     _client().copy_object(Bucket=bucket, Key=dst_key, CopySource={"Bucket": bucket, "Key": src_key})
 
 
+def copy_chat_file_to_evidence(src_key: str, dst_key: str) -> None:
+    """Copia un adjunto del chat al bucket de evidencias sin descargarlo (MAX lo
+    agrega a una tarea o ticket). Es una copia, no una referencia: los adjuntos
+    del chat se borran al vencer su retención y la evidencia debe quedarse."""
+    _client().copy_object(
+        Bucket=settings.wasabi_evidence_bucket_name, Key=dst_key,
+        CopySource={"Bucket": settings.wasabi_chats_bucket_name, "Key": src_key},
+    )
+
+
 def delete_chat_file(key: str) -> None:
     _client().delete_object(Bucket=settings.wasabi_chats_bucket_name, Key=key)
 

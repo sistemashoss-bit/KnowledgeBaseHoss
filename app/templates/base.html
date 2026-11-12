@@ -256,7 +256,7 @@
 
       {% if current_user and current_user.role in ("superadmin", "admin") %}
       {% set ns = namespace(admin_active=false) %}
-      {% for s in ['/users', '/logs/audit', '/logs/searches', '/departments', '/org/zones', '/tasks/tags'] %}
+      {% for s in ['/users', '/logs/audit', '/logs/searches', '/logs/ai-usage', '/departments', '/org/zones', '/tasks/tags'] %}
         {% if current_path == s or current_path.startswith(s ~ '/') %}{% set ns.admin_active = true %}{% endif %}
       {% endfor %}
       <details class="nav-group" {% if ns.admin_active %}open{% endif %}>
@@ -296,6 +296,14 @@
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <span class="nav-label">Búsquedas</span>
+        </a>
+        <a href="/logs/ai-usage" {{ nav_current('/logs/ai-usage') }}
+           class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">
+          <svg class="w-4 h-4 shrink-0" fill="none" aria-hidden="true" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
+          </svg>
+          <span class="nav-label">Uso de IA</span>
         </a>
         <a href="/departments/" {{ nav_current('/departments') }}
            class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-sm font-medium">

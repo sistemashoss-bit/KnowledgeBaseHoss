@@ -1,16 +1,18 @@
 """Propuestas de MAX (tarea, seguimiento, ticket): se guardan con su mensaje y se
 ejecutan solo cuando quien lo invocó las confirma, con SUS permisos (las mismas
 validaciones que la web)."""
+import logging
+import re
 import uuid
 from datetime import date, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app import audit
+from app import audit, storage
 from app.calendar.reminders import to_local
 from app.models import (
-    AssistantProposal, ConversationParticipant, Message, Task, User,
+    AssistantProposal, ConversationParticipant, Message, MessageAttachment, Task, TaskEvidence, TicketEvidence, User,
     PROPOSAL_CONFIRMED, PROPOSAL_DISCARDED, PROPOSAL_FAILED, PROPOSAL_FOLLOW_UP, PROPOSAL_PENDING, PROPOSAL_TASK,
     PROPOSAL_TICKET,
 )
@@ -19,6 +21,8 @@ from app.tasks import service as task_service
 from app.tickets import service as ticket_service
 
 SOURCE_APP = "assistant"
+
+logger = logging.getLogger(__name__)
 
 
 def save(db: Session, message: Message | None, source_message_id, invoker_id, proposals: list[dict],
@@ -134,6 +138,54 @@ def confirm(db: Session, proposal_id: str, user: User, request=None) -> Assistan
     return p
 
 
+def _copy_attachments(db: Session, p: AssistantProposal, user: User, target) -> tuple[list[str], list[str]]:
+    """Copia al bucket de evidencias los adjuntos del chat que trae la propuesta y
+    los registra en la tarea o ticket recién creado (`target`). Solo adjuntos de
+    mensajes vigentes del mismo chat. Devuelve (agregados, fallidos) por nombre;
+    un fallo no deshace la tarea/ticket, se avisa en la tarjeta. Sin commit."""
+    added, failed = [], []
+    is_task = isinstance(target, Task)
+    for item in p.payload.get("attachments") or []:
+        name = item.get("filename") or "archivo"
+        try:
+            att_id = uuid.UUID(str(item.get("id")))
+        except ValueError:
+            failed.append(name)
+            continue
+        att = (
+            db.query(MessageAttachment).join(Message, Message.id == MessageAttachment.message_id)
+            .filter(
+                MessageAttachment.id == att_id,
+                Message.conversation_id == p.conversation_id,
+                Message.deleted_at.is_(None),
+            ).first()
+        ) if p.conversation_id else None
+        if att is None:
+            failed.append(name)  # mensaje eliminado o adjunto ya purgado por la retención
+            continue
+        safe = re.sub(r"[^\w.\-]", "_", att.filename)[:200] or "file"
+        key = f"{'tasks' if is_task else 'tickets'}/{target.id}/{uuid.uuid4()}_{safe}"
+        try:
+            storage.copy_chat_file_to_evidence(att.file_key, key)
+        except Exception:
+            logger.exception("assistant: no se pudo copiar el adjunto %s a %s", att.id, key)
+            failed.append(name)
+            continue
+        model = TaskEvidence if is_task else TicketEvidence
+        fk = {"task_id": target.id} if is_task else {"ticket_id": target.id}
+        db.add(model(
+            id=uuid.uuid4(), uploaded_by=user.id, filename=att.filename, file_key=key,
+            content_type=att.content_type, file_size=att.file_size, **fk,
+        ))
+        added.append(att.filename)
+    return added, failed
+
+
+def _attachments_note(added: list[str], failed: list[str]) -> str:
+    out = f" attachments={len(added)}" if added else ""
+    return out + (f" attachments_failed={len(failed)}" if failed else "")
+
+
 def _confirm_task(db: Session, p: AssistantProposal, user: User, request) -> None:
     data = p.payload
     task = task_service.create_task(
@@ -146,15 +198,18 @@ def _confirm_task(db: Session, p: AssistantProposal, user: User, request) -> Non
         source_app=SOURCE_APP,
         context=_source_context(p, db),
     )
+    added, failed = _copy_attachments(db, p, user, task)
     p.status = PROPOSAL_CONFIRMED
     p.task_id = task.id
     p.resolved_at = datetime.utcnow()
+    if added or failed:
+        p.payload = {**data, "attachments_added": added, "attachments_failed": failed}
     db.commit()
     task_service.notify_task_created(task, user)
     audit.log_action(
         "task_create", user=user, request=request,
         resource_type="task", resource_id=task.id, resource_name=task.title,
-        details=f"priority={task.priority} via=assistant proposal={p.id}",
+        details=f"priority={task.priority} via=assistant proposal={p.id}{_attachments_note(added, failed)}",
     )
 
 
@@ -198,9 +253,12 @@ def _confirm_ticket(db: Session, p: AssistantProposal, user: User, request) -> N
         source_app=SOURCE_APP,
         context=_source_context(p, db),
     )
+    added, failed = _copy_attachments(db, p, user, t)
     p.status = PROPOSAL_CONFIRMED
     # La tarjeta enlaza al ticket por su número (no hay columna para tickets).
     p.payload = {**data, "ticket_number": t.number}
+    if added or failed:
+        p.payload = {**p.payload, "attachments_added": added, "attachments_failed": failed}
     p.resolved_at = datetime.utcnow()
     db.commit()
     admin_ids = ticket_service.department_admin_ids(t.department_id, db, exclude=user.id)
@@ -212,7 +270,7 @@ def _confirm_ticket(db: Session, p: AssistantProposal, user: User, request) -> N
     audit.log_action(
         "ticket_create", user=user, request=request,
         resource_type="ticket", resource_id=t.id, resource_name=f"#{t.number} {t.title}",
-        details=f"kind={t.kind} priority={t.priority} via=assistant proposal={p.id}",
+        details=f"kind={t.kind} priority={t.priority} via=assistant proposal={p.id}{_attachments_note(added, failed)}",
     )
 
 

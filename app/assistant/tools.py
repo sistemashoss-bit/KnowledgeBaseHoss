@@ -49,6 +49,17 @@ class ToolContext:
     # Documentos que devolvieron las búsquedas (id → título): el widget los
     # muestra como fuentes.
     sources: dict = field(default_factory=dict)
+    # Adjuntos del chat que MAX ve en el contexto ("adj-1" → MessageAttachment).
+    # Solo estos se pueden proponer como evidencia de una tarea o ticket.
+    attachments: dict = field(default_factory=dict)
+
+    def attachment_ref(self, att) -> str:
+        for ref, known in self.attachments.items():
+            if known.id == att.id:
+                return ref
+        ref = f"adj-{len(self.attachments) + 1}"
+        self.attachments[ref] = att
+        return ref
 
 
 def _fn(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
@@ -61,6 +72,16 @@ def _fn(name: str, description: str, properties: dict, required: list[str] | Non
         },
     }
 
+
+MAX_PROPOSAL_ATTACHMENTS = 10
+
+_ATTACHMENTS_PARAM = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "Adjuntos del chat (imágenes, archivos) que se agregan como evidencia, por su "
+                   "referencia (p. ej. adj-2). Úsalo si piden agregar/adjuntar la imagen, foto, captura "
+                   "o archivo, o si el pendiente se refiere a un adjunto del chat. Opcional.",
+}
 
 TOOL_DEFINITIONS = [
     _fn(
@@ -133,6 +154,7 @@ TOOL_DEFINITIONS = [
             },
             "due_date": {"type": "string", "description": "Fecha límite AAAA-MM-DD (opcional)"},
             "priority": {"type": "string", "enum": TASK_PRIORITIES},
+            "attachments": _ATTACHMENTS_PARAM,
         },
         ["title"],
     ),
@@ -172,6 +194,7 @@ TOOL_DEFINITIONS = [
                 "description": "Por los hechos, no por el tono: urgent solo si detiene ventas u operación; "
                                "high si impide trabajar sin alternativa; medium por defecto",
             },
+            "attachments": _ATTACHMENTS_PARAM,
         },
         ["kind", "title"],
     ),
@@ -419,13 +442,51 @@ def _resolve_assignee(ctx: ToolContext, ref) -> tuple[User | None, str | None]:
     )
 
 
+def _attachment_kind(content_type: str) -> str:
+    major = (content_type or "").split("/")[0]
+    return {"image": "imagen", "audio": "audio", "video": "video"}.get(major, "archivo")
+
+
+def _proposal_attachments(ctx: ToolContext, refs) -> tuple[list[dict], str | None]:
+    """Adjuntos pedidos para una propuesta → datos para la tarjeta. Solo los que
+    MAX vio en este chat (ctx.attachments); se copian al confirmar."""
+    if not refs:
+        return [], None
+    if isinstance(refs, str):
+        refs = [refs]
+    if not isinstance(refs, list):
+        return [], "attachments debe ser una lista de referencias (adj-1, adj-2…)"
+    if not ctx.attachments:
+        return [], "En esta conversación no hay adjuntos que pueda agregar."
+    out, seen = [], set()
+    for ref in refs:
+        key = str(ref).strip().lower()
+        att = ctx.attachments.get(key)
+        if att is None:
+            known = ", ".join(f"{r} ({a.filename})" for r, a in ctx.attachments.items())
+            return [], f"No existe el adjunto «{ref}». Los que hay en el chat: {known}"
+        if att.id in seen:
+            continue
+        seen.add(att.id)
+        out.append({
+            "id": str(att.id), "filename": att.filename, "content_type": att.content_type,
+            "size": att.file_size, "kind": _attachment_kind(att.content_type),
+        })
+    if len(out) > MAX_PROPOSAL_ATTACHMENTS:
+        return [], f"Máximo {MAX_PROPOSAL_ATTACHMENTS} adjuntos por propuesta."
+    return out, None
+
+
 def propose_task(
     ctx: ToolContext, title: str, description: str = "", assignee_id: str = "",
-    due_date: str = "", priority: str = "medium",
+    due_date: str = "", priority: str = "medium", attachments: list | None = None,
 ) -> dict:
     title = _clip(title, 255)
     if not title:
         return {"error": "Falta el título"}
+    files, error = _proposal_attachments(ctx, attachments)
+    if error:
+        return {"error": error}
     assignee = None
     if assignee_id:
         assignee, error = _resolve_assignee(ctx, assignee_id)
@@ -461,6 +522,7 @@ def propose_task(
             "assignee_name": _user_label(assignee),
             "due_date": due.isoformat() if due else "",
             "priority": priority if priority in TASK_PRIORITIES else "medium",
+            "attachments": files,
         },
     })
     number = sum(1 for p in ctx.proposals if p["kind"] == PROPOSAL_TASK)
@@ -538,7 +600,7 @@ def _resolve_department(ctx: ToolContext, ref: str) -> Department | None:
 
 def propose_ticket(
     ctx: ToolContext, kind: str, title: str, description: str = "", department: str = "",
-    priority: str = "medium",
+    priority: str = "medium", attachments: list | None = None,
 ) -> dict:
     kind = _KIND_ALIASES.get(_norm(kind), kind)
     if kind not in TICKET_KINDS:
@@ -546,6 +608,9 @@ def propose_ticket(
     title = _clip(title, 255)
     if not title:
         return {"error": "Falta el título"}
+    files, error = _proposal_attachments(ctx, attachments)
+    if error:
+        return {"error": error}
     dept = _resolve_department(ctx, department) if department else None
     if dept is None:
         hint = _departments_hint(ctx)
@@ -564,6 +629,7 @@ def propose_ticket(
             "department_id": str(dept.id),
             "department_name": dept.name,
             "priority": priority if priority in TASK_PRIORITIES else "medium",
+            "attachments": files,
         },
     })
     return {"ok": True, "note": "Se mostrará una tarjeta para que quien te invocó confirme el ticket."}

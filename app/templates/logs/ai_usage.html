@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Uso de IA{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-6">
+  <div class="max-w-5xl mx-auto space-y-4">
+
+    <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900">Uso de IA</h1>
+        <p class="mt-0.5 text-sm text-gray-500">Consultas a MAX (chat, widget y editor) en la ventana actual de cada persona: {{ limit }} cada 24 h desde su primera consulta.</p>
+      </div>
+      {% if available %}
+      <span class="text-sm text-gray-400 whitespace-nowrap">{{ rows|length }} con consultas{% if blocked %} · <span class="text-red-600">{{ blocked }} sin cupo</span>{% endif %}</span>
+      {% endif %}
+    </div>
+
+    <div class="table-scroll bg-white rounded-xl border border-gray-200">
+      {% if not available %}
+      <p class="py-16 text-center text-sm text-gray-400">El conteo vive en Valkey y no está disponible en este momento (sin Valkey no se aplica el límite).</p>
+      {% elif rows %}
+      <table class="w-full text-sm" data-ai-usage-table>
+        <thead>
+          <tr class="bg-gray-50 border-b text-xs text-gray-500 uppercase tracking-wide text-left">
+            <th class="px-4 py-3">Persona</th>
+            <th class="px-4 py-3">Departamento</th>
+            <th class="px-4 py-3 w-56">Consultas</th>
+            <th class="px-4 py-3">Se libera</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for r in rows %}
+          {% set pct = (100 * r.used / r.limit)|round|int if r.limit else 0 %}
+          <tr class="hover:bg-gray-50" data-user-id="{{ r.user_id }}">
+            <td class="px-4 py-3">
+              {% if r.user %}
+              <p class="font-medium text-gray-800">{{ r.user.name or r.user.email }}</p>
+              {% if r.user.name %}<p class="text-xs text-gray-500">{{ r.user.email }}</p>{% endif %}
+              {% else %}
+              <p class="text-xs text-gray-400">Usuario no encontrado ({{ r.user_id }})</p>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-600">{{ r.user.department.name if r.user and r.user.department else '—' }}</td>
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-2">
+                <div class="h-2 flex-1 overflow-hidden rounded-full bg-gray-100" role="progressbar" aria-label="Consultas usadas"
+                     aria-valuemin="0" aria-valuemax="{{ r.limit }}" aria-valuenow="{{ r.used }}">
+                  <div class="h-full rounded-full {{ 'bg-red-500' if r.blocked else ('bg-amber-500' if pct >= 80 else 'bg-blue-600') }}" style="width: {{ pct }}%"></div>
+                </div>
+                <span class="w-14 text-right text-xs tabular-nums {{ 'font-semibold text-red-600' if r.blocked else 'text-gray-700' }}">{{ r.used }}/{{ r.limit }}</span>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+              {% if r.resets_at %}
+              en {{ r.resets_in|wait }}
+              <span class="text-gray-400">· <time datetime="{{ r.resets_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ r.resets_at.strftime('%d/%m/%Y %H:%M') }}</time></span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="py-16 text-center text-sm text-gray-400">Nadie ha usado MAX en las últimas 24 horas.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

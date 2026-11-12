@@ -176,6 +176,47 @@ def ttl(key: str) -> int:
         return 0
 
 
+def read_rate_limit(key: str) -> tuple[int, int] | None:
+    """(conteo, segundos para que se reinicie) del rate limit `key` sin contar
+    un intento. (0, 0) si no hay conteo; None sin Valkey."""
+    r = _get()
+    if r is None:
+        return None
+    try:
+        pipe = r.pipeline()
+        pipe.get(f"rl:{key}")
+        pipe.ttl(f"rl:{key}")
+        count, left = pipe.execute()
+        return (int(count or 0), max(int(left or 0), 0)) if count else (0, 0)
+    except Exception:
+        return None
+
+
+def scan_rate_limits(pattern: str) -> dict[str, tuple[int, int]] | None:
+    """{key sin "rl:": (conteo, segundos restantes)} de los rate limits que
+    coinciden con `pattern` (glob, sin "rl:"). None sin Valkey."""
+    r = _get()
+    if r is None:
+        return None
+    try:
+        keys = list(r.scan_iter(match=f"rl:{pattern}", count=500))
+        if not keys:
+            return {}
+        pipe = r.pipeline()
+        for k in keys:
+            pipe.get(k)
+            pipe.ttl(k)
+        values = pipe.execute()
+        out = {}
+        for n, k in enumerate(keys):
+            count, left = values[2 * n], values[2 * n + 1]
+            if count:
+                out[k[3:]] = (int(count), max(int(left or 0), 0))
+        return out
+    except Exception:
+        return None
+
+
 # ── Once-daily lock ───────────────────────────────────────────────────────────
 
 def try_acquire_daily_lock(key: str) -> bool:

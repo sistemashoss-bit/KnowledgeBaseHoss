@@ -1,11 +1,15 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from app.assistant import limits as assistant_limits
 from app.audit import action_label
 from app.auth.deps import require_role
+from app.config import settings
 from app.database import get_db
-from app.models import AuditLog, ROLE_SUPERADMIN, SearchLog
+from app.models import AuditLog, ROLE_SUPERADMIN, SearchLog, User
 from app.templating import templates
 
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -67,5 +71,42 @@ def search_logs(
             "total": total,
             "page_size": _PAGE,
             "selected_type": search_type,
+        },
+    )
+
+
+@router.get("/ai-usage", response_class=HTMLResponse)
+def ai_usage(
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(ROLE_SUPERADMIN)),
+):
+    """Uso actual del cupo diario de MAX (vive solo en Valkey): quiénes tienen
+    consultas en su ventana de 24 h, cuántas llevan y cuándo se les libera."""
+    usage = assistant_limits.daily_usage_all()
+    rows = []
+    valid = {}
+    for key in usage or {}:
+        try:
+            valid[key] = uuid.UUID(key)
+        except ValueError:
+            pass
+    if valid:
+        users = {
+            u.id: u
+            for u in db.query(User).options(joinedload(User.department))
+            .filter(User.id.in_(list(valid.values()))).all()
+        }
+        rows = [{"user": users.get(uid), "user_id": key, **usage[key]} for key, uid in valid.items()]
+        rows.sort(key=lambda r: (-r["used"], r["resets_in"]))
+
+    return templates.TemplateResponse(
+        request, "logs/ai_usage.html",
+        {
+            "current_user": user,
+            "rows": rows,
+            "available": usage is not None,
+            "limit": settings.assistant_user_per_day,
+            "blocked": sum(1 for r in rows if r["blocked"]),
         },
     )

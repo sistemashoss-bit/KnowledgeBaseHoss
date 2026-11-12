@@ -106,9 +106,19 @@ def _participant_line(u) -> str:
     return "".join(parts) + ")"
 
 
-def _history(db, scope: scope_lib.Scope, source: Message) -> str:
+def _attachments_text(ctx: tools.ToolContext, msg: Message) -> str:
+    """Adjuntos de un mensaje con la referencia que MAX usa para proponerlos como
+    evidencia: `[adjuntos: adj-1 «foto.jpg» (imagen)]`. Registra cada uno en ctx."""
+    atts = sorted(msg.attachments or [], key=lambda a: (a.created_at is None, a.created_at, a.filename))
+    if not atts:
+        return ""
+    items = [f"{ctx.attachment_ref(a)} «{a.filename}» ({tools._attachment_kind(a.content_type)})" for a in atts]
+    return f"[adjuntos: {', '.join(items)}]"
+
+
+def _history(db, scope: scope_lib.Scope, source: Message, ctx: tools.ToolContext) -> str:
     rows = (
-        db.query(Message).options(joinedload(Message.sender))
+        db.query(Message).options(joinedload(Message.sender), joinedload(Message.attachments))
         .filter(
             Message.conversation_id == scope.conversation.id,
             Message.deleted_at.is_(None),
@@ -121,9 +131,11 @@ def _history(db, scope: scope_lib.Scope, source: Message) -> str:
     lines = []
     for m in reversed(rows):
         who = mentions.display_name(m.sender) if m.sender else "?"
-        text = (m.content or "").strip() or "(adjunto)"
+        text = (m.content or "").strip()
         if len(text) > 600:
             text = text[:599] + "…"
+        files = _attachments_text(ctx, m)
+        text = f"{text} {files}".strip() if files else (text or "(adjunto)")
         lines.append(f"[{to_local(m.created_at):%d/%m %H:%M}] {who}: {text}")
     return "\n".join(lines)
 
@@ -141,7 +153,7 @@ def _today_text() -> str:
     )
 
 
-def _system_prompt(db, scope: scope_lib.Scope, source: Message) -> str:
+def _system_prompt(db, scope: scope_lib.Scope, source: Message, ctx: tools.ToolContext) -> str:
     conv = scope.conversation
     invoker = mentions.display_name(scope.invoker)
     where = [f"Grupo: «{conv.name or 'Grupo sin nombre'}»"]
@@ -184,13 +196,18 @@ Reglas:
   "el viernes") con la lista de próximos días.
   "Para el viernes" es la fecha límite (due_date), no parte del título; si no
   mencionan fecha, no pongas fecha límite.
+- Los archivos e imágenes del chat aparecen como [adjuntos: adj-N «nombre» (tipo)]. No
+  ves su contenido, solo el nombre. Si {invoker} pide agregar o adjuntar una imagen,
+  foto, captura o archivo del chat a la tarea o ticket (o responde a un mensaje con
+  adjuntos al pedirla), pasa sus referencias en `attachments` de propose_task /
+  propose_ticket. Si no queda claro cuál, pregunta. No los agregues si no lo piden.
 - Si una herramienta devuelve un error, explica ese mismo motivo en palabras simples
   (no inventes otro).
 - Responde en español, breve y en texto plano: sin markdown (nada de #, ** ni tablas);
   si necesitas listas usa "- ". No muestres ids internos.
 
 Conversación reciente (la más nueva al final):
-{_history(db, scope, source)}"""
+{_history(db, scope, source, ctx)}"""
 
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
@@ -203,22 +220,32 @@ def _message_text(msg) -> str:
     return text
 
 
-def _question(db, source: Message) -> str:
+def _question(db, source: Message, ctx: tools.ToolContext) -> str:
     """El mensaje que invocó a MAX; si es una respuesta ("Responder") a otro
-    mensaje, se antepone ese mensaje para que sepa a qué se refiere."""
+    mensaje, se antepone ese mensaje para que sepa a qué se refiere. Los
+    adjuntos de ambos van con su referencia (el citado puede ser más viejo que
+    el historial)."""
     text = (source.content or "").strip()
+    own = _attachments_text(ctx, source)
+    if own:
+        text = f"{text} {own}".strip()
     if not source.reply_to_id:
         return text
-    quoted = db.query(Message).options(joinedload(Message.sender)).filter(Message.id == source.reply_to_id).first()
+    quoted = (
+        db.query(Message).options(joinedload(Message.sender), joinedload(Message.attachments))
+        .filter(Message.id == source.reply_to_id, Message.conversation_id == source.conversation_id).first()
+    )
     if quoted is None or quoted.deleted_at:
         return text
     who = "tu mensaje" if bot_lib.is_bot(quoted.sender) else (
         f"el mensaje de {mentions.display_name(quoted.sender)}" if quoted.sender else "un mensaje"
     )
-    body = (quoted.content or "").strip() or "(adjunto)"
+    body = (quoted.content or "").strip()
     if len(body) > 600:
         body = body[:599] + "…"
-    return f"[Responde a {who}: «{body}»]\n{text}"
+    files = _attachments_text(ctx, quoted)
+    body = f"«{body}» {files}".strip() if body else (files or "«(adjunto)»")
+    return f"[Responde a {who}: {body}]\n{text}"
 
 
 def _claims_missing_proposal(ctx: tools.ToolContext, text: str) -> bool:
@@ -318,7 +345,7 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         typing = True
         ctx = tools.ToolContext(db=db, scope=scope)
         try:
-            answer = _run_llm(ctx, _system_prompt(db, scope, source), _question(db, source))
+            answer = _run_llm(ctx, _system_prompt(db, scope, source, ctx), _question(db, source, ctx))
         except Exception:
             logger.exception("assistant LLM call failed")
             db.rollback()

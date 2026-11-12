@@ -31,6 +31,14 @@
   </p>
   {% if d.note %}<p class="mt-0.5 text-gray-500 [overflow-wrap:anywhere]">{{ d.note }}</p>{% endif %}
   {% endif %}
+  {% if d.attachments %}
+  {#- Adjuntos del chat que se copian como evidencia al confirmar. -#}
+  <p class="mt-1 text-gray-500 [overflow-wrap:anywhere]" data-proposal-attachments>
+    <span aria-hidden="true">📎</span>
+    {{ d.attachments | length }} adjunto{{ 's' if d.attachments | length != 1 }} como evidencia:
+    {% for a in d.attachments %}{{ a.filename }}{{ ', ' if not loop.last }}{% endfor %}
+  </p>
+  {% endif %}
 
   {% if p.status == 'pending' %}
     {% if current_user and p.invoker_id|string == current_user.id|string %}
@@ -55,6 +63,12 @@
       {% if p.task_id %}· <a href="/tasks/{{ p.task_id }}" class="underline hover:text-green-800">ver tarea</a>{% endif %}
       {% endif %}
     </p>
+    {% if d.attachments_added %}
+    <p class="mt-0.5 text-green-700">{{ d.attachments_added | length }} evidencia{{ 's' if d.attachments_added | length != 1 }} agregada{{ 's' if d.attachments_added | length != 1 }}</p>
+    {% endif %}
+    {% if d.attachments_failed %}
+    <p class="mt-0.5 text-amber-700 [overflow-wrap:anywhere]">No se pudo adjuntar: {{ d.attachments_failed | join(', ') }} (el mensaje se eliminó o el archivo ya no está en el chat)</p>
+    {% endif %}
   {% elif p.status == 'discarded' %}
     <p class="mt-1.5 text-gray-400">Descartada</p>
   {% else %}
