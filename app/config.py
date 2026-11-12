@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     assistant_user_per_minute: int = 5
     assistant_user_per_day: int = 50
     assistant_conv_per_hour: int = 30
+    # Landing sin sesión: preguntas por IP cada 24 h.
+    assistant_anon_per_day: int = 10
     # Una invocación a la vez por chat; el lock se suelta al responder.
     assistant_busy_ttl_seconds: int = 60
 

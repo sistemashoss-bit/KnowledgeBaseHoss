@@ -218,23 +218,39 @@
     htmx.trigger(document.body, 'pinsChanged');
   });
 
-  // "MAX está escribiendo…": on/off desde el servidor; se esconde solo a
-  // los 60 s por si el `off` no llega (conexión SSE caída).
+  // "MAX está escribiendo…": on/off desde el servidor, o el nombre de la
+  // tool que está usando (se queda hasta el siguiente paso: lo lento es el
+  // modelo leyendo lo que encontró). Se esconde solo a los 60 s sin
+  // noticias por si el `off` no llega (conexión SSE caída).
   // #max-typing está después de este script: se busca al usarlo (al
   // correr el script todavía no existe y getElementById da null).
+  var MAX_TYPING_LABELS = {
+    search_documents: 'MAX está buscando en los documentos',
+    search_passages: 'MAX está buscando en los documentos',
+    search_tasks: 'MAX está revisando tareas',
+    search_followups: 'MAX está revisando seguimientos',
+    search_messages: 'MAX está buscando en los chats',
+    get_conversation: 'MAX está leyendo una conversación',
+    propose_task: 'MAX está preparando la tarea',
+    propose_followup: 'MAX está preparando el seguimiento',
+    propose_ticket: 'MAX está preparando el ticket',
+  };
   var maxTypingTimer = null;
-  function setMaxTyping(on) {
+  function setMaxTyping(state) {
     var maxTyping = document.getElementById('max-typing');
     if (!maxTyping) return;
+    var on = state !== 'off';
+    var label = maxTyping.querySelector('[data-max-typing-text]');
+    if (label) label.textContent = MAX_TYPING_LABELS[state] || 'MAX está escribiendo';
     var atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
     maxTyping.classList.toggle('hidden', !on);
     maxTyping.classList.toggle('flex', on);
     if (atBottom) feed.scrollTop = feed.scrollHeight;
     clearTimeout(maxTypingTimer);
-    if (on) maxTypingTimer = setTimeout(function () { setMaxTyping(false); }, 60000);
+    if (on) maxTypingTimer = setTimeout(function () { setMaxTyping('off'); }, 60000);
   }
   document.getElementById('feed-sse').addEventListener('htmx:sseMessage', function (e) {
-    if (e.detail && e.detail.type === 'typing') setMaxTyping(e.detail.data === 'on');
+    if (e.detail && e.detail.type === 'typing') setMaxTyping(String(e.detail.data || 'on'));
   });
 
   // ── Responder ──────────────────────────────────────────────────────

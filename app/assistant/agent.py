@@ -5,6 +5,7 @@ Corre en un hilo aparte (`dispatch`): el envío del mensaje no espera al LLM.
 """
 import logging
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -257,9 +258,11 @@ def _claims_missing_proposal(ctx: tools.ToolContext, text: str) -> bool:
 def _run_llm(
     ctx: tools.ToolContext, system: str, question: str,
     *, tool_defs: list | None = None, history: list[dict] | None = None,
+    on_tool: Callable[[str], None] | None = None,
 ) -> str:
     """Loop de tool calling. `history`: turnos previos (widget), como mensajes
-    user/assistant."""
+    user/assistant. `on_tool(nombre)`: aviso antes de correr cada tool (el
+    letrero "MAX está buscando…" del chat)."""
     llm = rag._llm_client().with_options(timeout=LLM_TIMEOUT_SECONDS)
     model = settings.assistant_model or settings.openrouter_model
     tool_defs = tool_defs or tools.TOOL_DEFINITIONS
@@ -309,6 +312,11 @@ def _run_llm(
             if used >= settings.assistant_max_tool_calls:
                 result = '{"error": "Límite de consultas de esta respuesta alcanzado; responde con lo que tienes."}'
             else:
+                if on_tool:
+                    try:
+                        on_tool(tc.function.name)
+                    except Exception:
+                        logger.debug("on_tool failed", exc_info=True)
                 result = tools.run(ctx, tc.function.name, tc.function.arguments)
             used += 1
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -345,10 +353,15 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         typing = True
         ctx = tools.ToolContext(db=db, scope=scope)
         try:
-            answer = _run_llm(ctx, _system_prompt(db, scope, source, ctx), _question(db, source, ctx))
+            answer = _run_llm(
+                ctx, _system_prompt(db, scope, source, ctx), _question(db, source, ctx),
+                # Solo el nombre de la tool (no lo que busca): el letrero lo ve todo el grupo.
+                on_tool=lambda name: realtime.notify_typing(conv_id, name),
+            )
         except Exception:
             logger.exception("assistant LLM call failed")
             db.rollback()
+            limits.refund(invoker_id, conv_id)
             _post_reply(db, scope, source, "No pude responder en este momento; intenta de nuevo en un rato.")
             return
 

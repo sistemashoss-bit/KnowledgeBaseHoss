@@ -176,6 +176,21 @@ def ttl(key: str) -> int:
         return 0
 
 
+_UNDO_SCRIPT = "if redis.call('exists', KEYS[1]) == 1 then return redis.call('decr', KEYS[1]) end return 0"
+
+
+def undo_rate_limit(key: str) -> None:
+    """Resta el intento que contó `hit_rate_limit` en `key` (si la ventana
+    sigue viva; nunca crea la llave sin expiración). Sin Valkey no hace nada."""
+    r = _get()
+    if r is None:
+        return
+    try:
+        r.eval(_UNDO_SCRIPT, 1, f"rl:{key}")
+    except Exception:
+        pass
+
+
 def read_rate_limit(key: str) -> tuple[int, int] | None:
     """(conteo, segundos para que se reinicie) del rate limit `key` sin contar
     un intento. (0, 0) si no hay conteo; None sin Valkey."""
@@ -187,7 +202,8 @@ def read_rate_limit(key: str) -> tuple[int, int] | None:
         pipe.get(f"rl:{key}")
         pipe.ttl(f"rl:{key}")
         count, left = pipe.execute()
-        return (int(count or 0), max(int(left or 0), 0)) if count else (0, 0)
+        count = int(count or 0)
+        return (count, max(int(left or 0), 0)) if count > 0 else (0, 0)
     except Exception:
         return None
 
@@ -210,7 +226,7 @@ def scan_rate_limits(pattern: str) -> dict[str, tuple[int, int]] | None:
         out = {}
         for n, k in enumerate(keys):
             count, left = values[2 * n], values[2 * n + 1]
-            if count:
+            if int(count or 0) > 0:
                 out[k[3:]] = (int(count), max(int(left or 0), 0))
         return out
     except Exception:

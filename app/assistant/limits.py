@@ -30,25 +30,58 @@ def _user_checks(user_id) -> list:
     ]
 
 
+def _conv_check(conv_id) -> tuple:
+    return ("conversation", f"max:conv:{conv_id}:hour", settings.assistant_conv_per_hour, 3600)
+
+
+def _anon_check(ip: str) -> tuple:
+    return ("anon", f"max:anon:{ip}:day", settings.assistant_anon_per_day, 86400)
+
+
 def _first_hit(checks) -> tuple[str, int] | None:
+    """Cuenta el intento en todos los límites; si alguno se pasa, lo deshace en
+    todos (un intento bloqueado no gasta cupo de nada) y devuelve (motivo,
+    segundos de espera) del primero que bloqueó, en el orden de `checks`."""
+    hit = None
     for reason, key, limit, window in checks:
-        if vk.hit_rate_limit(key, limit, window):
-            return reason, vk.ttl(f"rl:{key}") or window
-    return None
+        if vk.hit_rate_limit(key, limit, window) and hit is None:
+            hit = reason, vk.ttl(f"rl:{key}") or window
+    if hit:
+        for _, key, _, _ in checks:
+            vk.undo_rate_limit(key)
+    return hit
+
+
+def _refund(checks) -> None:
+    for _, key, _, _ in checks:
+        vk.undo_rate_limit(key)
 
 
 def check_user(user_id) -> tuple[str, int] | None:
-    """Solo los límites por persona (el widget); comparte el cupo con el chat."""
+    """Solo los límites por persona (widget y editor); comparten el cupo con el chat."""
     return _first_hit(_user_checks(user_id))
 
 
 def check(user_id, conv_id) -> tuple[str, int] | None:
     """Cuenta la invocación y devuelve (motivo, segundos de espera) si se pasó
-    de algún límite, o None si puede seguir. Orden: ráfaga → diario → grupo
-    (si uno bloquea, los siguientes no se cuentan)."""
-    return _first_hit(
-        _user_checks(user_id) + [("conversation", f"max:conv:{conv_id}:hour", settings.assistant_conv_per_hour, 3600)]
-    )
+    de algún límite, o None si puede seguir. Si bloquea, no se cuenta en
+    ninguno (p. ej. el tope del grupo no le gasta cupo a la persona)."""
+    return _first_hit(_user_checks(user_id) + [_conv_check(conv_id)])
+
+
+def check_ip(ip: str) -> tuple[str, int] | None:
+    """Landing sin sesión: preguntas por IP."""
+    return _first_hit([_anon_check(ip)])
+
+
+def refund(user_id, conv_id=None) -> None:
+    """Devuelve el cupo diario (y el del grupo) cuando el modelo falló y no hubo
+    respuesta. El de ráfaga se queda: frena reintentos seguidos."""
+    _refund([c for c in _user_checks(user_id) if c[0] == "day"] + ([_conv_check(conv_id)] if conv_id else []))
+
+
+def refund_ip(ip: str) -> None:
+    _refund([_anon_check(ip)])
 
 
 def should_warn(subject, reason: str, wait: int) -> bool:
@@ -63,6 +96,10 @@ def limit_message(reason: str, wait: int) -> str:
     if reason == "day":
         hours = max(1, round(wait / 3600))
         return f"Llegaste a tu límite de consultas de hoy. Podrás preguntarme de nuevo en unas {hours} h."
+    if reason == "anon":
+        hours = max(1, round(wait / 3600))
+        return (f"Llegaste al límite de {settings.assistant_anon_per_day} preguntas. Inicia sesión para "
+                f"seguir preguntando o vuelve en unas {hours} h.")
     if reason == "conversation":
         return f"Este grupo llegó al límite de consultas por hora. Intenten de nuevo en unos {minutes} min."
     return "Ya estoy respondiendo en este chat; pregúntame de nuevo en un momento."
@@ -74,8 +111,7 @@ def limit_message(reason: str, wait: int) -> str:
 
 def _usage(count: int, left: int) -> dict:
     limit = settings.assistant_user_per_day
-    # Los intentos ya bloqueados también suman al contador: se topa en el límite.
-    used = min(count, limit)
+    used = min(count, limit)  # por si bajaron el límite con la ventana abierta
     return {
         "used": used,
         "limit": limit,

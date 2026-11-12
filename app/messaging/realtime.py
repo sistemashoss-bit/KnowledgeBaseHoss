@@ -8,6 +8,7 @@ slow fallback poll keeps things working.
 import asyncio
 import json
 import logging
+import re
 
 from app.config import settings
 
@@ -160,14 +161,22 @@ def notify_message_update(conv_id, msg_id) -> None:
     vk.publish(channel(conv_id), f"{_UPDATE_PREFIX}{msg_id}")
 
 
-# "MAX está escribiendo…": sale como `event: typing` con data `on`/`off`; no
+# "MAX está escribiendo…": sale como `event: typing` con data `on`/`off` o el
+# nombre de la tool que está usando (el cliente lo traduce a un texto); no
 # refresca el feed (la respuesta llega después como un mensaje normal).
 _TYPING_PREFIX = "typing:"
+_TYPING_STATE = re.compile(r"[a-z_]{1,40}")
 
 
-def notify_typing(conv_id, on: bool) -> None:
+def notify_typing(conv_id, state: bool | str) -> None:
+    """`state`: True/False (escribiendo / ya no) o el nombre de una tool. Solo
+    viaja una clave, nunca los argumentos: el letrero lo ven todos en el chat."""
     from app import valkey_client as vk
-    vk.publish(channel(conv_id), f"{_TYPING_PREFIX}{'on' if on else 'off'}")
+    if isinstance(state, bool):
+        state = "on" if state else "off"
+    elif not _TYPING_STATE.fullmatch(state):
+        state = "on"
+    vk.publish(channel(conv_id), f"{_TYPING_PREFIX}{state}")
 
 
 async def _channel_stream(chan: str, request, event_name: str):

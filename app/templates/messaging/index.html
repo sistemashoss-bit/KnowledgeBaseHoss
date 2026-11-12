@@ -435,7 +435,7 @@
     <div id="max-typing" role="status" aria-live="polite"
          class="hidden shrink-0 items-center gap-2 px-4 sm:px-6 py-1.5 text-xs text-gray-500">
       <img src="{{ asset('mascota.webp') }}" alt="" class="w-5 h-5 rounded-full object-cover" />
-      MAX está escribiendo
+      <span data-max-typing-text>MAX está escribiendo</span>
       <span class="max-typing-dots text-gray-400" aria-hidden="true"><span></span><span></span><span></span></span>
     </div>
 
@@ -456,9 +456,8 @@
     </div>
     {% endif %}
 
-
-
-        <!-- Input bar -->
+    {% if active_conv %}
+    <!-- Input bar (solo con una conversación abierta) -->
     <div class="chat-composer relative bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <form id="send-form"
             hx-post="/messaging/{{ active_conv.id }}/send"
@@ -608,16 +607,13 @@
       <script src="{{ asset('messaging/mentions.js') }}"></script>
       {% endif %}
     </div>
+    {% endif %}
 
     </div>
 
-
-
-
-
-
-
+{% if active_conv %}
 {% include "messaging/_side_panel.html" %}
+{% endif %}
 
   </div>
 

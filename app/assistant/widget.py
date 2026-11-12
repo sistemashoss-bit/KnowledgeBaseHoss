@@ -126,10 +126,16 @@ def answer(db: Session, user: User, question: str) -> dict:
         # Si falla el loop con tools, al menos la respuesta sobre documentos.
         logger.exception("assistant widget failed; falling back to document Q&A")
         db.rollback()
-        result = rag.answer_question(
-            question, build_access_filter(user), role=user.role,
-            dept_id=str(user.department_id) if user.department_id else None, user_id=str(user.id),
-        )
+        try:
+            result = rag.answer_question(
+                question, build_access_filter(user), role=user.role,
+                dept_id=str(user.department_id) if user.department_id else None, user_id=str(user.id),
+            )
+        except Exception:
+            # Tampoco hubo respaldo: no se cobra la consulta.
+            logger.exception("assistant widget fallback failed")
+            limits.refund(user.id)
+            return {"answer": "No pude responder en este momento; intenta de nuevo en un rato.", "sources": [], "proposals": []}
         audit.log_search(question, user=user, result_count=len(result["sources"]), search_type="rag")
         return {**result, "proposals": []}
 

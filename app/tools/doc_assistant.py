@@ -244,13 +244,13 @@ def clear_history(user_id) -> None:
 
 def answer(user: User, instruction: str, html: str) -> dict:
     """{"answer": str, "html": str | None}. `html`: documento actual (sin imágenes)."""
+    if len(html) > MAX_DOC_CHARS:
+        return {"answer": "El documento es demasiado largo para editarlo conmigo de una vez. "
+                          "Divídelo o pídeme algo más acotado.", "html": None}
     exceeded = limits.check_user(user.id)
     if exceeded:
         reason, wait = exceeded
         return {"answer": limits.limit_message(reason, wait), "html": None}
-    if len(html) > MAX_DOC_CHARS:
-        return {"answer": "El documento es demasiado largo para editarlo conmigo de una vez. "
-                          "Divídelo o pídeme algo más acotado.", "html": None}
 
     history = _load_history(user.id)
     doc = html.strip() or "(vacío)"
@@ -267,6 +267,7 @@ def answer(user: User, instruction: str, html: str) -> dict:
         message, new_html = _parse(choice.message.content or "")
     except Exception:
         logger.exception("doc editor assistant failed")
+        limits.refund(user.id)
         return {"answer": "No pude contestar en este momento; inténtalo de nuevo en un rato.", "html": None}
 
     if new_html is not None and choice.finish_reason == "length":
