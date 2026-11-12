@@ -94,7 +94,7 @@
   // ── Editar / eliminar mensajes propios ─────────────────────────────
   var convId = feed.dataset.convId;
   var convUrl = '/messaging/' + convId;
-  var EDIT_MS = 15 * 60 * 1000;  // EDIT_WINDOW de messaging/router.py (quien lo valida)
+  var EDIT_MS = 15 * 60 * 1000;  // EDIT_WINDOW de messaging/helpers.py (quien lo valida)
   function rowOf(id) { return feed.querySelector('[data-msg-id="' + id + '"]'); }
   function replaceRow(id, html) {
     var old = rowOf(id);

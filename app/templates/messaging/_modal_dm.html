@@ -1,0 +1,55 @@
+{# Modal: nuevo mensaje directo (dmFilter en assets/messaging/page.js). Se incluye desde messaging/index.html. #}
+{% from "messaging/_macros.html" import contact_avatar with context %}
+<!-- ── Modal: Nuevo mensaje directo ─────────────────────────────────────── -->
+<div id="modal-dm" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-4 sm:p-6 responsive-modal">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold text-gray-900">Nuevo mensaje directo</h2>
+      <button onclick="document.getElementById('modal-dm').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    {% if contacts %}
+    <!-- Search -->
+    <div class="relative mb-3">
+      <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+      </svg>
+      <input id="dm-search" type="text" placeholder="Buscar por nombre o correo…"
+             oninput="dmFilter()"
+             class="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400" />
+    </div>
+
+    <div class="space-y-1 max-h-64 overflow-y-auto">
+      {% for contact in contacts %}
+      <form class="dm-contact" method="post" action="/messaging/direct/{{ contact.id }}"
+            data-search="{{ ((contact.name or '') + ' ' + contact.email) | lower }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-50 text-left transition-colors">
+          {{ contact_avatar(contact, "w-8 h-8 text-sm") }}
+          <div class="min-w-0">
+            {% if contact.name %}
+            <p class="text-sm font-medium text-gray-800">{{ contact.name }}</p>
+            <p class="text-xs text-gray-400 truncate">{{ contact.email }}</p>
+            {% else %}
+            <p class="text-sm font-medium text-gray-800 truncate">{{ contact.email }}</p>
+            {% endif %}
+          </div>
+        </button>
+      </form>
+      {% endfor %}
+      <p id="dm-empty" class="hidden text-sm text-gray-400 text-center py-4">Sin resultados.</p>
+    </div>
+
+    {% else %}
+    <p class="text-sm text-gray-400 text-center py-4">No hay contactos disponibles en tu organización.</p>
+    {% endif %}
+  </div>
+</div>

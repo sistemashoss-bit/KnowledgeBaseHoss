@@ -1,0 +1,13 @@
+{# Macros compartidas por las plantillas de mensajes. Importar con
+   {% from "messaging/_macros.html" import contact_avatar with context %}
+   (usa contact_avatars del contexto). #}
+{% macro contact_avatar(u, size="w-6 h-6 text-xs") -%}
+  {%- set url = contact_avatars.get(u.id|string) if contact_avatars else none -%}
+  {%- if url -%}
+  <img src="{{ url }}" alt="" loading="lazy" class="{{ size }} rounded-full object-cover shrink-0" />
+  {%- else -%}
+  <div class="{{ size }} rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+    {{ (u.name or u.email)[0].upper() }}
+  </div>
+  {%- endif -%}
+{%- endmacro %}

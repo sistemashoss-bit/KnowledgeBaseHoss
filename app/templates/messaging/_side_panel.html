@@ -1,0 +1,278 @@
+{# Panel lateral "Información del chat" (Alpine: showSidePanel / sidePanelPinned). Se incluye desde messaging/index.html. #}
+{% from "messaging/_macros.html" import contact_avatar with context %}
+    <!-- Fondo oscuro -->
+<div
+    x-show="showSidePanel && !sidePanelPinned"
+    x-cloak
+    @click="showSidePanel = false"
+    class="fixed inset-0 z-40 bg-black/30"
+    x-transition.opacity
+></div>
+
+<!-- Panel lateral -->
+<aside
+    x-show="showSidePanel"
+    x-cloak
+    @click.stop
+    class="chat-chrome fixed top-0 right-0 z-50 h-full w-full sm:w-[460px]
+           max-w-full shadow-2xl flex flex-col overflow-hidden"
+    :style="sidePanelPinned
+        ? 'position: relative; inset: auto; width: 460px; min-width: 460px; max-width: 460px; height: 100%; flex: 0 0 460px;'
+        : ''"
+    :class="sidePanelPinned ? 'z-0 shadow-none border-l' : ''"
+    x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="translate-x-full"
+    x-transition:enter-end="translate-x-0"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="translate-x-0"
+    x-transition:leave-end="translate-x-full"
+>
+
+  <!-- Encabezado del panel -->
+    <div class="shrink-0 flex items-center justify-between px-5 py-4 border-b border-gray-200">
+      
+      <h2 class="text-base font-semibold text-gray-900">
+      Información del chat
+    </h2>
+
+
+<div class="flex items-center gap-2">
+
+  <!-- Fijar panel -->
+  <button type="button"
+          @click="sidePanelPinned = !sidePanelPinned"
+          class="chat-btn w-9 h-9"
+          :aria-pressed="sidePanelPinned"
+          :title="sidePanelPinned ? 'Desfijar panel' : 'Fijar panel'"
+          :aria-label="sidePanelPinned ? 'Desfijar panel' : 'Fijar panel'">
+
+    <svg class="w-5 h-5" fill="none" stroke="currentColor"
+         viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            stroke-width="2"
+            d="M16 3l5 5-4 1-5 5-1 4-3-3-3 3-2-2 3-3-3-3 4-1 5-5z"/>
+    </svg>
+  </button>
+
+  <!-- Cerrar -->
+  <button type="button"
+          @click="showSidePanel = false; sidePanelPinned = false"
+          class="chat-btn w-9 h-9"
+          title="Cerrar" aria-label="Cerrar panel">
+
+    <svg class="w-5 h-5" fill="none" stroke="currentColor"
+         viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            stroke-width="2"
+            d="M6 18L18 6M6 6l12 12"/>
+    </svg>
+  </button>
+
+
+</div>
+
+
+  </div>
+
+  <!-- Contenido desplazable -->
+<div class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+
+  <!-- Opciones -->
+{% if active_conv.type == 'group' and (active_conv.created_by|string == current_user.id|string or current_user.role == 'superadmin') %}
+<!-- Editar grupo (nombre, foto). El modal se mueve a <body> como el de agregar miembros. -->
+<div class="px-5 pt-5 pb-4 border-b border-gray-100">
+  <button type="button"
+          onclick="
+            const modal = document.getElementById('modal-edit-group');
+            if (modal) {
+              document.body.appendChild(modal);
+              modal.classList.remove('hidden');
+            }"
+          class="chat-btn w-full py-2 text-sm">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+    </svg>
+    Editar grupo
+  </button>
+</div>
+{% endif %}
+
+<!-- Búsqueda -->
+<div class="px-5 pt-5 pb-4 border-b border-gray-100">
+  <p class="text-sm font-semibold text-gray-800 mb-3">
+    Buscar en el chat
+  </p>
+
+  <div class="relative">
+    <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+         fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/>
+    </svg>
+
+    <input id="side-msg-search"
+           type="search"
+           name="q"
+           placeholder="Buscar mensajes..."
+           autocomplete="off"
+           hx-get="/messaging/{{ active_conv.id }}/search"
+           hx-trigger="input changed delay:300ms, search"
+           hx-target="#side-msg-search-results"
+           class="w-full pl-10 pr-3 py-2.5 text-sm border rounded-xl
+                  focus:outline-none focus:ring-2 focus:ring-blue-400">
+
+  </div>
+
+  <div id="side-msg-search-results"
+       class="max-h-48 overflow-y-auto mt-2"></div>
+</div>
+
+
+<!-- Participantes -->
+{% if active_conv.type == 'group' %}
+<div class="px-5 py-4 border-b border-gray-100">
+
+<div class="flex items-center justify-between mb-3">
+  <p class="text-sm font-semibold text-gray-800">Participantes</p>
+
+  <div class="flex items-center gap-3">
+    {% if current_user.role in ['admin', 'superadmin'] %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button
+            type="button"
+            onclick="
+              const modal = document.getElementById('modal-add-members');
+              if (modal) {
+                document.body.appendChild(modal);
+                modal.classList.remove('hidden');
+              }"
+            title="Agregar participantes" aria-label="Agregar participantes"
+            class="chat-btn-primary w-9 h-9">
+
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M16 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2
+                      M10 11a4 4 0 100-8 4 4 0 000 8
+                      M19 8v6
+                      M16 11h6"/>
+            </svg>
+          </button>
+    {% endif %}
+
+    <span class="text-xs text-gray-400">
+      {{ active_conv.participants | length }}
+    </span>
+  </div>
+</div>
+
+  <div class="space-y-2">
+
+    {% for p in active_conv.participants %}
+    <div x-show="showAllMembers || {{ loop.index }} <= 6"
+         class="flex items-center justify-between gap-3 px-2 py-2 rounded-lg hover:bg-gray-50">
+
+      <div class="flex items-center gap-3 min-w-0">
+
+        {% if p.user %}
+          {{ contact_avatar(p.user, "w-9 h-9 text-sm") }}
+        {% else %}
+          <div class="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-sm">
+            ?
+          </div>
+        {% endif %}
+
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-800 truncate">
+            {{ p.user.name or p.user.email if p.user else "Usuario" }}
+          </p>
+
+          {% if p.user and p.user.id|string == current_user.id|string %}
+          <p class="text-xs text-gray-400">Tú</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if p.user and p.user.id|string != current_user.id|string and not p.user.is_bot
+            and (active_conv.created_by|string == current_user.id|string
+            or current_user.role == 'superadmin') %}
+
+      <form method="post" action="/messaging/{{ active_conv.id }}/members/remove">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="user_id" value="{{ p.user_id }}">
+
+        <button type="submit"
+                class="chat-btn-danger text-xs px-2.5 py-1">
+          Quitar
+        </button>
+      </form>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+
+  </div>
+
+  {% if active_conv.participants | length > 6 %}
+  <button type="button"
+          @click="showAllMembers = !showAllMembers"
+          :aria-expanded="showAllMembers"
+          class="chat-btn mt-3 w-full py-2 text-sm">
+
+    <span x-show="!showAllMembers">Mostrar todos los participantes</span>
+    <span x-show="showAllMembers">Mostrar menos</span>
+
+  </button>
+  {% endif %}
+
+  {% if active_conv.created_by|string == current_user.id|string
+        or current_user.role == 'superadmin' %}
+  <button type="button"
+          onclick="document.getElementById('modal-add-members').classList.remove('hidden')"
+          class="chat-btn-primary mt-3 w-full py-2 text-sm">
+    + Agregar participantes
+  </button>
+  {% endif %}
+
+</div>
+{% endif %}
+
+
+
+        <!-- Leave group -->
+{% if active_conv.created_by|string != current_user.id|string %}
+<div class="px-5 py-4 border-b border-gray-100">
+  <form method="post" action="/messaging/{{ active_conv.id }}/members/remove"
+        onsubmit="return confirm('¿Salir de este grupo?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="user_id" value="{{ current_user.id }}" />
+    <button type="submit"
+            class="chat-btn-danger w-full text-sm py-2">
+      Salir del grupo
+    </button>
+  </form>
+</div>
+{% endif %}
+
+
+<!-- Archivos -->
+<div class="px-5 py-4">
+
+  <div class="flex items-center justify-between mb-3">
+    <p class="text-sm font-semibold text-gray-800">
+      Archivos compartidos
+    </p>
+  </div>
+
+  <div id="side-shared-files" class="text-sm text-gray-500">
+    <p class="text-center py-5">Cargando archivos...</p>
+  </div>
+
+</div>
+
+</div>
+
+
+
+</aside>

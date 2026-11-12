@@ -1,0 +1,88 @@
+{# Modal: nuevo grupo (filtro de miembros en assets/messaging/page.js, prefijo ng). Se incluye desde messaging/index.html. #}
+{% from "messaging/_macros.html" import contact_avatar with context %}
+<!-- ── Modal: Nuevo grupo ────────────────────────────────────────────────── -->
+<div id="modal-group" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-4 sm:p-6 responsive-modal overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-base font-semibold text-gray-900">Nuevo grupo</h2>
+      <button onclick="document.getElementById('modal-group').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <form method="post" action="/messaging/group/new" class="space-y-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del grupo <span class="text-red-500">*</span></label>
+        <input type="text" name="name" required placeholder="Ej. Equipo Sistemas"
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+      </div>
+
+      <!-- Filtro por departamento (también queda como dato del grupo) -->
+      {% if departments %}
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Departamento</label>
+        <select id="ng-dept" name="department_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <option value="">— Todos —</option>
+          {% for d in departments %}
+          <option value="{{ d.id }}">{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <!-- Members -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-sm font-medium text-gray-700">
+            Miembros
+            <span class="text-xs text-gray-400 font-normal ml-1">(tú serás añadido automáticamente)</span>
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input id="ng-check-all" type="checkbox"
+                   class="w-3.5 h-3.5 rounded text-blue-500 focus:ring-blue-400 border-gray-300" />
+            Seleccionar todos
+          </label>
+        </div>
+
+        <!-- Member count badge -->
+        <p id="ng-count" class="text-xs text-gray-400 mb-1.5"></p>
+
+        <div class="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+          {% for u in contacts %}
+          <label class="ng-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
+                 data-dept="{{ u.department_id or '' }}">
+            <input type="checkbox" name="member_ids" value="{{ u.id }}"
+                   class="ng-cb w-4 h-4 rounded text-blue-500 focus:ring-blue-400 border-gray-300"/>
+            {{ contact_avatar(u) }}
+            <div class="min-w-0 flex-1">
+              {% if u.name %}
+              <p class="text-sm text-gray-800">{{ u.name }}</p>
+              <p class="text-xs text-gray-400 truncate">{{ u.email }}</p>
+              {% else %}
+              <p class="text-sm text-gray-800 truncate">{{ u.email }}</p>
+              {% endif %}
+            </div>
+            {% if u.department %}
+            <span class="text-xs text-gray-300 shrink-0">{{ u.department.name }}</span>
+            {% endif %}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="flex gap-3 justify-end pt-1">
+        <button type="button" onclick="document.getElementById('modal-group').classList.add('hidden')"
+                class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
+        <button type="submit"
+                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
+          Crear Grupo
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

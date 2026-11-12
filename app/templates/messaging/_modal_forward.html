@@ -1,0 +1,51 @@
+{# Modal: reenviar mensaje (lógica en assets/messaging/feed.js). Se incluye desde messaging/index.html. #}
+{% if active_conv %}
+<!-- ── Modal: Reenviar mensaje (tus chats y, como en WhatsApp, contactos sin
+     chat todavía: el servidor abre el directo con la misma regla que start_direct) -->
+{% set fwd = namespace(dm_ids=[]) %}
+{% for item in conv_list if item.conv.type == 'direct' %}
+  {% for p in item.conv.participants if p.user_id != current_user.id %}{% set fwd.dm_ids = fwd.dm_ids + [p.user_id|string] %}{% endfor %}
+{% endfor %}
+<div id="modal-forward" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <form id="fwd-form" class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-4 sm:p-6 responsive-modal flex flex-col">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-base font-semibold text-gray-900">Reenviar mensaje</h2>
+      <button type="button" onclick="document.getElementById('modal-forward').classList.add('hidden')"
+              class="text-gray-400 hover:text-gray-600" aria-label="Cerrar">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <input id="fwd-search" type="text" placeholder="Buscar chat o persona…" oninput="fwdFilter()" autocomplete="off"
+           class="w-full mb-3 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400" />
+    <div class="space-y-0.5 max-h-72 overflow-y-auto" onchange="fwdCount()">
+      {% if conv_list %}<p data-fwd-head class="px-1 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Chats</p>{% endif %}
+      {% for item in conv_list %}
+      <label data-fwd-row data-search="{{ item.display_name | lower }}"
+             class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-blue-50 cursor-pointer">
+        <input type="checkbox" name="targets" value="c:{{ item.conv.id }}" class="w-4 h-4 accent-blue-500" />
+        <span class="text-sm text-gray-800 truncate">{{ item.display_name }}{% if item.conv.id == active_conv.id %} <span class="text-gray-400">(este chat)</span>{% endif %}</span>
+      </label>
+      {% endfor %}
+      {% set others = contacts | rejectattr('id', 'equalto', current_user.id) | list %}
+      {% set new_contacts = [] %}
+      {% for c in others if c.id|string not in fwd.dm_ids %}{% set _ = new_contacts.append(c) %}{% endfor %}
+      {% if new_contacts %}<p data-fwd-head class="px-1 pt-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Contactos</p>{% endif %}
+      {% for c in new_contacts %}
+      <label data-fwd-row data-search="{{ ((c.name or '') + ' ' + c.email) | lower }}"
+             class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-blue-50 cursor-pointer">
+        <input type="checkbox" name="targets" value="u:{{ c.id }}" class="w-4 h-4 accent-blue-500" />
+        <span class="min-w-0">
+          <span class="block text-sm text-gray-800 truncate">{{ c.name or c.email }}</span>
+          {% if c.name %}<span class="block text-xs text-gray-400 truncate">{{ c.email }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+      <p id="fwd-empty" class="hidden text-sm text-gray-400 text-center py-4">Sin resultados.</p>
+    </div>
+    <button id="fwd-send" type="submit" disabled
+            class="mt-4 w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium">Reenviar</button>
+  </form>
+</div>
+{% endif %}

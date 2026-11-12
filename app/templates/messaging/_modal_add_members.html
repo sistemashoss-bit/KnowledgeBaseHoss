@@ -1,0 +1,134 @@
+{# Modal: agregar miembros al grupo (filtro en assets/messaging/page.js, prefijo am). Se incluye desde messaging/index.html. #}
+{% from "messaging/_macros.html" import contact_avatar with context %}
+              <!-- ── Modal: Agregar miembros ───────────────────────────── -->
+      {% if active_conv and active_conv.type == 'group' %}
+
+      {% set participant_ids = active_conv.participants
+          | map(attribute='user_id')
+          | map('string')
+          | list %}
+
+      <div id="modal-add-members"
+          class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-4 sm:p-6 responsive-modal overflow-y-auto">
+
+          <!-- Encabezado -->
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="text-base font-semibold text-gray-900">
+              Agregar miembros
+            </h2>
+
+            <button type="button"
+                    onclick="document.getElementById('modal-add-members').classList.add('hidden')"
+                    class="text-gray-400 hover:text-gray-600 text-xl">
+              &times;
+            </button>
+          </div>
+
+          <form id="am-form"
+                method="post"
+                action="/messaging/{{ active_conv.id }}/members"
+                onsubmit="return addSelectedMembers(event)"
+                class="space-y-4">
+
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+            <!-- Filtro -->
+            <div>
+
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">
+                  Departamento
+                </label>
+
+                <select id="am-dept"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+                  <option value="">— Todos —</option>
+
+                  {% for d in departments %}
+                  <option value="{{ d.id }}">{{ d.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+            </div>
+
+            <!-- Miembros -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700">
+                  Miembros disponibles
+                </label>
+
+                <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                  <input id="am-check-all"
+                        type="checkbox"
+                        class="w-3.5 h-3.5 rounded border-gray-300">
+                  Seleccionar todos
+                </label>
+              </div>
+
+              <p id="am-count" class="text-xs text-gray-400 mb-1.5"></p>
+
+              <div class="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+
+                {% for u in contacts %}
+                {% if u.id|string not in participant_ids %}
+
+                <label class="am-member-row flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-b-0"
+                      data-dept="{{ u.department_id or '' }}">
+
+                  <input type="checkbox"
+                        name="user_ids"
+                        value="{{ u.id }}"
+                        class="am-cb w-4 h-4 rounded border-gray-300">
+
+                  {{ contact_avatar(u) }}
+
+                  <div class="min-w-0 flex-1">
+                    {% if u.name %}
+                    <p class="text-sm text-gray-800">{{ u.name }}</p>
+                    <p class="text-xs text-gray-400 truncate">{{ u.email }}</p>
+                    {% else %}
+                    <p class="text-sm text-gray-800 truncate">{{ u.email }}</p>
+                    {% endif %}
+                  </div>
+
+                  {% if u.department %}
+                  <span class="text-xs text-gray-300 shrink-0">
+                    {{ u.department.name }}
+                  </span>
+                  {% endif %}
+
+                </label>
+
+                {% endif %}
+                {% endfor %}
+
+              </div>
+            </div>
+
+            <!-- Acciones -->
+            <div class="flex gap-3 justify-end pt-1">
+
+              <button type="button"
+                      onclick="document.getElementById('modal-add-members').classList.add('hidden')"
+                      class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
+                Cancelar
+              </button>
+
+              
+              <button type="submit"
+                      class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg">
+                Agregar miembros 
+              </button>
+
+            </div>
+
+          </form>
+        </div>
+      </div>
+
+      {% endif %}

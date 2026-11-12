@@ -39,7 +39,7 @@ templates.env.filters["linkify"] = _linkify
 
 
 # Mensaje de "compartir ubicación" del chat: su contenido es exactamente el enlace
-# que arma app/messaging/router.py (osm_location_url). Se dibuja como tarjeta con mapa.
+# que arma app/messaging/helpers.py (osm_location_url). Se dibuja como tarjeta con mapa.
 _OSM_LOCATION_RE = re.compile(
     r"https://www\.openstreetmap\.org/\?mlat=(-?\d{1,2}\.\d+)&mlon=(-?\d{1,3}\.\d+)#map=\d+/[-\d.]+/[-\d.]+"
 )
@@ -83,7 +83,7 @@ def _stickers_enabled() -> bool:
 templates.env.filters["sticker_url"] = _sticker_url
 
 
-# Mensaje de "nueva pizarra" del chat (app/messaging/router.py
+# Mensaje de "nueva pizarra" del chat (app/messaging/routes/sending.py
 # create_chat_whiteboard): título + URL absoluta, para que se lea bien en
 # notificaciones y reenvíos. En el chat se dibuja como tarjeta con enlace relativo.
 _WHITEBOARD_MSG_RE = re.compile(

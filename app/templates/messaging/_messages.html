@@ -13,7 +13,7 @@
 {#- Respuesta de MAX: los documentos que consultó van al final del texto; se
     dibujan como botones bajo la burbuja (como en el widget). -#}
 {% set msg_text, msg_sources = (msg.content | assistant_sources) if (msg.sender and msg.sender.is_bot) else (msg.content, []) %}
-{#- Editable: texto propio dentro de los 15 min (EDIT_WINDOW en messaging/router.py,
+{#- Editable: texto propio dentro de los 15 min (EDIT_WINDOW en messaging/helpers.py,
     que es quien lo valida; el script del feed oculta "Editar" al vencer). -#}
 {% set editable = is_mine and not msg.deleted_at and not msg.forwarded and msg.content and not sticker and not loc and not board
                   and edit_since is defined and msg.created_at > edit_since %}
