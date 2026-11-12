@@ -1,5 +1,5 @@
 """Lógica de tareas y seguimientos sin HTTP: permisos, validación de alcance y
-creación. La usan las rutas de app/tasks/router.py y el asistente MAX
+creación. La usan las rutas de app/tasks/routes/ y el asistente MAX
 (app/assistant), así ambos aplican exactamente las mismas reglas.
 
 Las funciones de creación agregan a la sesión y hacen flush, pero no commit:
