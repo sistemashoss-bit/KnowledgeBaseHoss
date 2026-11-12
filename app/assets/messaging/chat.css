@@ -1,0 +1,410 @@
+/* Estilos de la página de mensajes (app/templates/messaging/index.html). */
+/* "MAX está escribiendo…": tres puntos que saltan uno tras otro */
+.max-typing-dots { display: inline-flex; align-items: flex-end; gap: 3px; height: 10px; }
+.max-typing-dots span {
+  width: 5px; height: 5px; border-radius: 9999px; background: currentColor;
+  animation: max-typing-bounce 1.2s infinite ease-in-out;
+}
+.max-typing-dots span:nth-child(2) { animation-delay: .15s; }
+.max-typing-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes max-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .max-typing-dots span { animation: none; opacity: .7; }
+}
+
+/* Opciones del menú de apariencia */
+.chat-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+  color: #374151;
+  white-space: nowrap;
+  word-break: normal;
+  transition: background .2s;
+}
+
+.chat-theme-option:hover {
+  background: #f3f4f6;
+}
+
+.chat-theme-option[aria-pressed="true"] {
+  background: #eff6ff;
+  font-weight: 600;
+}
+
+.theme-dot {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid #00000015;
+}
+
+/* Paletas de colores */
+#chat-theme-root[data-chat-theme="dark"] {
+  --chat-bg: #191e2a;
+  --chat-header: #252d3d;
+  --chat-composer: #252d3d;
+  --chat-received: #303849;
+  --chat-sent: #526bb9;
+  --chat-text: #454C5E;
+  --chat-received-text: #f0f2fa;
+  --chat-sent-text: #ffffff;
+  --chat-border: #414b60;
+  --chat-input: #303849;
+  --chat-accent: #9db4f4;
+}
+
+#chat-theme-root[data-chat-theme="gray"] {
+  --chat-bg: #dde0e4;
+  --chat-header: #f1f2f4;
+  --chat-composer: #f1f2f4;
+  --chat-received: #f7f7f8;
+  --chat-sent: #778594;
+  --chat-text: #414854;
+  --chat-received-text: #414854;
+  --chat-sent-text: #ffffff;
+  --chat-border: #c7cdd5;
+  --chat-input: #ffffff;
+  --chat-accent: #536b82;
+}
+
+#chat-theme-root[data-chat-theme="autumn"] {
+  --chat-bg: #f2e1cb;
+  --chat-header: #fff7ed;
+  --chat-composer: #fff7ed;
+  --chat-received: #fffaf3;
+  --chat-sent: #b76b43;
+  --chat-text: #664636;
+  --chat-received-text: #664636;
+  --chat-sent-text: #ffffff;
+  --chat-border: #e4c5a8;
+  --chat-input: #ffffff;
+  --chat-accent: #a9552f;
+}
+
+#chat-theme-root[data-chat-theme="christmas"] {
+  --chat-bg: #e5eee8;
+  --chat-header: #f5faf6;
+  --chat-composer: #f5faf6;
+  --chat-received: #fffdfc;
+  --chat-sent: #a93f44;
+  --chat-text: #244c3f;
+  --chat-received-text: #244c3f;
+  --chat-sent-text: #ffffff;
+  --chat-border: #c5d8ca;
+  --chat-input: #ffffff;
+  --chat-accent: #a93f44;
+}
+
+/* Aplicación de las paletas */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"]) {
+  background-color: var(--chat-bg);
+  color: var(--chat-text);
+}
+
+/* Fondo de la conversación */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #message-feed {
+  background-color: var(--chat-bg);
+}
+
+/* Mensajes recibidos */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id]:not([data-mine]) [data-msg-text] {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+/* Mensajes enviados */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id][data-mine] [data-msg-text] {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+    border-color: var(--chat-border);
+}
+
+/* Enlaces dentro de mensajes enviados */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id][data-mine] [data-msg-text] a {
+    color: var(--chat-sent-text);
+}
+
+/* Respuestas a mensajes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] {
+    background-color: var(--chat-received);
+    border-left-color: var(--chat-accent);
+    color: var(--chat-received-text);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] span {
+    color: var(--chat-received-text);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-jump] span:first-child {
+    color: var(--chat-accent);
+}
+
+/* Archivos adjuntos: añadiremos una clase específica */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .chat-file-attachment {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-mine] .chat-file-attachment {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+}
+
+/* Bordes de imágenes adjuntas */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed img[data-lightbox] {
+    border-color: var(--chat-border);
+}
+
+/* Horarios y nombres de remitentes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed [data-msg-id] > div > p.text-gray-400 {
+    color: var(--chat-accent);
+}
+/* Barra de escritura */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  .chat-composer {
+  background-color: var(--chat-composer);
+  border-color: var(--chat-border);
+}
+
+/* Campo de escritura */
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #msg-input {
+  background-color: var(--chat-input);
+  border-color: var(--chat-border);
+  color: var(--chat-text);
+}
+
+#chat-theme-root[data-chat-theme]:not([data-chat-theme="default"])
+  #msg-input::placeholder {
+  color: var(--chat-accent);
+  opacity: .75;
+}
+
+/* Mantener legible el texto del menú (vive dentro de la barra oscura) */
+#chat-theme-menu {
+  color: #374151;
+}
+#chat-theme-menu p {
+  color: #6b7280;
+}
+
+/* ==========================================
+   MARCO FIJO: contactos, encabezado y panel lateral.
+   Mismo tono que el menú principal (slate) y NO cambia con la
+   apariencia del chat; el tema solo afecta feed y barra de escritura.
+   ========================================== */
+.chat-chrome,
+.chat-chrome-bar {
+  --chrome-bg: #1e293b;
+  --chrome-raised: #334155;
+  --chrome-hover: #475569;
+  --chrome-border: #334155;
+  --chrome-text: #f1f5f9;
+  --chrome-muted: #cbd5e1;
+  --chrome-subtle: #94a3b8;
+  --chrome-field: #0f172a;
+  background-color: var(--chrome-bg);
+  color: var(--chrome-text);
+  border-color: var(--chrome-border);
+}
+.chat-chrome-bar { border-bottom: 1px solid var(--chrome-border); }
+
+.chat-chrome .text-gray-900,
+.chat-chrome .text-gray-800,
+.chat-chrome .text-gray-700 { color: var(--chrome-text); }
+.chat-chrome .text-gray-600,
+.chat-chrome .text-gray-500 { color: var(--chrome-muted); }
+.chat-chrome .text-gray-400,
+.chat-chrome .text-gray-300 { color: var(--chrome-subtle); }
+.chat-chrome .text-blue-600 { color: #93c5fd; }
+.chat-chrome .border-gray-50,
+.chat-chrome .border-gray-100,
+.chat-chrome .border-gray-200 { border-color: var(--chrome-border); }
+.chat-chrome .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--chrome-border); }
+.chat-chrome .border-white { border-color: var(--chrome-bg); }
+.chat-chrome .hover\:bg-gray-50:hover,
+.chat-chrome .hover\:bg-gray-100:hover,
+.chat-chrome .hover\:bg-blue-50:hover { background-color: var(--chrome-raised); }
+.chat-chrome .hover\:border-blue-300:hover { border-color: #60a5fa; }
+.chat-chrome .bg-blue-50 { background-color: var(--chrome-raised); }
+.chat-chrome .bg-gray-100 { background-color: var(--chrome-raised); }
+.chat-chrome mark { background-color: #facc15; color: #0f172a; }
+
+.chat-chrome input[type="text"],
+.chat-chrome input[type="search"] {
+  background-color: var(--chrome-field);
+  border-color: var(--chrome-border);
+  color: var(--chrome-text);
+}
+.chat-chrome input::placeholder { color: #64748b; }
+
+/* Conversación activa en la lista */
+.chat-chrome .conv-active {
+  background-color: var(--chrome-raised);
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+
+/* Botones sólidos del marco */
+.chat-btn,
+.chat-btn-primary,
+.chat-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background-color .15s, color .15s;
+}
+.chat-btn { background-color: #334155; color: #e2e8f0; }
+.chat-btn:hover { background-color: #475569; color: #fff; }
+.chat-btn[aria-pressed="true"],
+.chat-btn[aria-expanded="true"] { background-color: #2563eb; color: #fff; }
+.chat-btn-primary { background-color: #2563eb; color: #fff; }
+.chat-btn-primary:hover { background-color: #3b82f6; }
+.chat-btn-danger { background-color: #dc2626; color: #fff; }
+.chat-btn-danger:hover { background-color: #ef4444; }
+.chat-btn:focus-visible,
+.chat-btn-primary:focus-visible,
+.chat-btn-danger:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Botones sólidos del chat (siguen el tema) */
+#chat-theme-root {
+  --chat-tool-bg: #e2e8f0;
+  --chat-tool-text: #475569;
+  --chat-tool-hover: #cbd5e1;
+  --chat-send-bg: #2563eb;
+  --chat-send-hover: #3b82f6;
+}
+#chat-theme-root[data-chat-theme="dark"] {
+  --chat-tool-bg: #303849; --chat-tool-text: #9db4f4; --chat-tool-hover: #414b60;
+  --chat-send-bg: #526bb9; --chat-send-hover: #6680cc;
+}
+#chat-theme-root[data-chat-theme="gray"] {
+  --chat-tool-bg: #dde0e4; --chat-tool-text: #536b82; --chat-tool-hover: #c7cdd5;
+  --chat-send-bg: #778594; --chat-send-hover: #8793a2;
+}
+#chat-theme-root[data-chat-theme="autumn"] {
+  --chat-tool-bg: #f2e1cb; --chat-tool-text: #a9552f; --chat-tool-hover: #e4c5a8;
+  --chat-send-bg: #b76b43; --chat-send-hover: #c47c55;
+}
+#chat-theme-root[data-chat-theme="christmas"] {
+  --chat-tool-bg: #e5eee8; --chat-tool-text: #a93f44; --chat-tool-hover: #c5d8ca;
+  --chat-send-bg: #a93f44; --chat-send-hover: #b9545a;
+}
+.chat-tool-btn {
+  background-color: var(--chat-tool-bg);
+  color: var(--chat-tool-text);
+  border: 0;
+  transition: background-color .15s, color .15s;
+}
+.chat-tool-btn:hover { background-color: var(--chat-tool-hover); }
+.chat-tool-btn[aria-expanded="true"] { background-color: var(--chat-send-bg); color: #fff; }
+.chat-send-btn {
+  background-color: var(--chat-send-bg);
+  color: #fff;
+  border: 0;
+  transition: background-color .15s;
+}
+.chat-send-btn:hover { background-color: var(--chat-send-hover); }
+.chat-tool-btn:focus-visible,
+.chat-send-btn:focus-visible {
+  outline: 2px solid var(--chat-send-bg);
+  outline-offset: 2px;
+}
+
+
+/* ==========================================
+   REACCIONES ADAPTADAS A LOS TEMAS DEL CHAT
+   ========================================== */
+
+/* Reacciones existentes */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-chip {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border: 1px solid var(--chat-border);
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+/* Reacciones seleccionadas por el usuario */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-mine {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+    border-color: var(--chat-accent);
+}
+
+/* Hover de las reacciones */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed button.rx-chip:hover {
+    filter: brightness(1.08);
+}
+
+/* Botón para agregar reacción */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-add {
+    background-color: var(--chat-received);
+    color: var(--chat-received-text);
+    border-color: var(--chat-border);
+}
+
+/* Hover del botón de agregar */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-add:hover {
+    background-color: var(--chat-sent);
+    color: var(--chat-sent-text);
+}
+
+/* Contenedor de reacciones vacías */
+#chat-theme-root:not([data-chat-theme="default"])
+#message-feed .rx-empty {
+    border-color: var(--chat-border);
+}
+
+
+/* Soltar archivos sobre la conversación para adjuntarlos. */
+#chat-drop-overlay {
+    position: absolute;
+    inset: .75rem;
+    z-index: 30;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed #60a5fa;
+    border-radius: 1rem;
+    background-color: rgba(239, 246, 255, .92);
+    color: #1d4ed8;
+    font-size: .875rem;
+    font-weight: 600;
+    pointer-events: none;
+}
+#chat-column.is-dragging #chat-drop-overlay { display: flex; }

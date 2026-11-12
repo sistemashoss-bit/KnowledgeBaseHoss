@@ -97,7 +97,7 @@ ASSISTANT_BOT_NAME = "MAX"
 
 # ── Reactions (mensajes y comentarios) ────────────────────────────────────────
 # Lista fija: valida el input y evita cargar un selector completo de emojis.
-REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "✅"]
+REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "✅","😡"]
 
 
 class Base(DeclarativeBase):
