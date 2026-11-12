@@ -89,6 +89,17 @@ class Settings(BaseSettings):
     assistant_conv_per_hour: int = 30
     # Landing sin sesión: preguntas por IP cada 24 h.
     assistant_anon_per_day: int = 10
+    # Transcripción de audios del chat (OpenRouter /audio/transcriptions). Cada
+    # transcripción nueva cuesta 1 consulta del cupo diario de quien la pide.
+    transcription_model: str = "openai/whisper-large-v3-turbo"
+    transcription_max_mb: int = 20
+    # Imágenes que genera MAX en el chat (OpenRouter /images). Cada una cuesta
+    # `image_extra_credits` consultas además de la invocación (1 + 3 = 4) y hay
+    # un tope aparte de `image_per_day` imágenes por persona cada 24 h.
+    image_model: str = "recraft/recraft-v4.1-flash"
+    image_extra_credits: int = 3
+    image_per_day: int = 4
+    image_max_per_invocation: int = 2
     # Una invocación a la vez por chat; el lock se suelta al responder.
     assistant_busy_ttl_seconds: int = 60
 

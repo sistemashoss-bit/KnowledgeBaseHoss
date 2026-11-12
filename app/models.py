@@ -1144,9 +1144,18 @@ class MessageAttachment(Base):
     content_type = Column(String(100), nullable=False)
     file_size = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Audios: transcripción (Whisper). transcribed_at marca que ya se hizo
+    # (el texto puede quedar vacío si no se detectó voz).
+    transcript = Column(Text, nullable=True)
+    transcribed_at = Column(DateTime, nullable=True)
+    transcribed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     message = relationship("Message", back_populates="attachments")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+    @property
+    def is_audio(self) -> bool:
+        return (self.content_type or "").startswith("audio/")
 
 
 # ── Asistente MAX: propuestas de acción ──────────────────────────────────────

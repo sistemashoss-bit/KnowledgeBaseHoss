@@ -97,6 +97,12 @@
           {% endif %}
           El cupo cuenta 24 horas a partir de tu primera consulta.
         </p>
+        {% if image_usage %}
+        <p class="mt-2 text-sm text-gray-600" data-image-usage>
+          Imágenes generadas: <span class="font-medium {{ 'text-red-600' if image_usage.blocked else 'text-gray-900' }}">{{ image_usage.used }} de {{ image_usage.limit }}</span>
+          (cada una usa {{ image_credits }} consultas{% if image_usage.resets_at %}; {{ 'puedes generar más' if image_usage.blocked else 'el conteo se reinicia' }} en {{ image_usage.resets_in|wait }}{% endif %}).
+        </p>
+        {% endif %}
         {% endif %}
       </div>
     </section>

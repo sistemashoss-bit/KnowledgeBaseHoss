@@ -25,6 +25,7 @@
             <th class="px-4 py-3">Persona</th>
             <th class="px-4 py-3">Departamento</th>
             <th class="px-4 py-3 w-56">Consultas</th>
+            <th class="px-4 py-3">Imágenes</th>
             <th class="px-4 py-3">Se libera</th>
           </tr>
         </thead>
@@ -49,6 +50,9 @@
                 </div>
                 <span class="w-14 text-right text-xs tabular-nums {{ 'font-semibold text-red-600' if r.blocked else 'text-gray-700' }}">{{ r.used }}/{{ r.limit }}</span>
               </div>
+            </td>
+            <td class="px-4 py-3 text-xs tabular-nums whitespace-nowrap {{ 'font-semibold text-red-600' if r.images and r.images.blocked else 'text-gray-700' }}" data-images>
+              {{ (r.images.used ~ '/' ~ r.images.limit) if r.images else '—' }}
             </td>
             <td class="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
               {% if r.resets_at %}

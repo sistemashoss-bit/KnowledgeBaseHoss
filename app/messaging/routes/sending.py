@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app import audit, storage, images
-from app.messaging import stickers
+from app.messaging import stickers, transcription
 from app.models import (
     Conversation,
     ConversationParticipant,
@@ -275,3 +275,41 @@ def download_attachment(
     # cachear la redirección 10 min nunca lleva a una firma vencida, y la imagen
     # queda en la caché del navegador bajo esa misma URL.
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "private, max-age=600"})
+
+
+@router.post("/{conv_id}/attachments/{att_id}/transcribe", response_class=HTMLResponse)
+def transcribe_attachment(
+    conv_id: str,
+    att_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Transcribe un audio del chat (1 consulta del cupo de MAX de quien lo pide;
+    si ya estaba transcrito, gratis). Devuelve la fila del mensaje; los demás la
+    refrescan con `event: msgupdate`."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    try:
+        uuid.UUID(att_id)
+    except ValueError:
+        raise HTTPException(404)
+    att = (
+        db.query(MessageAttachment).join(Message, Message.id == MessageAttachment.message_id)
+        .filter(MessageAttachment.id == att_id, Message.conversation_id == conv_id, Message.deleted_at.is_(None))
+        .first()
+    )
+    if not att or not att.is_audio:
+        raise HTTPException(404)
+
+    error = None
+    try:
+        transcription.transcribe(db, att, current_user)
+    except transcription.TranscriptionError as exc:
+        error = str(exc)
+    msg = att.message
+    conv_type = db.query(Conversation.type).filter(Conversation.id == conv_id).scalar()
+    ctx = _feed_context([msg], current_user, db, conv_type == CONV_GROUP, msg.conversation_id)
+    ctx["transcribe_error"] = {str(att.id): error} if error else {}
+    return templates.TemplateResponse(request, "messaging/_messages.html", ctx)

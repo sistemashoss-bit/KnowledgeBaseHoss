@@ -17,8 +17,10 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app import rag
+from app.assistant import limits
 from app.assistant import scope as scope_lib
 from app.calendar.reminders import to_local
+from app.config import settings
 from app.models import (
     Conversation, Department, Document, Message, Task, TaskFollowUp, User,
     PROPOSAL_FOLLOW_UP, PROPOSAL_TASK, PROPOSAL_TICKET, TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
@@ -52,6 +54,9 @@ class ToolContext:
     # Adjuntos del chat que MAX ve en el contexto ("adj-1" → MessageAttachment).
     # Solo estos se pueden proponer como evidencia de una tarea o ticket.
     attachments: dict = field(default_factory=dict)
+    # Imágenes generadas en esta invocación (ya en el bucket); se adjuntan a la
+    # respuesta de MAX al publicarla.
+    images: list[dict] = field(default_factory=list)
 
     def attachment_ref(self, att) -> str:
         for ref, known in self.attachments.items():
@@ -198,8 +203,93 @@ TOOL_DEFINITIONS = [
         },
         ["kind", "title"],
     ),
+    _fn(
+        "transcribe_audio",
+        "Transcribe un audio o nota de voz del chat para saber qué dice (tú no puedes escucharlo). "
+        "La transcripción queda visible en el chat debajo del audio. Cuesta una consulta extra a quien "
+        "te invocó: úsala solo cuando necesites el contenido de un audio sin transcripción para "
+        "responder o cuando te pidan transcribirlo.",
+        {"attachment": {"type": "string", "description": "Referencia del audio, como adj-3"}},
+        ["attachment"],
+    ),
+    _fn(
+        "generate_image",
+        "Genera una imagen (ilustración, diseño, ícono, póster, diagrama sencillo…) y la adjunta a tu "
+        "respuesta en el chat. Úsala solo si te piden explícitamente crear o generar una imagen. Cuesta "
+        "consultas extra a quien te invocó. Escribe el prompt en inglés, concreto: tema, estilo, "
+        "colores, composición y el texto exacto que deba aparecer.",
+        {
+            "prompt": {"type": "string", "description": "Descripción detallada de la imagen, en inglés"},
+            "aspect_ratio": {
+                "type": "string", "enum": ["1:1", "4:3", "3:4", "16:9", "9:16"],
+                "description": "Proporción: 1:1 por defecto; 16:9 presentaciones/banners; 9:16 historias/celular",
+            },
+        },
+        ["prompt"],
+    ),
 ]
 
+
+
+def transcribe_audio(ctx: ToolContext, attachment: str) -> dict:
+    """Transcribe un audio del contexto (adj-N) y lo deja en el chat. Cobra una
+    consulta extra del cupo diario a quien invocó (si ya estaba, gratis)."""
+    from app.messaging import transcription  # evita import circular (messaging → assistant)
+
+    if not ctx.attachments:
+        return {"error": "En esta conversación no hay audios que pueda transcribir."}
+    ref = str(attachment or "").strip().lower()
+    att = ctx.attachments.get(ref)
+    if att is None:
+        audios = [f"{r} ({a.filename})" for r, a in ctx.attachments.items() if a.is_audio]
+        return {"error": f"No existe el adjunto «{attachment}». "
+                         + (f"Audios en el chat: {', '.join(audios)}" if audios else "No hay audios en el chat.")}
+    if not att.is_audio:
+        return {"error": f"{ref} ({att.filename}) no es un audio."}
+    try:
+        text, new = transcription.transcribe(ctx.db, att, ctx.scope.invoker, extra=True)
+    except transcription.TranscriptionError as exc:
+        return {"error": str(exc)}
+    return {
+        "attachment": ref,
+        "filename": att.filename,
+        "transcript": text or "(no se detectó voz en el audio)",
+        "note": "Transcrito ahora; ya quedó visible en el chat." if new else "Ya estaba transcrito.",
+    }
+
+
+def generate_image(ctx: ToolContext, prompt: str, aspect_ratio: str = "1:1") -> dict:
+    """Genera una imagen y la deja lista para adjuntarla a la respuesta. Cobra
+    `image_extra_credits` consultas a quien invocó; si falla, las devuelve."""
+    from app.assistant import images
+
+    if ctx.scope.conversation is None:
+        return {"error": "Solo puedo generar imágenes dentro de un chat."}
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return {"error": "Falta describir la imagen."}
+    if len(ctx.images) >= settings.image_max_per_invocation:
+        return {"error": f"Máximo {settings.image_max_per_invocation} imágenes por respuesta; pídeme más en otro mensaje."}
+    if aspect_ratio not in images.ASPECT_RATIOS:
+        aspect_ratio = "1:1"
+    user = ctx.scope.invoker
+    cost = settings.image_extra_credits
+    exceeded = limits.charge_image(user.id)
+    if exceeded:
+        if exceeded[0] == "image":
+            return {"error": limits.limit_message(*exceeded)}
+        return {"error": f"Generar una imagen cuesta {cost + 1} consultas (esta pregunta y {cost} más) y no "
+                         f"te alcanzan. {limits.limit_message(*exceeded)}"}
+    try:
+        data, media_type = images.generate(prompt[:2000], aspect_ratio)
+        stored = images.store(ctx.scope.conversation.id, data, media_type, len(ctx.images) + 1)
+    except Exception:
+        logger.exception("image generation failed")
+        limits.refund_image(user.id)
+        return {"error": "No pude generar la imagen en este momento; intenta de nuevo en un rato."}
+    ctx.images.append({**stored, "prompt": prompt, "aspect_ratio": aspect_ratio})
+    return {"ok": True, "filename": stored["filename"],
+            "note": "La imagen se adjunta a tu respuesta; no pongas enlaces ni la describas de más."}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -645,6 +735,8 @@ _IMPLEMENTATIONS = {
     "propose_task": propose_task,
     "propose_followup": propose_followup,
     "propose_ticket": propose_ticket,
+    "transcribe_audio": transcribe_audio,
+    "generate_image": generate_image,
 }
 
 

@@ -97,7 +97,8 @@ def ai_usage(
             for u in db.query(User).options(joinedload(User.department))
             .filter(User.id.in_(list(valid.values()))).all()
         }
-        rows = [{"user": users.get(uid), "user_id": key, **usage[key]} for key, uid in valid.items()]
+        img = assistant_limits.image_usage_all()
+        rows = [{"user": users.get(uid), "user_id": key, **usage[key], "images": img.get(key)} for key, uid in valid.items()]
         rows.sort(key=lambda r: (-r["used"], r["resets_in"]))
 
     return templates.TemplateResponse(
@@ -107,6 +108,7 @@ def ai_usage(
             "rows": rows,
             "available": usage is not None,
             "limit": settings.assistant_user_per_day,
+            "image_limit": settings.image_per_day,
             "blocked": sum(1 for r in rows if r["blocked"]),
         },
     )

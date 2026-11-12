@@ -34,6 +34,15 @@ def _conv_check(conv_id) -> tuple:
     return ("conversation", f"max:conv:{conv_id}:hour", settings.assistant_conv_per_hour, 3600)
 
 
+def _image_key(user_id) -> str:
+    # Fuera de "max:user:*" para no mezclarse con el cupo diario al escanear.
+    return f"max:img:{user_id}:day"
+
+
+def _image_check(user_id) -> tuple:
+    return ("image", _image_key(user_id), settings.image_per_day, 86400)
+
+
 def _anon_check(ip: str) -> tuple:
     return ("anon", f"max:anon:{ip}:day", settings.assistant_anon_per_day, 86400)
 
@@ -69,6 +78,35 @@ def check(user_id, conv_id) -> tuple[str, int] | None:
     return _first_hit(_user_checks(user_id) + [_conv_check(conv_id)])
 
 
+def _day_checks(user_id, n: int) -> list:
+    return [c for c in _user_checks(user_id) if c[0] == "day"] * n
+
+
+def charge_extra(user_id, n: int = 1) -> tuple[str, int] | None:
+    """`n` consultas extra del cupo diario dentro de una invocación ya contada
+    (MAX transcribe un audio: 1; genera una imagen: 2). Todas o ninguna. No
+    toca el de ráfaga: es la misma pregunta."""
+    return _first_hit(_day_checks(user_id, n))
+
+
+def refund_extra(user_id, n: int = 1) -> None:
+    _refund(_day_checks(user_id, n))
+
+
+def _image_checks(user_id) -> list:
+    return [_image_check(user_id)] + _day_checks(user_id, settings.image_extra_credits)
+
+
+def charge_image(user_id) -> tuple[str, int] | None:
+    """Una imagen: cuenta 1 en el tope de imágenes por día y
+    `image_extra_credits` consultas del cupo diario. Todo o nada."""
+    return _first_hit(_image_checks(user_id))
+
+
+def refund_image(user_id) -> None:
+    _refund(_image_checks(user_id))
+
+
 def check_ip(ip: str) -> tuple[str, int] | None:
     """Landing sin sesión: preguntas por IP."""
     return _first_hit([_anon_check(ip)])
@@ -100,6 +138,9 @@ def limit_message(reason: str, wait: int) -> str:
         hours = max(1, round(wait / 3600))
         return (f"Llegaste al límite de {settings.assistant_anon_per_day} preguntas. Inicia sesión para "
                 f"seguir preguntando o vuelve en unas {hours} h.")
+    if reason == "image":
+        return (f"Llegaste al límite de {settings.image_per_day} imágenes por día. Podrás generar "
+                f"otra en {format_wait(wait) or 'un momento'}.")
     if reason == "conversation":
         return f"Este grupo llegó al límite de consultas por hora. Intenten de nuevo en unos {minutes} min."
     return "Ya estoy respondiendo en este chat; pregúntame de nuevo en un momento."
@@ -109,8 +150,8 @@ def limit_message(reason: str, wait: int) -> str:
 # El cupo es una ventana de 24 h que empieza con la primera consulta (no a
 # medianoche) y la comparten el chat, el widget y el asistente del editor.
 
-def _usage(count: int, left: int) -> dict:
-    limit = settings.assistant_user_per_day
+def _usage(count: int, left: int, limit: int | None = None) -> dict:
+    limit = settings.assistant_user_per_day if limit is None else limit
     used = min(count, limit)  # por si bajaron el límite con la ventana abierta
     return {
         "used": used,
@@ -135,6 +176,16 @@ def daily_usage_all() -> dict | None:
     if raw is None:
         return None
     return {key.split(":")[2]: _usage(*value) for key, value in raw.items()}
+
+
+def image_usage(user_id) -> dict | None:
+    raw = vk.read_rate_limit(_image_key(user_id))
+    return None if raw is None else _usage(*raw, limit=settings.image_per_day)
+
+
+def image_usage_all() -> dict:
+    raw = vk.scan_rate_limits(_image_key("*")) or {}
+    return {key.split(":")[2]: _usage(*value, limit=settings.image_per_day) for key, value in raw.items()}
 
 
 def format_wait(seconds: int) -> str:

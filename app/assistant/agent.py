@@ -20,7 +20,7 @@ from app.calendar.reminders import to_local
 from app.config import settings
 from app.database import SessionLocal
 from app.messaging import realtime
-from app.models import Message
+from app.models import Message, MessageAttachment
 from app.tasks.recurring import local_now
 from app.templating import assistant_sources_block
 
@@ -66,7 +66,7 @@ def _run_safe(conv_id, message_id, invoker_id) -> None:
 
 def _post_reply(
     db, scope: scope_lib.Scope, source: Message, text: str, proposal_items: list[dict] | None = None,
-    sources: list[dict] | None = None,
+    sources: list[dict] | None = None, images: list[dict] | None = None,
 ):
     """Publica la respuesta de MAX (respondiendo al mensaje que lo invocó y
     mencionando a quien preguntó) con sus propuestas y los documentos que
@@ -91,9 +91,25 @@ def _post_reply(
     db.flush()
     if proposal_items:
         proposals.save(db, msg, source.id, scope.invoker.id, proposal_items)
+    for img in images or []:
+        # Ya están en el bucket (tools.generate_image); aquí solo el adjunto.
+        db.add(MessageAttachment(
+            message_id=msg.id, uploaded_by=bot.id, filename=img["filename"], file_key=img["key"],
+            content_type=img["content_type"], file_size=img["size"],
+        ))
     db.commit()
     _after_new_message(scope.conversation.id, msg.id, bot, db, text[:120], text)
     return msg
+
+
+def _log_images(scope: scope_lib.Scope, conv_id, ctx: tools.ToolContext) -> None:
+    """Auditoría de cada imagen generada: quién la pidió y con qué prompt."""
+    for img in ctx.images:
+        audit.log_action(
+            "assistant_image", user=scope.invoker,
+            resource_type="conversation", resource_id=str(conv_id), resource_name=scope.conversation.name,
+            details=f"{img['filename']} {img['aspect_ratio']} prompt={img['prompt'][:300]}",
+        )
 
 
 # ── Contexto ──────────────────────────────────────────────────────────────────
@@ -113,8 +129,27 @@ def _attachments_text(ctx: tools.ToolContext, msg: Message) -> str:
     atts = sorted(msg.attachments or [], key=lambda a: (a.created_at is None, a.created_at, a.filename))
     if not atts:
         return ""
-    items = [f"{ctx.attachment_ref(a)} «{a.filename}» ({tools._attachment_kind(a.content_type)})" for a in atts]
-    return f"[adjuntos: {', '.join(items)}]"
+    return f"[adjuntos: {', '.join(_attachment_item(ctx, a) for a in atts)}]"
+
+
+TRANSCRIPT_CHARS = 800
+
+
+def _attachment_item(ctx: tools.ToolContext, a) -> str:
+    """`adj-1 «foto.jpg» (imagen)`; los audios dicen si ya tienen transcripción
+    (y la incluyen recortada) para que MAX no gaste una consulta en volver a pedirla."""
+    kind = tools._attachment_kind(a.content_type)
+    item = f"{ctx.attachment_ref(a)} «{a.filename}»"
+    if not a.is_audio:
+        return f"{item} ({kind})"
+    if not a.transcribed_at:
+        return f"{item} (audio sin transcribir)"
+    text = (a.transcript or "").strip()
+    if not text:
+        return f"{item} (audio; transcripción: sin voz)"
+    if len(text) > TRANSCRIPT_CHARS:
+        text = text[:TRANSCRIPT_CHARS - 1] + "…"
+    return f"{item} (audio; transcripción: «{text}»)"
 
 
 def _history(db, scope: scope_lib.Scope, source: Message, ctx: tools.ToolContext) -> str:
@@ -202,6 +237,17 @@ Reglas:
   foto, captura o archivo del chat a la tarea o ticket (o responde a un mensaje con
   adjuntos al pedirla), pasa sus referencias en `attachments` de propose_task /
   propose_ticket. Si no queda claro cuál, pregunta. No los agregues si no lo piden.
+- Los audios no los escuchas: si un audio ya trae transcripción úsala; si dice "audio
+  sin transcribir" y lo necesitas para responder (p. ej. {invoker} te pide contestar o
+  resumir un audio) usa transcribe_audio con su referencia. Cada transcripción nueva le
+  cuesta una consulta extra a {invoker}: no transcribas audios que no te pidieron.
+- Imágenes: usa generate_image solo si {invoker} pide explícitamente crear, generar o
+  diseñar una imagen (cuesta {settings.image_extra_credits} consultas extra; máximo
+  {settings.image_max_per_invocation} por respuesta y {settings.image_per_day} al día por persona). La ve todo el
+  chat: niégate a contenido sexual, violento, ofensivo o discriminatorio, a imitar
+  marcas o logotipos de terceros y a retratar a personas reales reconocibles (incluidas
+  las del chat); explica por qué en una frase. Tras generarla responde breve: la imagen
+  ya va adjunta.
 - Si una herramienta devuelve un error, explica ese mismo motivo en palabras simples
   (no inventes otro).
 - Responde en español, breve y en texto plano: sin markdown (nada de #, ** ni tablas);
@@ -361,6 +407,12 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         except Exception:
             logger.exception("assistant LLM call failed")
             db.rollback()
+            if ctx.images:
+                # Las imágenes ya se generaron (y cobraron): se entregan igual.
+                _post_reply(db, scope, source, "Aquí está la imagen, aunque no pude terminar la respuesta.",
+                            images=ctx.images)
+                _log_images(scope, conv_id, ctx)
+                return
             limits.refund(invoker_id, conv_id)
             _post_reply(db, scope, source, "No pude responder en este momento; intenta de nuevo en un rato.")
             return
@@ -368,10 +420,12 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         if not answer:
             answer = (
                 "Dejé la propuesta para que la confirmes." if ctx.proposals
+                else "Aquí está la imagen." if ctx.images
                 else "No encontré cómo ayudarte con eso. ¿Me lo puedes decir de otra forma?"
             )
         sources = [{"id": doc_id, "title": title} for doc_id, title in list(ctx.sources.items())[:MAX_SOURCES]]
-        _post_reply(db, scope, source, answer, ctx.proposals, sources)
+        _post_reply(db, scope, source, answer, ctx.proposals, sources, ctx.images)
+        _log_images(scope, conv_id, ctx)
 
         audit.log_search(source.content or "", user=scope.invoker, result_count=len(ctx.calls), search_type="assistant")
         audit.log_action(

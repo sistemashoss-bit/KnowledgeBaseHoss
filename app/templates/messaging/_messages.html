@@ -147,9 +147,34 @@
            data-lightbox
            class="rounded-xl max-w-full max-h-64 object-cover border cursor-zoom-in {% if is_mine %}border-blue-300{% else %}border-gray-200 shadow-sm{% endif %}" />
       {% elif att.content_type.startswith('audio/') %}
-      {# Audio / nota de voz: reproductor nativo #}
-      <audio controls preload="metadata" src="{{ file_url }}?inline=1"
-             class="w-64 max-w-full h-10 {% if is_mine %}ml-auto{% endif %}"></audio>
+      {# Audio / nota de voz: reproductor nativo y su transcripción (la ven todos;
+         pedirla cuesta 1 consulta de MAX a quien la pide, una sola vez). #}
+      <div class="flex flex-col gap-1 {% if is_mine %}items-end{% else %}items-start{% endif %}" data-audio-att="{{ att.id }}">
+        <audio controls preload="metadata" src="{{ file_url }}?inline=1"
+               class="w-64 max-w-full h-10"></audio>
+        {% if att.transcribed_at %}
+        <div class="w-64 max-w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-sm" data-transcript>
+          <p class="text-[10px] font-medium uppercase tracking-wide text-gray-400">Transcripción</p>
+          <p class="mt-0.5 whitespace-pre-line [overflow-wrap:anywhere]">{{ att.transcript or 'No se detectó voz en el audio.' }}</p>
+        </div>
+        {% else %}
+        <button type="button" data-transcribe-btn
+                hx-post="/messaging/{{ msg.conversation_id }}/attachments/{{ att.id }}/transcribe"
+                {# Por id y no `closest`: el aviso en vivo (msgupdate) puede reemplazar la
+                   fila antes de que llegue esta respuesta. #}
+                hx-target="[data-msg-id='{{ msg.id }}']" hx-swap="outerHTML" hx-disabled-elt="this"
+                hx-on::before-request="this.textContent = 'Transcribiendo…'"
+                title="Usa 1 de tus consultas diarias de MAX"
+                class="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-60 transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7"/>
+          </svg>
+          Transcribir
+        </button>
+        {% set t_err = (transcribe_error or {}).get(att.id|string) %}
+        {% if t_err %}<p class="w-64 max-w-full text-xs text-amber-700 [overflow-wrap:anywhere]" role="alert">{{ t_err }}</p>{% endif %}
+        {% endif %}
+      </div>
       {% else %}
       <a <a href="{{ file_url }}"
        class="chat-file-attachment flex items-center gap-2 px-3 py-2 rounded-xl text-xs

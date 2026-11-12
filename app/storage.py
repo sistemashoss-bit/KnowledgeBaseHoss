@@ -150,6 +150,10 @@ def upload_chat_file(key: str, content: bytes, content_type: str) -> None:
     )
 
 
+def read_chat_file(key: str) -> bytes:
+    return _client().get_object(Bucket=settings.wasabi_chats_bucket_name, Key=key)["Body"].read()
+
+
 def get_chat_file_url(key: str, filename: str, inline: bool = False) -> str:
     """Adjuntos e imágenes del chat (y fotos de grupo): URL estable, ver _stable_url."""
     disposition = "inline" if inline else "attachment"

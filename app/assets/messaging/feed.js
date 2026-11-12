@@ -108,11 +108,15 @@
     // base.html formatea las horas en htmx:afterSwap; este reemplazo no es de htmx.
     row.dispatchEvent(new CustomEvent('htmx:afterSwap', { bubbles: true, detail: { target: row } }));
   }
+  // No se refresca una fila con la edición abierta ni con una petición htmx en
+  // curso (p. ej. "Transcribir"): su respuesta ya trae la fila nueva, y
+  // reemplazarla antes deja a htmx sin el botón que la pidió.
+  function rowBusy(row) { return !row || row.querySelector('[data-edit-form], .htmx-request'); }
   function refreshRow(id) {
-    if (!rowOf(id) || rowOf(id).querySelector('[data-edit-form]')) return;
+    if (rowBusy(rowOf(id))) return;
     fetch(convUrl + '/messages/' + id)
       .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (html) { if (html) replaceRow(id, html); });
+      .then(function (html) { if (html && !rowBusy(rowOf(id))) replaceRow(id, html); });
   }
   function post(id, action, body) {
     return fetch(convUrl + '/messages/' + id + '/' + action, { method: 'POST', body: body || new FormData(), credentials: 'same-origin' })
@@ -234,6 +238,8 @@
     propose_task: 'MAX está preparando la tarea',
     propose_followup: 'MAX está preparando el seguimiento',
     propose_ticket: 'MAX está preparando el ticket',
+    transcribe_audio: 'MAX está escuchando un audio',
+    generate_image: 'MAX está creando una imagen',
   };
   var maxTypingTimer = null;
   function setMaxTyping(state) {
