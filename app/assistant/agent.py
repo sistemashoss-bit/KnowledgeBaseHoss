@@ -47,6 +47,24 @@ _ASKS_ACTION = re.compile(
     r"|tickets?|incidencias?|levant\w*|report\w*)\b", re.I
 )
 _NOT_SAVED = "(No pude registrar la propuesta; pídemelo de nuevo con más detalle.)"
+# El mensaje pide crear una imagen: la primera vuelta obliga a usar una herramienta y, si
+# contesta solo con texto (o copia un "[adjuntos: …]" del historial), se le insiste una vez.
+_ASKS_IMAGE = re.compile(
+    r"\b(gener\w*|cre[ae]\w*|haz|hazme|hac\w*|dibuj\w*|diseñ\w*|ilustr\w*|otra|nueva)\b"
+    r".{0,60}\b(imagen(es)?|ilustraci\w*|dibujos?|p[oó]ster\w*|[ií]conos?|logos?|banners?)\b"
+    r"|\bdib[uú]j(a|ame|ar|en)\b",
+    re.I | re.S,
+)
+_IMAGE_NUDGE = (
+    "Aviso del sistema: no se generó ninguna imagen; el texto no adjunta nada y los "
+    "\"[adjuntos: …]\" del historial son de mensajes anteriores. Si te pidieron crear una imagen "
+    "y no es contenido que debas negar, llama generate_image ahora. Si no, responde sin decir "
+    "que adjuntaste una imagen."
+)
+# La respuesta dice que la imagen ya va adjunta.
+_CLAIMS_IMAGE = re.compile(r"imagen.{0,60}adjunt|adjunt.{0,60}imagen|aqu[ií] (est[aá]|tienes) (la|tu) imagen", re.I | re.S)
+# Etiquetas de adjuntos que el modelo copia del historial: nunca adjuntan nada.
+_ATTACHMENT_TAG = re.compile(r"\s*\[adjuntos:[^\]]*\]")
 _WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
@@ -301,6 +319,17 @@ def _claims_missing_proposal(ctx: tools.ToolContext, text: str) -> bool:
     return bool(_CLAIMS_PROPOSAL.search(text or ""))
 
 
+def _missing_image(ctx: tools.ToolContext, question: str, text: str) -> bool:
+    """Pidieron una imagen (o la respuesta dice que va adjunta) y no se generó
+    ni falló generate_image."""
+    if ctx.images or "generate_image" in ctx.errors:
+        return False
+    if _ASKS_IMAGE.search(question or ""):
+        return True
+    # "Dejé la propuesta con la imagen adjunta" habla de un adjunto del chat, no de una generada.
+    return not ctx.proposals and bool(_CLAIMS_IMAGE.search(text or ""))
+
+
 def _run_llm(
     ctx: tools.ToolContext, system: str, question: str,
     *, tool_defs: list | None = None, history: list[dict] | None = None,
@@ -318,8 +347,9 @@ def _run_llm(
         {"role": "user", "content": question},
     ]
     used = 0
-    nudged = False
-    force = bool(_ASKS_ACTION.search(question or ""))
+    nudged = image_nudged = False
+    asks_image = bool(_ASKS_IMAGE.search(question or ""))
+    force = asks_image or bool(_ASKS_ACTION.search(question or ""))
     for _ in range(settings.assistant_max_tool_calls + 3):
         final = used >= settings.assistant_max_tool_calls
         completion = llm.chat.completions.create(
@@ -335,7 +365,13 @@ def _run_llm(
         tool_calls = getattr(msg, "tool_calls", None) or []
         force = False
         if not tool_calls or final:
-            text = _message_text(msg)
+            text = _ATTACHMENT_TAG.sub("", _message_text(msg)).strip()
+            if not image_nudged and not final and _missing_image(ctx, question, text):
+                logger.info("assistant answered an image request without generate_image: %r", text[:200])
+                image_nudged = True  # sin forzar: puede negarse (persona real, marca…)
+                messages.append({"role": "assistant", "content": text})
+                messages.append({"role": "user", "content": _IMAGE_NUDGE})
+                continue
             if not _claims_missing_proposal(ctx, text):
                 return text
             if nudged or final:
