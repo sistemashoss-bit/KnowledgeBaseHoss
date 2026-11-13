@@ -154,7 +154,11 @@ async def sync_org(
     if not token:
         return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
 
-    data = await hoss.fetch_org(token)
+    try:
+        data = await hoss.fetch_org(token)
+    except hoss.TokenRejected:
+        vk.delete_hoss_token(current_user.id)
+        return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
     if data is None:
         return RedirectResponse("/org/zones/?sync=error", status_code=302)
 

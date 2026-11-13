@@ -52,7 +52,11 @@ async def sync_departments(
     if not token:
         return RedirectResponse("/departments/?sync=notoken", status_code=302)
 
-    departments = await hoss.fetch_departments(token)
+    try:
+        departments = await hoss.fetch_departments(token)
+    except hoss.TokenRejected:
+        vk.delete_hoss_token(user.id)
+        return RedirectResponse("/departments/?sync=notoken", status_code=302)
     if departments is None:
         return RedirectResponse("/departments/?sync=error", status_code=302)
 

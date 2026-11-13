@@ -34,6 +34,11 @@ class AccessDenied(Exception):
         self.message = message
 
 
+class TokenRejected(Exception):
+    """hoss-api rechazó el token guardado (401): venció, se cerró la sesión o se
+    revocó. Ya no sirve; quien llama debe borrarlo y pedir entrar de nuevo."""
+
+
 class RateLimited(Exception):
     """hoss-api bloqueó el email por intentos fallidos (429). Trae su mensaje."""
 
@@ -125,6 +130,8 @@ async def fetch_org(session_token: str) -> dict | None:
                 headers=headers,
                 params={"page": 1, "pageSize": 10000},
             )
+            if 401 in (regions_resp.status_code, branches_resp.status_code):
+                raise TokenRejected()
             if regions_resp.status_code != 200 or branches_resp.status_code != 200:
                 return None
 
@@ -155,6 +162,8 @@ async def fetch_departments(session_token: str) -> list | None:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(f"{base}/departments", headers=headers)
+            if resp.status_code == 401:
+                raise TokenRejected()
             if resp.status_code != 200:
                 return None
             departments = resp.json()

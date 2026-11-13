@@ -273,6 +273,16 @@ def get_hoss_token(user_id) -> str | None:
         return None
 
 
+def delete_hoss_token(user_id) -> None:
+    r = _get()
+    if r is None:
+        return
+    try:
+        r.delete(f"hoss_token:{str(user_id)}")
+    except Exception:
+        pass
+
+
 # ── User presence ─────────────────────────────────────────────────────────────
 
 _LASTSEEN_TTL = 86400 * 30   # 30 days
