@@ -133,13 +133,13 @@ async def sso_handoff(
     next: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
-    """Recibe el accessToken de hoss-api (el que NextAuth ya guarda en la sesión
-    de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
+    """Recibe un código de un solo uso de hoss-api (o, de clientes viejos, el
+    accessToken de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
     login. El token viaja por POST para no filtrarlo en URL/referer/logs.
     `next`: ruta a la que ir al entrar (p. ej. la de una notificación de la
     extensión); sin ella, a /documents/."""
     try:
-        identity = await hoss.introspect_session(token)
+        identity = await hoss.identity_from_bearer(token)
     except hoss.AccessDenied:
         return _access_page(request, "No tienes acceso a Knowledge Base.", 403)
     if not identity:
@@ -149,9 +149,11 @@ async def sso_handoff(
     if not user or not user.is_active:
         return _access_page(request, "Tu usuario está desactivado.", 403)
 
-    # Guardamos el accessToken de hoss para reusarlo en llamadas server-to-server
-    # (p. ej. sincronizar sucursales/regiones). hoss valida su expiración al usarlo.
-    vk.store_hoss_token(user.id, token)
+    # Solo con el JWT de un cliente viejo y sin client_secret: se guarda para
+    # sincronizar el catálogo. Con client_secret la sincronización usa el token de
+    # sitio y knowledge no guarda tokens de usuario.
+    if not token.startswith(hoss.CODE_PREFIX) and not settings.hoss_sso_client_secret:
+        vk.store_hoss_token(user.id, token)
 
     return _open_session(user, identity, _safe_next(next))
 

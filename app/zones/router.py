@@ -150,15 +150,19 @@ async def sync_org(
     current_user=Depends(require_superadmin),
 ):
 
-    token = vk.get_hoss_token(current_user.id)
+    # Con client_secret: token de sitio. Sin él: el token guardado en el handoff.
+    site_token = await hoss.site_token()
+    token = site_token or vk.get_hoss_token(current_user.id)
     if not token:
         return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
 
     try:
         data = await hoss.fetch_org(token)
     except hoss.TokenRejected:
-        vk.delete_hoss_token(current_user.id)
-        return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
+        if not site_token:
+            vk.delete_hoss_token(current_user.id)
+            return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
+        data = None
     if data is None:
         return RedirectResponse("/org/zones/?sync=error", status_code=302)
 

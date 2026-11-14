@@ -5,8 +5,9 @@ adjunta un screenshot y aquí nace un ticket (incidencia, o solicitud si Jev ve
 que pide una mejora) clasificado por Jev.
 
 Autenticación, en este orden:
-- `Authorization: Bearer <accessToken de hoss-api>` desde otras apps: se valida
-  contra hoss-api (/sso/identity) y se aprovisiona al usuario como en el SSO.
+- `Authorization: Bearer <código ssoc_… o accessToken de hoss-api>` desde otras
+  apps: el código se canjea en hoss-api (/sso/redeem) y el JWT (clientes viejos)
+  se valida con /sso/identity; se aprovisiona al usuario como en el SSO.
   Requiere que el puesto tenga acceso a knowledge en hoss.
 - Cookie de sesión de knowledge, cuando el widget corre dentro de knowledge
   (mismo origen; el CSRF global aplica como en cualquier POST).
@@ -94,7 +95,7 @@ async def _reporter(request: Request, db: Session) -> User:
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         try:
-            identity = await hoss.introspect_session(auth[7:].strip())
+            identity = await hoss.identity_from_bearer(auth[7:].strip())
         except hoss.AccessDenied:
             raise HTTPException(403, "Tu puesto no tiene acceso a knowledge en hoss")
         if not identity:

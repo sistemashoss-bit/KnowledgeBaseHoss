@@ -16,6 +16,8 @@ JWT_SECRET de hoss: valida credenciales (login propio) o el token del handoff
     firma la URL localmente. avatar_url: URL ya firmada por hoss (para consumidores que
     no comparten el mismo Wasabi).
 """
+import time
+
 import httpx
 
 from app.config import settings
@@ -170,3 +172,73 @@ async def fetch_departments(session_token: str) -> list | None:
             return departments if isinstance(departments, list) else None
     except httpx.HTTPError:
         return None
+
+
+# ── Paso 2 del SSO: código de un solo uso y token de sitio ─────────────────────
+
+# Prefijo de los códigos de POST /sso/code en hoss-api (actions/sso/code.js).
+CODE_PREFIX = "ssoc_"
+
+
+async def redeem_code(code: str) -> dict | None:
+    """Canjea un código de un solo uso (POST /sso/redeem) por la identidad.
+    None si el código no sirve (expiró, ya se usó, sesión revocada) o si falta el
+    client_secret; AccessDenied si el usuario ya no tiene acceso al sitio."""
+    base = settings.hoss_api_url.rstrip("/")
+    if not base or not code or not settings.hoss_sso_client_secret:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{base}/sso/redeem",
+                json={"code": code, "site": SITE, "client_secret": settings.hoss_sso_client_secret},
+            )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code == 403:
+        raise AccessDenied()
+    if resp.status_code != 200:
+        return None
+    identity = resp.json()
+    return identity if identity.get("corporate_id") else None
+
+
+async def identity_from_bearer(token: str) -> dict | None:
+    """Identidad a partir de lo que manda hoss-front o la extensión: un código de un
+    solo uso (nuevo) o el JWT de staff (clientes viejos, mientras se publican)."""
+    token = (token or "").strip()
+    if token.startswith(CODE_PREFIX):
+        return await redeem_code(token)
+    return await introspect_session(token)
+
+
+_site_token: dict = {"value": None, "exp": 0.0}
+
+
+async def site_token() -> str | None:
+    """Token de sitio (client_credentials, scope catalog:read) para leer el catálogo
+    de hoss. Se reutiliza hasta un minuto antes de vencer. None sin client_secret o
+    si hoss no responde."""
+    base = settings.hoss_api_url.rstrip("/")
+    if not base or not settings.hoss_sso_client_secret:
+        return None
+    if _site_token["value"] and time.monotonic() < _site_token["exp"]:
+        return _site_token["value"]
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{base}/sso/token",
+                json={
+                    "grant_type": "client_credentials",
+                    "site": SITE,
+                    "client_secret": settings.hoss_sso_client_secret,
+                },
+            )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    body = resp.json()
+    _site_token["value"] = body.get("access_token")
+    _site_token["exp"] = time.monotonic() + max(int(body.get("expires_in", 0)) - 60, 0)
+    return _site_token["value"]

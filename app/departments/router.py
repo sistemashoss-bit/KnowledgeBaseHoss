@@ -48,15 +48,19 @@ async def sync_departments(
     db: Session = Depends(get_db),
     user=Depends(require_role(ROLE_SUPERADMIN)),
 ):
-    token = vk.get_hoss_token(user.id)
+    # Con client_secret: token de sitio. Sin él: el token guardado en el handoff.
+    site_token = await hoss.site_token()
+    token = site_token or vk.get_hoss_token(user.id)
     if not token:
         return RedirectResponse("/departments/?sync=notoken", status_code=302)
 
     try:
         departments = await hoss.fetch_departments(token)
     except hoss.TokenRejected:
-        vk.delete_hoss_token(user.id)
-        return RedirectResponse("/departments/?sync=notoken", status_code=302)
+        if not site_token:
+            vk.delete_hoss_token(user.id)
+            return RedirectResponse("/departments/?sync=notoken", status_code=302)
+        departments = None
     if departments is None:
         return RedirectResponse("/departments/?sync=error", status_code=302)
 

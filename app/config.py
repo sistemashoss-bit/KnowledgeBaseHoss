@@ -72,6 +72,10 @@ class Settings(BaseSettings):
 
     # SSO con hoss-api (proveedor de identidad del staff).
     hoss_api_url: str = ""
+    # client_secret de knowledge en el SSO (SSO_SECRET_KNOWLEDGE en hoss-api, mismo
+    # valor). Con él: canjea los códigos de un solo uso (handoff y widget) y pide
+    # token de sitio para sincronizar el catálogo sin guardar tokens de usuario.
+    hoss_sso_client_secret: str = ""
 
     # OpenRouter (LLM for Q&A)
     openrouter_api_key: str

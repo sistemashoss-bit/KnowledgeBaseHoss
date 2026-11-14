@@ -90,6 +90,7 @@ VOYAGE_API_KEY=
 # Opcionales
 VALKEY_URL=valkeys://default:password@host:port
 HOSS_API_URL=                 # SSO con hoss-api
+HOSS_SSO_CLIENT_SECRET=       # mismo valor que SSO_SECRET_KNOWLEDGE en hoss-api (código de un solo uso y token de sitio)
 # MESSAGE_RETENTION_DAYS=30
 # AUDIT_RETENTION_DAYS=30
 # CLEANUP_HOUR_UTC=3
