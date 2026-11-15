@@ -1,4 +1,12 @@
 terraform {
+   cloud {
+    
+    organization = "hosssystems"
+
+    workspaces {
+      name = "Knowledge"
+    }
+  }
   required_providers {
     local = {
       source  = "hashicorp/local"
