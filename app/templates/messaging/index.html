@@ -144,14 +144,13 @@
             {% endif %}
           {% else %}
           <div class="relative shrink-0">
-            {% if item.other_avatar_key %}
-            <img src="{{ avatar_url(item.other_avatar_key) }}" alt=""
+            {% if item.other_avatar_url %}
+            <img data-avatar src="{{ item.other_avatar_url }}" alt=""
                  class="w-9 h-9 rounded-full object-cover" />
-            {% else %}
-            <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold">
+            {% endif %}
+            <div class="{% if item.other_avatar_url %}hidden {% endif %}w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold">
               {{ item.avatar }}
             </div>
-            {% endif %}
             {% if item.is_online %}
             <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white"></span>
             {% endif %}
@@ -225,20 +224,19 @@
         </div>
           {% endif %}
         {% else %}
-          {% set ns = namespace(ak=None) %}
+          {% set ns = namespace(au=None) %}
           {% for p in active_conv.participants %}
-            {% if p.user_id|string != current_user.id|string and p.user and p.user.avatar_key %}
-              {% set ns.ak = p.user.avatar_key %}
+            {% if p.user_id|string != current_user.id|string and p.user %}
+              {% set ns.au = avatar_url(p.user) %}
             {% endif %}
           {% endfor %}
-          {% if ns.ak %}
-        <img src="{{ avatar_url(ns.ak) }}" alt=""
+          {% if ns.au %}
+        <img data-avatar src="{{ ns.au }}" alt=""
              class="w-8 h-8 rounded-full object-cover shrink-0" />
-          {% else %}
-        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0">
+          {% endif %}
+        <div class="{% if ns.au %}hidden {% endif %}w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0">
           {{ active_conv_name[0].upper() }}
         </div>
-          {% endif %}
         {% endif %}
         <div class="chat-header-title flex-1 min-w-0">
           <p class="text-sm font-semibold text-gray-900">{{ active_conv_name }}</p>

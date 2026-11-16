@@ -26,14 +26,14 @@
   {# ── Avatar (others, group only) ─────────────────────────────────────── #}
   {% if show_sender %}
   <div class="shrink-0 self-end mb-5">
-    {% if msg.sender and msg.sender.avatar_key %}
-    <img src="{{ avatar_url(msg.sender.avatar_key) }}"
+    {% set au = avatar_url(msg.sender) %}
+    {% if au %}
+    <img data-avatar src="{{ au }}"
          alt="" class="w-7 h-7 rounded-full object-cover ring-1 ring-white" />
-    {% else %}
-    <div class="w-7 h-7 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 text-xs font-bold ring-1 ring-white select-none">
+    {% endif %}
+    <div class="{% if au %}hidden {% endif %}w-7 h-7 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 text-xs font-bold ring-1 ring-white select-none">
       {{ (msg.sender.name or msg.sender.email)[0].upper() if msg.sender else "?" }}
     </div>
-    {% endif %}
   </div>
   {% endif %}
 

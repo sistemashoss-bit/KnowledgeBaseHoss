@@ -25,6 +25,16 @@
       try { saved = localStorage.getItem(key); } catch (e) {}
       if (saved === '1' || (messaging && saved === null)) root.classList.add('sidebar-collapsed');
     })();
+    // Avatares del staff (CDN de Bunny): sin foto el CDN responde 404. Se quita la
+    // imagen y se muestran las iniciales que van justo después (con `hidden`). En
+    // captura porque `error` de <img> no burbujea; cubre también lo que llega por htmx.
+    document.addEventListener('error', function (e) {
+      var img = e.target;
+      if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-avatar')) return;
+      var fallback = img.nextElementSibling;
+      if (fallback) fallback.classList.remove('hidden');
+      img.remove();
+    }, true);
   </script>
   {% if current_user %}
   <meta name="csrf-token" content="{{ csrf_for(current_user.id) }}" />
@@ -351,14 +361,14 @@
       {% if current_user %}
       {% set sidebar_name = (current_user.name or '')|trim or 'Usuario' %}
       <div class="flex items-center gap-3">
-        {% if current_user.avatar_key %}
-        <img src="{{ avatar_url(current_user.avatar_key) }}"
+        {% set au = avatar_url(current_user) %}
+        {% if au %}
+        <img data-avatar src="{{ au }}"
              alt="" class="w-8 h-8 rounded-full object-cover shrink-0" />
-        {% else %}
-        <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+        {% endif %}
+        <div class="{% if au %}hidden {% endif %}w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
           {{ sidebar_name[0].upper() }}
         </div>
-        {% endif %}
         <div class="nav-label min-w-0 flex-1 overflow-hidden">
           <p class="text-white text-xs font-medium leading-4 line-clamp-2 [overflow-wrap:anywhere]" title="{{ sidebar_name }}">{{ sidebar_name }}</p>
           <p class="text-slate-400 text-xs capitalize">{{ {'superadmin': 'Superadministrador', 'admin': 'Administrador', 'auditor': 'Auditor', 'employee': 'Empleado'}.get(current_user.role, current_user.role) }}</p>

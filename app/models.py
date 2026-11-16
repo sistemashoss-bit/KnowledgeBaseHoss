@@ -227,9 +227,9 @@ class User(Base):
     # Puesto en hoss-api (su rol allá), refrescado en cada login (SSO). Solo se
     # muestra: los permisos aquí salen de `role` (site_role que manda hoss).
     position_name = Column(String(100), nullable=True)
-    # Llave del avatar en Wasabi (bucket hossavatars), provista por hoss-api en el
-    # payload de identidad (SSO). knowledge comparte el mismo Wasabi, así que firma
-    # la URL localmente al renderizar (ver templating._avatar_url).
+    # Solo para el bot (`asset:<archivo>` en app/assets). El avatar del staff vive en
+    # Bunny y su URL sale del corporate_id (storage.get_avatar_url); lo que quede
+    # aquí de cuando hoss-api lo mandaba en el identity se ignora.
     avatar_key = Column(String(500), nullable=True)
     # El puesto en hoss cubre todas las sucursales (access_all_facilities): en un
     # departamento `branch_scoped` gestiona el departamento completo.

@@ -30,8 +30,8 @@ def _comment_json(c: CalendarEventComment, user: User, ev: CalendarEvent, rx: li
         "sticker": c.content if stickers.is_sticker(c.content) else None,
         "author": _display_name(c.user),
         "initials": _initials(c.user),
-        # Firma local (sin red), igual que avatar_url en las plantillas.
-        "avatar_url": storage.get_avatar_signed_url(c.user.avatar_key) if c.user and c.user.avatar_key else None,
+        # CDN de Bunny, igual que avatar_url en las plantillas (404 → iniciales).
+        "avatar_url": storage.get_avatar_url(c.user),
         "created_at": to_local(c.created_at).isoformat(timespec="minutes"),
         "edited": c.edited,
         # Edita solo el autor; borra el autor o el dueño del evento.

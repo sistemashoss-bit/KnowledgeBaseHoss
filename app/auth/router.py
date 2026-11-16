@@ -182,7 +182,6 @@ def profile_page(
 
 # Nombre y avatar son identidad compartida: los administra hoss-api (SSO) y se
 # sincronizan al iniciar sesión (ver provisioning.py). knowledge ya no edita el
-# nombre ni sube avatares; recibe la llave del avatar en el payload de identidad y
-# firma la URL al renderizar. La subida del avatar vive en hoss-api
-# (POST /users/me/avatar).
+# nombre ni sube avatares: el avatar vive en Bunny (sistema/avatars), se cambia
+# desde hoss-front y aquí solo se arma su URL (storage.get_avatar_url).
 

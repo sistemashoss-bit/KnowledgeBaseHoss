@@ -113,19 +113,14 @@ def provision_from_identity(identity: dict, db: Session) -> User:
     name = " ".join(
         p for p in (identity.get("first_name"), identity.get("last_name")) if p
     ) or None
-    # hoss-api es dueño del avatar (SSO): manda la LLAVE de Wasabi en el identity.
-    # knowledge solo la persiste y la refresca en cada login (es lo que muestra para
-    # OTROS usuarios); la URL la firma localmente al renderizar.
-    avatar_key = identity.get("avatar_key")
+    # El avatar ya no viene del identity: vive en Bunny y la URL sale del
+    # corporate_id (storage.get_avatar_url). avatar_key solo lo usa el bot (asset:).
 
     user = db.query(User).filter(User.corporate_id == corporate_id).first()
     if user:
         changed = False
         if name and user.name != name:
             user.name = name
-            changed = True
-        if user.avatar_key != avatar_key:
-            user.avatar_key = avatar_key
             changed = True
         if _sync_org(user, identity, db):
             changed = True
@@ -140,7 +135,6 @@ def provision_from_identity(identity: dict, db: Session) -> User:
         user.corporate_id = corporate_id
         if name and not user.name:
             user.name = name
-        user.avatar_key = avatar_key
         _sync_org(user, identity, db)
         db.commit()
         return user
@@ -151,7 +145,6 @@ def provision_from_identity(identity: dict, db: Session) -> User:
         corporate_id=corporate_id,
         email=identity["email"],
         name=name,
-        avatar_key=avatar_key,
         role=ROLE_EMPLOYEE,
     )
     _sync_org(user, identity, db)

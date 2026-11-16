@@ -5,14 +5,14 @@
 {# Comentario-sticker (mssgs-stickers.com): se ve como imagen y no se edita. #}
 {% set sticker = comment.content | sticker_url %}
 <div id="comment-{{ comment.id }}" class="group flex gap-3 px-4 sm:px-6 py-4" x-data="{ editing: false }">
-  {% if comment.user and comment.user.avatar_key %}
-  <img src="{{ avatar_url(comment.user.avatar_key) }}" alt="" loading="lazy"
+  {% set au = avatar_url(comment.user) %}
+  {% if au %}
+  <img data-avatar src="{{ au }}" alt="" loading="lazy"
        class="w-7 h-7 rounded-full object-cover shrink-0" />
-  {% else %}
-  <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
+  {% endif %}
+  <div class="{% if au %}hidden {% endif %}w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
     {{ (comment.user.name or comment.user.email)[0].upper() if comment.user else "?" }}
   </div>
-  {% endif %}
   <div class="flex-1 min-w-0">
     <div class="flex items-center gap-2 mb-1">
       <span class="text-xs font-medium text-gray-700">

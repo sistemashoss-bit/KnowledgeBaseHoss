@@ -190,16 +190,10 @@ def _mentionify(html, names=None, me: str = "", everyone: bool = True) -> Markup
 templates.env.filters["mentionify"] = _mentionify
 
 
-def _avatar_url(key: str | None) -> str | None:
-    # hoss-api (SSO) es dueño del avatar y manda la LLAVE en el payload de identidad.
-    # Como knowledge comparte el mismo Wasabi/bucket (hossavatars), firma la URL él
-    # mismo al renderizar (fresca, sin cachear URLs que expiran).
-    if not key:
-        return None
-    return _storage.get_avatar_signed_url(key)
-
-
-templates.env.globals["avatar_url"] = _avatar_url
+# avatar_url(user): URL del avatar en el CDN de Bunny (o None). El <img> debe llevar
+# data-avatar y, justo después, las iniciales con `hidden`: si el CDN da 404 (la
+# persona no tiene foto) base.html quita la imagen y muestra las iniciales.
+templates.env.globals["avatar_url"] = _storage.get_avatar_url
 
 
 def _evidence_url(key: str, filename: str) -> str:
@@ -211,7 +205,7 @@ templates.env.globals["evidence_url"] = _evidence_url
 
 def _group_avatar_url(key: str | None) -> str | None:
     # Foto de grupo: sube/gestiona knowledge (bucket de chats), a diferencia del
-    # avatar de usuario (dueño hoss-api, bucket aparte). Ver avatar_url arriba.
+    # avatar de usuario (Bunny, ver avatar_url arriba).
     if not key:
         return None
     return _storage.get_chat_file_url(key, "avatar", inline=True)

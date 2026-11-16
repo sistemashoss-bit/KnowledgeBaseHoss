@@ -61,7 +61,7 @@
              <ul class="space-y-2 min-h-32 max-h-80 overflow-y-auto mb-3" x-show="comments.length">
                 <template x-for="c in comments" :key="c.id">
                   <li class="flex items-start gap-2">
-                    <img x-show="c.avatar_url" :src="c.avatar_url" alt="" loading="lazy" class="w-6 h-6 shrink-0 rounded-full object-cover">
+                    <img x-show="c.avatar_url" :src="c.avatar_url" alt="" loading="lazy" @error="c.avatar_url = null" class="w-6 h-6 shrink-0 rounded-full object-cover">
                     <span x-show="!c.avatar_url" class="w-6 h-6 shrink-0 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold flex items-center justify-center" x-text="c.initials"></span>
                     <div class="flex-1 min-w-0">
                       <p class="text-xs text-gray-500">

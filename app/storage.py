@@ -69,12 +69,7 @@ def delete_file(file_key: str) -> None:
     _client().delete_object(Bucket=settings.wasabi_bucket_name, Key=file_key)
 
 
-# ── Avatar bucket (separate) ──────────────────────────────────────────────────
-# hoss-api es dueño del avatar (SSO) y de la subida (POST /users/me/avatar). knowledge
-# solo recibe la llave en el payload de identidad y firma la URL de lectura localmente
-# (comparte el mismo Wasabi/bucket). Por eso aquí solo queda el presign de lectura.
-
-# Caché de URLs firmadas que se muestran una y otra vez (avatares, imágenes del
+# Caché de URLs firmadas que se muestran una y otra vez (imágenes del
 # chat). Cada firma es una URL distinta (lleva fecha y firma), así que firmar en
 # cada render obliga al navegador a bajar la misma imagen en cada página. Se firma
 # por 1 h y se reutiliza 50 min: la URL que se entrega siempre vale ≥ 10 min más.
@@ -98,17 +93,39 @@ def _stable_url(params: dict) -> str:
     return url
 
 
+# ── Avatares del staff (Bunny, sistema/avatars) ───────────────────────────────
+# Viven en Bunny Storage y se leen del CDN en <cdn>/avatars/<corporate_id>: pública,
+# sin firmar y siempre la última foto (el CDN no cachea). La suben hoss-front y
+# demás apps al Edge Script de avatars; knowledge solo arma la URL. Como no se sabe
+# si la persona tiene foto, quien la muestra cae a iniciales si el CDN responde 404
+# (img[data-avatar] en base.html). El host va por entorno de hoss-api, sin env vars.
+AVATAR_CDN_BY_API = {
+    "api.hoss.com.mx": "https://hoss-avatars-prod-7gdw.b-cdn.net",
+    "api-dev.hoss.com.mx": "https://hoss-avatars-dev-0962.b-cdn.net",
+}
+
 AVATAR_ASSET_PREFIX = "asset:"
 
 
-def get_avatar_signed_url(key: str) -> str:
-    """URL firmada (local, sin red) y estable por 50 min; ver _stable_url.
+def _avatar_cdn() -> str | None:
+    from urllib.parse import urlparse
+    return AVATAR_CDN_BY_API.get(urlparse(settings.hoss_api_url).netloc)
 
-    Una llave `asset:<archivo>` apunta a app/assets en vez de Wasabi: la usa el
-    usuario bot (MAX, con la mascota del widget), que no tiene avatar en hoss."""
+
+def get_avatar_url(user) -> str | None:
+    """URL del avatar de un usuario, o None (se muestran iniciales).
+
+    Una llave `asset:<archivo>` apunta a app/assets: la usa el usuario bot (MAX,
+    con la mascota del widget), que no es staff de hoss."""
+    if user is None:
+        return None
+    key = user.avatar_key or ""
     if key.startswith(AVATAR_ASSET_PREFIX):
         return f"/assets/{key.removeprefix(AVATAR_ASSET_PREFIX)}"
-    return _stable_url({"Bucket": settings.wasabi_avatar_bucket_name, "Key": key})
+    cdn = _avatar_cdn()
+    if not cdn or not user.corporate_id:
+        return None
+    return f"{cdn}/avatars/{str(user.corporate_id).lower()}"
 
 
 # ── Evidence bucket ───────────────────────────────────────────────────────────

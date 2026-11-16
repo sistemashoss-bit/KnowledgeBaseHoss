@@ -160,7 +160,7 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
         last_msg = last_msgs.get(conv.id)
         unread = unread_map.get(conv.id, 0)
 
-        other_avatar_key = None
+        other_avatar_url = None
         is_online = False
         last_seen_text = None
         if conv.type == CONV_DIRECT:
@@ -168,7 +168,7 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 (p.user for p in conv.participants if str(p.user_id) != str(user.id)), None
             )
             if other:
-                other_avatar_key = other.avatar_key
+                other_avatar_url = storage.get_avatar_url(other)
                 last_seen_text = _format_last_seen(lastseen_map.get(str(other.id)))
                 is_online = last_seen_text == "En línea"
 
@@ -179,7 +179,7 @@ def _user_conversations(user: User, db: Session) -> list[dict]:
                 "unread": unread,
                 "display_name": _conv_display_name(conv, user),
                 "avatar": _conv_avatar(conv, user),
-                "other_avatar_key": other_avatar_key,
+                "other_avatar_url": other_avatar_url,
                 "last_at": last_msg.created_at if last_msg else conv.created_at,
                 "is_online": is_online,
                 "last_seen_text": last_seen_text,
@@ -216,9 +216,10 @@ def _messages_anyone(user: User) -> bool:
 
 
 def _contact_avatars(users: list[User]) -> dict[str, str]:
-    """URL firmada del avatar de cada persona de las listas (DM, nuevo grupo,
-    agregar miembros): una firma por persona aunque salga en las tres."""
-    return {str(u.id): storage.get_avatar_signed_url(u.avatar_key) for u in users if u.avatar_key}
+    """URL del avatar de cada persona de las listas (DM, nuevo grupo, agregar
+    miembros); sin entrada si no hay URL posible (iniciales)."""
+    urls = {str(u.id): storage.get_avatar_url(u) for u in users}
+    return {k: v for k, v in urls.items() if v}
 
 
 def _can_create_group(user: User) -> bool:

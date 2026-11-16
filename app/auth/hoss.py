@@ -6,15 +6,14 @@ JWT_SECRET de hoss: valida credenciales (login propio) o el token del handoff
 
     POST /sso/verify-auth {email, password, site}
     GET  /sso/identity?site=<site>   (Authorization: Bearer <sesion_hoss>)
-        -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, avatar_key, avatar_url}
+        -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, ...}
 
     Responden 403 si el usuario no tiene el permiso del sitio en hoss
     (knowledge_access) o, en verify-auth, si lo niegan las políticas de identidad
     (dispositivo, horario); se levanta AccessDenied.
 
-    avatar_key: llave del avatar en Wasabi (bucket compartido hossavatars); knowledge
-    firma la URL localmente. avatar_url: URL ya firmada por hoss (para consumidores que
-    no comparten el mismo Wasabi).
+    El avatar no se toma del identity: vive en Bunny (sistema/avatars) y su URL sale
+    del corporate_id (storage.get_avatar_url).
 """
 import time
 
