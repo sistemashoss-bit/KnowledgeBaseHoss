@@ -10,7 +10,6 @@ from app.auth.utils import generate_csrf_token
 from app.database import get_db
 from app import audit
 from app.auth import hoss
-from app import valkey_client as vk
 from app.models import Zone, Branch
 from app.templating import templates
 
@@ -54,9 +53,9 @@ def list_zones(
         b = request.query_params.get("b", "0")
         sync_msg = ("ok", f"Sincronización completada: {z} zona(s) y {b} sucursal(es) actualizadas.")
     elif sync_status == "notoken":
-        sync_msg = ("error", "No hay sesión de hoss activa. Vuelve a entrar por el acceso de hoss y reintenta.")
+        sync_msg = ("error", "No se obtuvo el token de sitio de hoss (falta HOSS_SSO_CLIENT_SECRET o hoss no respondió).")
     elif sync_status == "error":
-        sync_msg = ("error", "No se pudo sincronizar con hoss (sesión expirada o servicio no disponible).")
+        sync_msg = ("error", "No se pudo sincronizar con hoss (servicio no disponible).")
 
     return templates.TemplateResponse(
         request,
@@ -150,19 +149,11 @@ async def sync_org(
     current_user=Depends(require_superadmin),
 ):
 
-    # Con client_secret: token de sitio. Sin él: el token guardado en el handoff.
-    site_token = await hoss.site_token()
-    token = site_token or vk.get_hoss_token(current_user.id)
+    token = await hoss.site_token()
     if not token:
         return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
 
-    try:
-        data = await hoss.fetch_org(token)
-    except hoss.TokenRejected:
-        if not site_token:
-            vk.delete_hoss_token(current_user.id)
-            return RedirectResponse("/org/zones/?sync=notoken", status_code=302)
-        data = None
+    data = await hoss.fetch_org(token)
     if data is None:
         return RedirectResponse("/org/zones/?sync=error", status_code=302)
 

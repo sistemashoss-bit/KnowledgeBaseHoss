@@ -15,7 +15,6 @@ from app.auth.utils import (
     set_auth_cookie,
 )
 from app.database import get_db
-from app import valkey_client as vk
 from app.assistant import limits as assistant_limits
 from app.config import settings
 from app.auth import hoss
@@ -133,8 +132,7 @@ async def sso_handoff(
     next: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
-    """Recibe un código de un solo uso de hoss-api (o, de clientes viejos, el
-    accessToken de hoss-front), lo valida contra hoss-api y abre sesión local. Sin segundo
+    """Recibe un código de un solo uso de hoss-api, lo canjea y abre sesión local. Sin segundo
     login. El token viaja por POST para no filtrarlo en URL/referer/logs.
     `next`: ruta a la que ir al entrar (p. ej. la de una notificación de la
     extensión); sin ella, a /documents/."""
@@ -148,12 +146,6 @@ async def sso_handoff(
     user = provision_from_identity(identity, db)
     if not user or not user.is_active:
         return _access_page(request, "Tu usuario está desactivado.", 403)
-
-    # Solo con el JWT de un cliente viejo y sin client_secret: se guarda para
-    # sincronizar el catálogo. Con client_secret la sincronización usa el token de
-    # sitio y knowledge no guarda tokens de usuario.
-    if not token.startswith(hoss.CODE_PREFIX) and not settings.hoss_sso_client_secret:
-        vk.store_hoss_token(user.id, token)
 
     return _open_session(user, identity, _safe_next(next))
 

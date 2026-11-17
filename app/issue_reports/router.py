@@ -5,9 +5,9 @@ adjunta un screenshot y aquí nace un ticket (incidencia, o solicitud si Jev ve
 que pide una mejora) clasificado por Jev.
 
 Autenticación, en este orden:
-- `Authorization: Bearer <código ssoc_… o accessToken de hoss-api>` desde otras
-  apps: el código se canjea en hoss-api (/sso/redeem) y el JWT (clientes viejos)
-  se valida con /sso/identity; se aprovisiona al usuario como en el SSO.
+- `Authorization: Bearer <código ssoc_…>` desde otras apps: el código se canjea
+  en hoss-api (/sso/redeem); se aprovisiona al usuario como en el SSO. Un JWT de
+  staff se rechaza (401).
   Requiere que el puesto tenga acceso a knowledge en hoss.
 - Cookie de sesión de knowledge, cuando el widget corre dentro de knowledge
   (mismo origen; el CSRF global aplica como en cualquier POST).

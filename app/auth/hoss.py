@@ -1,11 +1,12 @@
 """Cliente de SSO contra hoss-api.
 
 hoss-api es el proveedor de identidad del staff. knowledge NO comparte el
-JWT_SECRET de hoss: valida credenciales (login propio) o el token del handoff
-(extensión / hoss-front) preguntándole a hoss-api por la identidad.
+JWT_SECRET de hoss: valida credenciales (login propio) o canjea el código de un
+solo uso del handoff (extensión / hoss-front). Nunca recibe ni guarda el JWT de
+staff.
 
     POST /sso/verify-auth {email, password, site}
-    GET  /sso/identity?site=<site>   (Authorization: Bearer <sesion_hoss>)
+    POST /sso/redeem {code, site, client_secret}
         -> {corporate_id, id, email, first_name, last_name, role, site_role, position, department, ...}
 
     Responden 403 si el usuario no tiene el permiso del sitio en hoss
@@ -33,11 +34,6 @@ class AccessDenied(Exception):
     def __init__(self, message: str | None = None):
         super().__init__(message)
         self.message = message
-
-
-class TokenRejected(Exception):
-    """hoss-api rechazó el token guardado (401): venció, se cerró la sesión o se
-    revocó. Ya no sirve; quien llama debe borrarlo y pedir entrar de nuevo."""
 
 
 class RateLimited(Exception):
@@ -81,41 +77,13 @@ async def verify_auth(email: str, password: str) -> dict | None:
     return identity
 
 
-async def introspect_session(session_token: str) -> dict | None:
-    """Valida una sesión existente de hoss (cookie de .hoss.com.mx) y devuelve
-    la identidad. Base del SSO silencioso:
-    knowledge NO valida el token localmente, se lo pregunta a hoss-api.
-    Levanta AccessDenied si el usuario no tiene acceso al sitio."""
-    base = settings.hoss_api_url.rstrip("/")
-    if not base or not session_token:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{base}/sso/identity",
-                params={"site": SITE},
-                headers={"Authorization": f"Bearer {session_token}"},
-            )
-            if resp.status_code == 403:
-                raise AccessDenied()
-            if resp.status_code != 200:
-                return None
-            identity = resp.json()
-            if not identity.get("corporate_id"):
-                return None
-            return identity
-    except httpx.HTTPError:
-        return None
-
-
 async def fetch_org(session_token: str) -> dict | None:
-    """Trae regiones y sucursales de hoss usando el token del staff (SSO).
+    """Trae regiones y sucursales de hoss con el token de sitio (catalog:read).
 
     hoss es el dueño del catálogo; cada región/sucursal trae su UUID global
     (global_region_id / global_branch_id) con el que knowledge las mapea.
     Devuelve {"regions": [...], "branches": [...]} o None si algo falla
-    (token expirado/insuficiente, hoss no disponible, etc.).
+    (token vencido, hoss no disponible, etc.).
     """
     base = settings.hoss_api_url.rstrip("/")
     if not base or not session_token:
@@ -131,8 +99,6 @@ async def fetch_org(session_token: str) -> dict | None:
                 headers=headers,
                 params={"page": 1, "pageSize": 10000},
             )
-            if 401 in (regions_resp.status_code, branches_resp.status_code):
-                raise TokenRejected()
             if regions_resp.status_code != 200 or branches_resp.status_code != 200:
                 return None
 
@@ -152,9 +118,9 @@ async def fetch_org(session_token: str) -> dict | None:
 
 
 async def fetch_departments(session_token: str) -> list | None:
-    """Trae los departamentos de hoss con el token del staff (requiere
-    view_departments en hoss). Cada uno trae su global_department_id, con el que
-    knowledge lo mapea. None si algo falla (token expirado/sin permiso, hoss caído)."""
+    """Trae los departamentos de hoss con el token de sitio (catalog:read). Cada uno
+    trae su global_department_id, con el que knowledge lo mapea. None si algo falla
+    (token vencido, hoss caído)."""
     base = settings.hoss_api_url.rstrip("/")
     if not base or not session_token:
         return None
@@ -163,8 +129,6 @@ async def fetch_departments(session_token: str) -> list | None:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(f"{base}/departments", headers=headers)
-            if resp.status_code == 401:
-                raise TokenRejected()
             if resp.status_code != 200:
                 return None
             departments = resp.json()
@@ -203,12 +167,12 @@ async def redeem_code(code: str) -> dict | None:
 
 
 async def identity_from_bearer(token: str) -> dict | None:
-    """Identidad a partir de lo que manda hoss-front o la extensión: un código de un
-    solo uso (nuevo) o el JWT de staff (clientes viejos, mientras se publican)."""
+    """Identidad a partir del código de un solo uso que manda hoss-front, la
+    extensión o meta. Cualquier otra cosa (p. ej. un JWT de staff) se rechaza."""
     token = (token or "").strip()
-    if token.startswith(CODE_PREFIX):
-        return await redeem_code(token)
-    return await introspect_session(token)
+    if not token.startswith(CODE_PREFIX):
+        return None
+    return await redeem_code(token)
 
 
 _site_token: dict = {"value": None, "exp": 0.0}
