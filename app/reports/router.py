@@ -387,7 +387,10 @@ def _task_report_scope(current_user, department_id: str, user_id: str, relation:
     """Condiciones de la consulta y estado de los filtros del Resumen de Tareas."""
     if relation not in dict(TASK_USER_RELATIONS):
         relation = "all"
-    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    # El departamento elegido solo acota la lista de usuarios; las tareas se
+    # limitan nada más a los departamentos que el usuario puede ver.
+    _, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    dept_ids, _ = _resolve_scope(current_user, "")
     conds = []
     if dept_ids is not None:
         conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
@@ -401,11 +404,6 @@ def _task_report_scope(current_user, department_id: str, user_id: str, relation:
     departments = _department_options(current_user, db)
 
     subtitle = []
-    dept = next((d for d in departments if str(d.id) == active_dept), None) or (
-        db.get(Department, active_dept) if active_dept else None
-    )
-    if dept:
-        subtitle.append(f"Departamento: {dept.name}")
     for u in dept_users:
         if str(u.id) == active_user:
             subtitle.append(f"Usuario: {u.name or u.email}")
@@ -567,7 +565,10 @@ def _ticket_report_scope(current_user, department_id: str, user_id: str, relatio
     """Condiciones y estado de los filtros del Resumen de Tickets (como el de Tareas)."""
     if relation not in dict(TICKET_USER_RELATIONS):
         relation = "all"
-    dept_ids, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    # El departamento elegido solo acota la lista de usuarios; los tickets se
+    # limitan nada más a los departamentos que el usuario puede ver.
+    _, active_dept, dept_users, active_user = _resolve_filters(current_user, department_id, user_id, db)
+    dept_ids, _ = _resolve_scope(current_user, "")
     conds = []
     if dept_ids is not None:
         conds.append(Ticket.department_id.in_(dept_ids) if dept_ids else Ticket.id == None)  # noqa: E711
@@ -577,11 +578,6 @@ def _ticket_report_scope(current_user, department_id: str, user_id: str, relatio
     departments = _department_options(current_user, db)
 
     subtitle = []
-    dept = next((d for d in departments if str(d.id) == active_dept), None) or (
-        db.get(Department, active_dept) if active_dept else None
-    )
-    if dept:
-        subtitle.append(f"Departamento: {dept.name}")
     for u in dept_users:
         if str(u.id) == active_user:
             subtitle.append(f"Usuario: {u.name or u.email}")

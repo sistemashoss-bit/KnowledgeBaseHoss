@@ -158,9 +158,6 @@
         <p class="text-xs text-gray-400 mt-0.5">{{ subtitle }}</p>
       </div>
       {% if open_tasks %}
-        {% if active_dept %}
-          {{ open_tasks_table(open_tasks[0].tasks) }}
-        {% else %}
         <div class="divide-y divide-gray-100">
           {% for g in open_tasks %}
           <details class="group" {% if open_tasks|length == 1 %}open{% endif %}>
@@ -179,7 +176,6 @@
           </details>
           {% endfor %}
         </div>
-        {% endif %}
       {% else %}
       <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin tareas pendientes ni en progreso.</div>
       {% endif %}

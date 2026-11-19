@@ -147,9 +147,6 @@
         <p class="text-xs text-gray-400 mt-0.5" title="Hora del centro: {{ business_hours_label }}">{{ subtitle }} · SLA en horas laborales; primero los vencidos y por vencer</p>
       </div>
       {% if open_tickets %}
-        {% if active_dept %}
-          {{ open_tickets_table(open_tickets[0].tickets) }}
-        {% else %}
         <div class="divide-y divide-gray-100">
           {% for g in open_tickets %}
           <details class="group" {% if open_tickets|length == 1 %}open{% endif %}>
@@ -169,7 +166,6 @@
           </details>
           {% endfor %}
         </div>
-        {% endif %}
       {% else %}
       <div class="px-4 sm:px-6 py-8 text-center text-sm text-gray-400 italic">Sin tickets abiertos, en atención ni en espera.</div>
       {% endif %}
