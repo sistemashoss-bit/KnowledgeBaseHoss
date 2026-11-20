@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool

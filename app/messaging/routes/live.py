@@ -7,7 +7,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from livekit.api import AccessToken, VideoGrants
 from sqlalchemy.orm import Session
 

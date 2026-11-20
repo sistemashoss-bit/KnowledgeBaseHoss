@@ -14,7 +14,7 @@ import logging
 import time
 
 import httpx
-from jose import jwt
+import jwt
 
 from app.config import settings
 

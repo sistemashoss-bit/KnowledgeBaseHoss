@@ -9,7 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app import audit, images, reactions, storage

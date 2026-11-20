@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user

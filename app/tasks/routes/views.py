@@ -5,7 +5,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy import false, or_
 from sqlalchemy.orm import Session, joinedload
 

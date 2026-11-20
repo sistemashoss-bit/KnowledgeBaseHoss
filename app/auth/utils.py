@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from fastapi import Response
 from itsdangerous import BadSignature, URLSafeSerializer
-from jose import jwt
+import jwt
 
 from app.config import settings
 

@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, Request
 from starlette.requests import HTTPConnection
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy.orm import Session
 
 from app.auth.utils import AUTH_COOKIE, decode_token, verify_csrf_token
