@@ -510,7 +510,7 @@
         </div>
 
         <div id="composer-row" class="flex gap-2 items-end">
-          <!-- Attach button: menú Archivo / Ubicación (script al final del composer) -->
+          <!-- Attach button: menú Archivo / Ubicación / Pizarra / Encuesta (script al final del composer) -->
           <div class="relative shrink-0">
             <button type="button" id="attach-btn" title="Adjuntar" aria-haspopup="menu" aria-expanded="false"
                     class="chat-tool-btn w-9 h-9 flex items-center justify-center rounded-xl disabled:opacity-50">
@@ -543,6 +543,13 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
                 </svg>
                 Nueva pizarra
+              </button>
+              <button type="button" role="menuitem" id="attach-poll"
+                      class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                Encuesta
               </button>
             </div>
             <input id="file-input" type="file" name="files" multiple class="hidden" />
@@ -594,6 +601,8 @@
           </button>
         </div>
       </form>
+      {# Antes de composer.js, que lo busca al cargar (es fixed: no importa dónde quede). #}
+      {% include "messaging/_modal_poll.html" %}
       <script src="{{ asset('messaging/composer.js') }}"></script>
       <p class="text-xs text-gray-300 mt-1.5 ml-1">Enter para enviar · Shift+Enter para nueva línea{% if mention_people %} · @ para mencionar{% endif %}</p>
 

@@ -1,4 +1,4 @@
-// Barra de escribir: envío optimista, menú de adjuntar (archivo, ubicación,
+// Barra de escribir: envío optimista, menú de adjuntar (archivo, ubicación, encuesta,
 // pizarra), arrastrar/pegar archivos, notas de voz y stickers. Se carga justo
 // después de #send-form.
 // Envío optimista: el texto aparece en el feed al instante como "Enviando…"
@@ -77,6 +77,87 @@
       })
       .catch(function (e) { alert('No se pudo crear la pizarra (' + e.message + ').'); })
       .finally(function () { attachBtn.disabled = false; });
+  });
+  // Encuesta (app/polls): modal _modal_poll.html; el servidor deja el mensaje.
+  var pollModal = document.getElementById('modal-poll');
+  var pollForm = document.getElementById('poll-form');
+  var pollOptions = document.getElementById('poll-options');
+  var pollSend = document.getElementById('poll-send');
+  var pollError = document.getElementById('poll-error');
+  var POLL_MAX = 12;
+  function pollFilled() {
+    return Array.prototype.filter.call(pollOptions.querySelectorAll('input'), function (i) { return i.value.trim(); });
+  }
+  function pollCheck() {
+    pollSend.disabled = !pollForm.question.value.trim() || pollFilled().length < 2;
+  }
+  function pollAddOption() {
+    var n = pollOptions.children.length;
+    if (n >= POLL_MAX) return;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.name = 'options';
+    input.maxLength = 150;
+    input.autocomplete = 'off';
+    input.placeholder = 'Opción ' + (n + 1);
+    input.className = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-gray-400';
+    pollOptions.appendChild(input);
+  }
+  // Siempre un campo vacío al final; los vacíos de en medio se quitan al salir de ellos.
+  pollOptions.addEventListener('input', function (e) {
+    if (e.target === pollOptions.lastElementChild && e.target.value.trim()) pollAddOption();
+    pollCheck();
+  });
+  pollOptions.addEventListener('focusout', function (e) {
+    var input = e.target;
+    if (input.value.trim() || input === pollOptions.lastElementChild || pollOptions.children.length <= 2) return;
+    input.remove();
+    Array.prototype.forEach.call(pollOptions.children, function (el, i) { el.placeholder = 'Opción ' + (i + 1); });
+    if (pollOptions.lastElementChild.value.trim()) pollAddOption();
+  });
+  pollForm.question.addEventListener('input', pollCheck);
+  function pollOpen(open) {
+    pollModal.classList.toggle('hidden', !open);
+    if (!open) return;
+    pollForm.reset();
+    pollOptions.innerHTML = '';
+    pollAddOption();
+    pollAddOption();
+    pollError.classList.add('hidden');
+    pollCheck();
+    pollForm.question.focus();
+  }
+  pollModal.querySelector('[data-poll-close]').addEventListener('click', function () { pollOpen(false); });
+  pollModal.addEventListener('click', function (e) { if (e.target === pollModal) pollOpen(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !pollModal.classList.contains('hidden')) pollOpen(false); });
+  document.getElementById('attach-poll').addEventListener('click', function () {
+    menu(false);
+    pollOpen(true);
+  });
+  pollForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    pollSend.disabled = true;
+    pollError.classList.add('hidden');
+    var fd = new FormData();
+    fd.append('question', pollForm.question.value);
+    pollFilled().forEach(function (i) { fd.append('options', i.value); });
+    fd.append('multiple', pollForm.multiple.checked ? 'true' : 'false');
+    fetch(pollForm.dataset.url, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.ok) return;
+        return r.json().catch(function () { return {}; }).then(function (b) {
+          throw new Error(typeof b.detail === 'string' ? b.detail : 'HTTP ' + r.status);
+        });
+      })
+      .then(function () {
+        pollOpen(false);
+        htmx.trigger(document.body, 'refreshFeed');
+      })
+      .catch(function (err) {
+        pollError.textContent = 'No se pudo enviar la encuesta: ' + err.message;
+        pollError.classList.remove('hidden');
+        pollCheck();
+      });
   });
   document.getElementById('attach-location').addEventListener('click', function () {
     menu(false);

@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app import mentions, notification_bus, reactions, storage, valkey_client as vk
+from app import mentions, notification_bus, polls, reactions, storage, valkey_client as vk
 from app.messaging import realtime
 from app.assistant import bot as assistant_bot, proposals as assistant_proposals
 from app.permissions import branch_user_ids, manager_scope
@@ -17,6 +17,7 @@ from app.models import (
     ConversationParticipant,
     Message,
     MessageReaction,
+    Poll,
     User,
     ROLE_SUPERADMIN,
     ROLE_ADMIN,
@@ -315,6 +316,7 @@ _FEED_LOAD = (
     joinedload(Message.sender),
     joinedload(Message.attachments),
     joinedload(Message.reply_to).joinedload(Message.sender),
+    joinedload(Message.poll).selectinload(Poll.options),
 )
 
 
@@ -396,6 +398,7 @@ def _feed_context(
         "current_user": current_user,
         "is_group": is_group,
         "reactions": reactions.summarize(db, MessageReaction, [m.id for m in messages], current_user.id),
+        "poll_results": polls.summarize(db, [m.poll for m in messages if m.poll_id and not m.deleted_at], current_user.id),
         "mention_names": names,
         "mention_me": mentions.display_name(current_user),
         "mention_everyone": is_group,

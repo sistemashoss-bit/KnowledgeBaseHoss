@@ -16,7 +16,7 @@ from sqlalchemy import and_
 from app.config import settings
 from app.database import SessionLocal
 from app.models import AuditLog, Message, MessageAttachment, SearchLog, Task, TASK_DONE
-from app import storage, valkey_client as vk
+from app import polls, storage, valkey_client as vk
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,9 @@ def purge_old_messages(days: int) -> tuple[int, int]:
         # Explicit ordered delete (attachments → messages) so it works whether or
         # not the DB-level ON DELETE CASCADE migration has been applied.
         old_msg_ids = db.query(Message.id).filter(expired)
+        # Encuestas de esos mensajes (el vínculo está en messages.poll_id, así
+        # que borrar el mensaje no las borra): se juntan antes y se borran después.
+        poll_ids = [pid for (pid,) in db.query(Message.poll_id).filter(expired, Message.poll_id.isnot(None))]
         db.query(MessageAttachment).filter(
             MessageAttachment.message_id.in_(old_msg_ids)
         ).delete(synchronize_session=False)
@@ -58,6 +61,7 @@ def purge_old_messages(days: int) -> tuple[int, int]:
             .filter(expired)
             .delete(synchronize_session=False)
         )
+        polls.delete(db, poll_ids)
         db.commit()
         return messages_deleted, files_deleted
     finally:

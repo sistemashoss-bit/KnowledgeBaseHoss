@@ -1114,10 +1114,14 @@ class Message(Base):
     pinned_at = Column(DateTime, nullable=True)
     pinned_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     forwarded = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Encuesta del mensaje (app/polls). El vínculo vive aquí y no en `polls`
+    # para que otras secciones enganchen encuestas con su propia columna.
+    poll_id = Column(UUID(as_uuid=True), ForeignKey("polls.id", ondelete="SET NULL"), nullable=True, unique=True)
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="sent_messages", foreign_keys=[sender_id])
     reply_to = relationship("Message", remote_side=[id], foreign_keys=[reply_to_id])
+    poll = relationship("Poll", foreign_keys=[poll_id])
     attachments = relationship(
         "MessageAttachment", back_populates="message", order_by="MessageAttachment.created_at",
         passive_deletes=True,
@@ -1156,6 +1160,48 @@ class MessageAttachment(Base):
     @property
     def is_audio(self) -> bool:
         return (self.content_type or "").startswith("audio/")
+
+
+# ── Encuestas (app/polls) ────────────────────────────────────────────────────
+# Módulo independiente: no sabe en qué sección vive cada encuesta. Quien la
+# usa (hoy el chat: Message.poll_id) guarda el vínculo y decide quién vota.
+
+class Poll(Base):
+    __tablename__ = "polls"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    question = Column(String(300), nullable=False)
+    multiple = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Sin uso en el chat (como WhatsApp, no se cierra); para secciones que lo necesiten.
+    closed_at = Column(DateTime, nullable=True)
+
+    options = relationship(
+        "PollOption", back_populates="poll", order_by="PollOption.position",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class PollOption(Base):
+    __tablename__ = "poll_options"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    poll_id = Column(UUID(as_uuid=True), ForeignKey("polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(String(150), nullable=False)
+    position = Column(Integer, nullable=False)
+
+    poll = relationship("Poll", back_populates="options")
+
+
+class PollVote(Base):
+    __tablename__ = "poll_votes"
+    __table_args__ = (Index("ix_poll_votes_poll_user", "poll_id", "user_id"),)
+
+    option_id = Column(UUID(as_uuid=True), ForeignKey("poll_options.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    poll_id = Column(UUID(as_uuid=True), ForeignKey("polls.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ── Asistente MAX: propuestas de acción ──────────────────────────────────────

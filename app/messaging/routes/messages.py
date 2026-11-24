@@ -1,4 +1,4 @@
-"""Acciones sobre un mensaje: reacciones, editar, eliminar, fijar, reenviar y búsqueda."""
+"""Acciones sobre un mensaje: reacciones, votar encuestas, editar, eliminar, fijar, reenviar y búsqueda."""
 
 import logging
 import uuid
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
 from app.database import get_db
-from app import audit, reactions, storage
+from app import audit, polls, reactions, storage
 from app.messaging import realtime, stickers
 from app.models import Message, MessageAttachment, MessageReaction, User
 from app.templating import _msg_preview, _osm_location, templates
@@ -83,11 +83,34 @@ def toggle_message_reaction(
     return _render_message_reactions(request, msg, current_user, db)
 
 
+@router.post("/{conv_id}/messages/{msg_id}/poll/vote", response_class=HTMLResponse)
+def vote_message_poll(
+    conv_id: str,
+    msg_id: str,
+    request: Request,
+    option_id: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Votar (o quitar el voto) en la encuesta de un mensaje. Devuelve la fila y
+    avisa a los demás con `msgupdate` para que la vuelvan a pedir."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    msg = _message_in_conv(conv_id, msg_id, db)
+    if msg.deleted_at or not msg.poll_id:
+        raise HTTPException(404)
+    polls.vote(db, msg.poll_id, option_id, current_user.id)
+    realtime.notify_message_update(conv_id, msg.id)
+    return _render_message(request, msg, current_user, db)
+
+
 def _editable(msg: Message) -> bool:
-    """Solo texto propio (no sticker/ubicación, solo-adjuntos ni reenviado), dentro de EDIT_WINDOW."""
+    """Solo texto propio (no sticker/ubicación/encuesta, solo-adjuntos ni reenviado), dentro de EDIT_WINDOW."""
     return (
         not msg.deleted_at
         and not msg.forwarded
+        and not msg.poll_id
         and bool(msg.content)
         and not stickers.STICKER_URL_RE.fullmatch(msg.content)
         and not _osm_location(msg.content)
@@ -152,7 +175,7 @@ def delete_message(
     current_user=Depends(get_current_user),
 ):
     """Eliminar para todos: queda "Mensaje eliminado"; se borran texto, adjuntos
-    (también de Wasabi) y reacciones."""
+    (también de Wasabi), reacciones y la encuesta con sus votos."""
     msg = _own_message(conv_id, msg_id, current_user, db)
     if not msg.deleted_at:
         names = [a.filename for a in msg.attachments]
@@ -163,6 +186,9 @@ def delete_message(
                 logger.warning("delete_message: no se pudo borrar %s", att.file_key, exc_info=True)
         db.query(MessageAttachment).filter(MessageAttachment.message_id == msg.id).delete(synchronize_session=False)
         db.query(MessageReaction).filter(MessageReaction.message_id == msg.id).delete(synchronize_session=False)
+        poll_id, msg.poll_id = msg.poll_id, None
+        db.flush()
+        polls.delete(db, [poll_id])
         msg.content = ""
         msg.deleted_at = datetime.utcnow()
         msg.pinned_at = msg.pinned_by = None
@@ -284,7 +310,8 @@ def forward_message(
 ):
     """Reenvía una copia (marcada "Reenviado") a uno o varios chats o personas.
     Los adjuntos se copian en Wasabi con llave propia: el reenvío no depende del
-    original (que puede eliminarse o purgarse)."""
+    original (que puede eliminarse o purgarse). Una encuesta llega como encuesta
+    nueva, sin votos (como en WhatsApp)."""
     if not current_user:
         raise HTTPException(401)
     _require_participant(conv_id, current_user, db)
@@ -303,6 +330,9 @@ def forward_message(
             id=uuid.uuid4(), conversation_id=target_conv, sender_id=current_user.id,
             content=src.content, forwarded=True,
         )
+        if src.poll:
+            msg.poll_id = polls.clone(db, src.poll, current_user.id).id
+            db.flush()
         db.add(msg)
         db.flush()
         for att in src.attachments:

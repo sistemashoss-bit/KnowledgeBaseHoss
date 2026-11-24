@@ -673,7 +673,12 @@
       }
       function run(root) { (root || document).querySelectorAll('time[data-fmt]').forEach(fmtLocal); }
       document.addEventListener('DOMContentLoaded', function() { run(); });
-      document.addEventListener('htmx:afterSwap', function(e) { run(e.detail.target); });
+      // Con hx-swap="outerHTML" el target es el nodo viejo, ya fuera del DOM:
+      // entonces se formatea toda la página (fmtLocal parte del atributo, es idempotente).
+      document.addEventListener('htmx:afterSwap', function(e) {
+        var t = e.detail.target;
+        run(t && t.isConnected ? t : document);
+      });
     })();
   </script>
 

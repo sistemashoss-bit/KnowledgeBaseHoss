@@ -1,4 +1,4 @@
-"""Enviar mensajes (texto, archivos, ubicación, stickers), pizarras y adjuntos."""
+"""Enviar mensajes (texto, archivos, ubicación, stickers), pizarras, encuestas y adjuntos."""
 
 import mimetypes
 import uuid
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user
 from app.database import get_db
-from app import audit, storage, images
+from app import audit, images, polls, storage
 from app.messaging import stickers, transcription
 from app.models import (
     Conversation,
@@ -198,6 +198,39 @@ def create_chat_whiteboard(
         details=f"chat={conv_id} shares={len(active)}",
     )
     return {"ok": True, "url": f"/whiteboards/{board.id}"}
+
+
+@router.post("/{conv_id}/poll")
+def create_chat_poll(
+    conv_id: str,
+    request: Request,
+    question: str = Form(...),
+    options: list[str] = Form(default=[]),
+    multiple: bool = Form(default=False),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Encuesta rápida (app/polls) como mensaje del chat: el texto queda como
+    "📊 Encuesta: <pregunta>" para la lista de chats, avisos y búsqueda."""
+    if not current_user:
+        raise HTTPException(401)
+    _require_participant(conv_id, current_user, db)
+    poll = polls.create(db, question, options, multiple, current_user.id)
+    content = f"📊 Encuesta: {poll.question}"
+    msg = Message(id=uuid.uuid4(), conversation_id=conv_id, sender_id=current_user.id, content=content, poll_id=poll.id)
+    db.flush()
+    db.add(msg)
+    db.flush()
+    _mark_read(conv_id, current_user.id, db)
+    db.commit()
+
+    _after_new_message(conv_id, msg.id, current_user, db, content[:120])
+    audit.log_action(
+        "poll_create", user=current_user, request=request,
+        resource_type="conversation", resource_id=conv_id,
+        details=f"message={msg.id} poll={poll.id} options={len(poll.options)}",
+    )
+    return {"ok": True}
 
 
 @router.get("/{conv_id}/files", response_class=HTMLResponse)
