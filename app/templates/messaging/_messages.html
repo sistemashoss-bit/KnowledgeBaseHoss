@@ -10,8 +10,10 @@
 {% set loc = msg.content | osm_location %}
 {% set sticker = msg.content | sticker_url %}
 {% set board = msg.content | whiteboard_link %}
-{#- Encuesta (app/polls): la tarjeta reemplaza al texto "📊 Encuesta: …" del mensaje. -#}
+{#- Encuesta (app/polls): si el texto es solo "📊 Encuesta: <pregunta>" (polls.MESSAGE_PREFIX)
+    la tarjeta lo reemplaza; si dice otra cosa (respuesta de MAX) va el texto y la tarjeta debajo. -#}
 {% set poll_res = (poll_results.get(msg.poll_id) if poll_results is defined else none) if msg.poll_id and not msg.deleted_at else none %}
+{% set poll_only = poll_res and msg.content == ("📊 Encuesta: " ~ msg.poll.question) %}
 {#- Respuesta de MAX: los documentos que consultó van al final del texto; se
     dibujan como botones bajo la burbuja (como en el widget). -#}
 {% set msg_text, msg_sources = (msg.content | assistant_sources) if (msg.sender and msg.sender.is_bot) else (msg.content, []) %}
@@ -113,13 +115,9 @@
       <span class="ml-auto shrink-0 text-xs text-blue-500">Abrir</span>
     </a>
 
-    {# Encuesta: votar reemplaza la fila completa (y avisa a los demás con msgupdate) #}
-    {% elif poll_res %}
-    {% with poll=msg.poll, pr=poll_res, poll_mine=is_mine,
-            vote_url="/messaging/" ~ msg.conversation_id ~ "/messages/" ~ msg.id ~ "/poll/vote",
-            vote_target="[data-msg-id='" ~ msg.id ~ "']" %}
-    {% include "polls/_card.html" %}
-    {% endwith %}
+    {# Encuesta sola: votar reemplaza la fila completa (y avisa a los demás con msgupdate) #}
+    {% elif poll_only %}
+    {% include "messaging/_poll_card.html" %}
 
     {# Text bubble #}
     {% elif msg.content %}
@@ -144,6 +142,11 @@
       {% endfor %}
     </div>
     {% endif %}
+    {% endif %}
+
+    {# Encuesta bajo el texto (respuesta de MAX) #}
+    {% if poll_res and not poll_only %}
+    <div class="mt-1">{% include "messaging/_poll_card.html" %}</div>
     {% endif %}
 
     {# Attachments #}

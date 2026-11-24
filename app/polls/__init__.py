@@ -20,13 +20,24 @@ QUESTION_MAX = 300
 OPTION_MAX = 150
 
 
+# Texto del mensaje que solo lleva la encuesta (lista de chats, avisos, búsqueda).
+# Si el mensaje dice otra cosa (p. ej. la respuesta de MAX), se dibuja el texto
+# y la tarjeta debajo (messaging/_messages.html compara con este prefijo).
+MESSAGE_PREFIX = "📊 Encuesta: "
+
+
+def message_text(poll: Poll) -> str:
+    return f"{MESSAGE_PREFIX}{poll.question}"
+
+
 def _clean(text: str | None, limit: int) -> str:
     return " ".join((text or "").split())[:limit]
 
 
-def create(db: Session, question: str, options: list[str], multiple: bool, user_id) -> Poll:
-    """Valida y agrega la encuesta a la sesión (sin commit). Las opciones vacías
-    se ignoran y las repetidas (sin distinguir mayúsculas) cuentan una vez."""
+def validate(question: str, options: list[str]) -> tuple[str, list[str]]:
+    """Pregunta y opciones limpias, o HTTPException 422 con el motivo. Las
+    opciones vacías se ignoran y las repetidas (sin distinguir mayúsculas)
+    cuentan una vez."""
     question = _clean(question, QUESTION_MAX)
     if not question:
         raise HTTPException(422, "Escribe la pregunta.")
@@ -40,6 +51,12 @@ def create(db: Session, question: str, options: list[str], multiple: bool, user_
         raise HTTPException(422, f"Agrega al menos {MIN_OPTIONS} opciones distintas.")
     if len(texts) > MAX_OPTIONS:
         raise HTTPException(422, f"Máximo {MAX_OPTIONS} opciones.")
+    return question, texts
+
+
+def create(db: Session, question: str, options: list[str], multiple: bool, user_id) -> Poll:
+    """Valida (validate) y agrega la encuesta a la sesión (sin commit)."""
+    question, texts = validate(question, options)
     poll = Poll(
         id=uuid.uuid4(), question=question, multiple=bool(multiple),
         created_by=user_id, created_at=datetime.utcnow(),

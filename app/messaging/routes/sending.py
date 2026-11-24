@@ -216,7 +216,7 @@ def create_chat_poll(
         raise HTTPException(401)
     _require_participant(conv_id, current_user, db)
     poll = polls.create(db, question, options, multiple, current_user.id)
-    content = f"📊 Encuesta: {poll.question}"
+    content = polls.message_text(poll)
     msg = Message(id=uuid.uuid4(), conversation_id=conv_id, sender_id=current_user.id, content=content, poll_id=poll.id)
     db.flush()
     db.add(msg)

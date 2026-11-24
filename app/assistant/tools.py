@@ -3,6 +3,8 @@
 Las de lectura filtran con lo que ven TODOS los participantes (scope.py). Las de
 acción (`propose_*`) no escriben nada: validan con los permisos de quien invocó
 y dejan una propuesta que se publica como tarjeta para confirmar (proposals.py).
+`create_poll` es la excepción: la encuesta va directo en la respuesta de MAX
+(no asigna trabajo a nadie; si no sirve, quien la pidió la borra).
 """
 import json
 import logging
@@ -16,13 +18,13 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from app import rag
+from app import polls, rag
 from app.assistant import limits
 from app.assistant import scope as scope_lib
 from app.calendar.reminders import to_local
 from app.config import settings
 from app.models import (
-    Conversation, Department, Document, Message, Task, TaskFollowUp, User,
+    Conversation, Department, Document, Message, Poll, Task, TaskFollowUp, User,
     PROPOSAL_FOLLOW_UP, PROPOSAL_TASK, PROPOSAL_TICKET, TASK_DONE, TASK_PRIORITIES, TASK_STATUSES,
     TICKET_INCIDENT, TICKET_KINDS, TICKET_REQUEST,
 )
@@ -57,6 +59,9 @@ class ToolContext:
     # Imágenes generadas en esta invocación (ya en el bucket); se adjuntan a la
     # respuesta de MAX al publicarla.
     images: list[dict] = field(default_factory=list)
+    # Encuesta validada en esta invocación (create_poll); se crea y se adjunta a
+    # la respuesta de MAX al publicarla.
+    polls: list[dict] = field(default_factory=list)
 
     def attachment_ref(self, att) -> str:
         for ref, known in self.attachments.items():
@@ -204,6 +209,25 @@ TOOL_DEFINITIONS = [
         ["kind", "title"],
     ),
     _fn(
+        "create_poll",
+        "Publica una encuesta en el chat junto con tu respuesta (no hace falta confirmarla). Úsala "
+        "solo si te piden crear, hacer o armar una encuesta o votación. Si no dicen las opciones y no "
+        "salen claras de la conversación, pregúntalas en vez de inventarlas.",
+        {
+            "question": {"type": "string", "description": "La pregunta, corta"},
+            "options": {
+                "type": "array", "items": {"type": "string"},
+                "description": f"De {polls.MIN_OPTIONS} a {polls.MAX_OPTIONS} opciones, cortas y distintas",
+            },
+            "multiple": {
+                "type": "boolean",
+                "description": "true si cada persona puede elegir varias opciones (p. ej. días en que puede); "
+                               "false si debe elegir solo una (por defecto)",
+            },
+        },
+        ["question", "options"],
+    ),
+    _fn(
         "transcribe_audio",
         "Transcribe un audio o nota de voz del chat para saber qué dice (tú no puedes escucharlo). "
         "La transcripción queda visible en el chat debajo del audio. Cuesta una consulta extra a quien "
@@ -292,7 +316,53 @@ def generate_image(ctx: ToolContext, prompt: str, aspect_ratio: str = "1:1") -> 
             "note": "La imagen se adjunta a tu respuesta; no pongas enlaces ni la describas de más."}
 
 
+def create_poll(ctx: ToolContext, question: str, options: list | None = None, multiple: bool = False) -> dict:
+    """Valida la encuesta; agent._post_reply la crea con la respuesta (una por respuesta)."""
+    if ctx.scope.conversation is None:
+        return {"error": "Solo puedo crear encuestas dentro de un chat."}
+    if ctx.polls:
+        return {"error": "Ya preparé una encuesta en esta respuesta; si hace falta otra, pídemela en otro mensaje."}
+    if not isinstance(options, list):
+        return {"error": "Las opciones deben ser una lista."}
+    try:
+        question, texts = polls.validate(question, [str(o) for o in options])
+    except HTTPException as exc:
+        return {"error": exc.detail}
+    ctx.polls.append({"question": question, "options": texts, "multiple": bool(multiple)})
+    return {"ok": True, "note": "La encuesta aparece debajo de tu respuesta; no repitas las opciones, "
+                                "solo di en una frase que ya está lista para votar."}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+POLL_VOTERS_SHOWN = 10
+
+
+def poll_texts(db: Session, messages: list[Message]) -> dict:
+    """{message_id: "[encuesta (…): opción (n: nombres), …]"} con los resultados
+    actuales, para que MAX los lea en el historial. Los votos los ve todo el chat."""
+    with_poll = [m for m in messages if m.poll_id and not m.deleted_at]
+    if not with_poll:
+        return {}
+    loaded = {p.id: p for p in db.query(Poll).options(joinedload(Poll.options))
+              .filter(Poll.id.in_([m.poll_id for m in with_poll]))}
+    results = polls.summarize(db, list(loaded.values()), None)
+    out = {}
+    for m in with_poll:
+        poll, res = loaded.get(m.poll_id), results.get(m.poll_id)
+        if poll is None or res is None:
+            continue
+        items = []
+        for o in res["options"]:
+            names = o["voters"][:POLL_VOTERS_SHOWN]
+            more = len(o["voters"]) - len(names)
+            who = (": " + ", ".join(names) + (f" y {more} más" if more else "")) if names else ""
+            items.append(f"{o['text']} ({o['count']}{who})")
+        kind = "varias respuestas" if poll.multiple else "una respuesta"
+        state = "cerrada" if poll.closed_at else f"{res['voters']} votaron"
+        out[m.id] = f"[encuesta «{poll.question}», {kind}, {state}: {'; '.join(items)}]"
+    return out
+
 
 def _clip(text: str | None, limit: int) -> str:
     text = (text or "").strip()
@@ -467,11 +537,13 @@ def get_conversation(ctx: ToolContext, conversation_id: str, limit: int = 20) ->
         .filter(Message.conversation_id == cid, Message.deleted_at.is_(None))
         .order_by(Message.created_at.desc()).limit(limit).all()
     )
+    poll_info = poll_texts(ctx.db, rows)
     return {
         "conversation": conv.name if conv and conv.name else "chat",
         "messages": [
             {"sender": _user_label(m.sender), "at": f"{to_local(m.created_at):%Y-%m-%d %H:%M}",
-             "text": _clip(m.content, MESSAGE_CHARS)}
+             "text": _clip(m.content, MESSAGE_CHARS),
+             **({"poll": poll_info[m.id]} if m.id in poll_info else {})}
             for m in reversed(rows)
         ],
     }
@@ -735,6 +807,7 @@ _IMPLEMENTATIONS = {
     "propose_task": propose_task,
     "propose_followup": propose_followup,
     "propose_ticket": propose_ticket,
+    "create_poll": create_poll,
     "transcribe_audio": transcribe_audio,
     "generate_image": generate_image,
 }

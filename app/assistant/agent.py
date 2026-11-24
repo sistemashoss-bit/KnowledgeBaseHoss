@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import joinedload
 
-from app import audit, mentions, rag
+from app import audit, mentions, polls, rag
 from app.assistant import bot as bot_lib
 from app.assistant import limits, proposals
 from app.assistant import scope as scope_lib
@@ -65,6 +65,31 @@ _IMAGE_NUDGE = (
 _CLAIMS_IMAGE = re.compile(r"imagen.{0,60}adjunt|adjunt.{0,60}imagen|aqu[ií] (est[aá]|tienes) (la|tu) imagen", re.I | re.S)
 # Etiquetas de adjuntos que el modelo copia del historial: nunca adjuntan nada.
 _ATTACHMENT_TAG = re.compile(r"\s*\[adjuntos:[^\]]*\]")
+# El mensaje pide crear una encuesta: la primera vuelta obliga a usar una herramienta.
+# Solo verbos de pedir (imperativo, infinitivo, "hagamos"): una pregunta de lectura
+# ("¿qué ganó la otra encuesta?", "¿quién creó la encuesta?") no fuerza nada.
+# "Otra/nueva encuesta" sin verbo solo cuenta al inicio del mensaje.
+_POLL_NOUN = r"(encuestas?|votaci[oó]n(es)?|sondeos?)"
+_ASKS_POLL = re.compile(
+    r"\b(haz|hazme|haces|hagan|hagamos|hacemos|hacer|hacerla|crea|creas|cr[eé]ame|creen|creemos|crear|arma|[aá]rmame|armen"
+    r"|armas|armemos|armar|abre|abres|abran|abramos|abrir|lanza|lanzas|lancen|lanzar|pon|ponme|pones|pongan|poner|organiza|organizas|organicen"
+    r"|organizar|publica|publicas|publiquen|publicar|prepara|preparas|prep[aá]rame|preparen|preparar|genera|generas|generar|necesitamos"
+    r"|queremos|quiero|ocupo|ocupamos)\b"
+    r".{0,60}\b" + _POLL_NOUN + r"\b"
+    r"|^\s*(@\S+[\s,:]*)?(otra|nueva|una)\s+" + _POLL_NOUN + r"\b",
+    re.I | re.S,
+)
+# La respuesta dice que dejó una encuesta.
+_CLAIMS_POLL = re.compile(
+    r"(cre[eé]|dej[eé]|publiqu[eé]|abr[ií]|arm[eé]|hice|aqu[ií] (est[aá]|tienes)).{0,40}encuesta"
+    r"|encuesta.{0,40}(lista|abajo|cread|publicad)",
+    re.I | re.S,
+)
+_POLL_NUDGE = (
+    "Aviso del sistema: no se creó ninguna encuesta. Solo aparece si llamas create_poll y no "
+    "devuelve error. Llámala ahora si te la pidieron; si faltan las opciones, pregúntalas sin decir "
+    "que ya la creaste."
+)
 _WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
@@ -84,7 +109,7 @@ def _run_safe(conv_id, message_id, invoker_id) -> None:
 
 def _post_reply(
     db, scope: scope_lib.Scope, source: Message, text: str, proposal_items: list[dict] | None = None,
-    sources: list[dict] | None = None, images: list[dict] | None = None,
+    sources: list[dict] | None = None, images: list[dict] | None = None, poll_items: list[dict] | None = None,
 ):
     """Publica la respuesta de MAX (respondiendo al mensaje que lo invocó y
     mencionando a quien preguntó) con sus propuestas y los documentos que
@@ -105,6 +130,13 @@ def _post_reply(
     text += assistant_sources_block(sources or [])
 
     msg = Message(conversation_id=scope.conversation.id, sender_id=bot.id, content=text, reply_to_id=source.id)
+    poll = None
+    if poll_items:
+        # Ya validada (tools.create_poll); va en la misma respuesta, debajo del texto.
+        item = poll_items[0]
+        poll = polls.create(db, item["question"], item["options"], item["multiple"], scope.invoker.id)
+        db.flush()
+        msg.poll_id = poll.id
     db.add(msg)
     db.flush()
     if proposal_items:
@@ -117,6 +149,12 @@ def _post_reply(
         ))
     db.commit()
     _after_new_message(scope.conversation.id, msg.id, bot, db, text[:120], text)
+    if poll is not None:
+        audit.log_action(
+            "assistant_poll", user=scope.invoker,
+            resource_type="conversation", resource_id=str(scope.conversation.id), resource_name=scope.conversation.name,
+            details=f"message={msg.id} poll={poll.id} options={len(poll.options)} question={poll.question[:200]}",
+        )
     return msg
 
 
@@ -182,12 +220,15 @@ def _history(db, scope: scope_lib.Scope, source: Message, ctx: tools.ToolContext
         .limit(settings.assistant_context_messages)
         .all()
     )
+    poll_info = tools.poll_texts(db, rows)
     lines = []
     for m in reversed(rows):
         who = mentions.display_name(m.sender) if m.sender else "?"
         text = (m.content or "").strip()
         if len(text) > 600:
             text = text[:599] + "…"
+        if m.id in poll_info:
+            text = f"{text} {poll_info[m.id]}"
         files = _attachments_text(ctx, m)
         text = f"{text} {files}".strip() if files else (text or "(adjunto)")
         lines.append(f"[{to_local(m.created_at):%d/%m %H:%M}] {who}: {text}")
@@ -266,6 +307,12 @@ Reglas:
   marcas o logotipos de terceros y a retratar a personas reales reconocibles (incluidas
   las del chat); explica por qué en una frase. Tras generarla responde breve: la imagen
   ya va adjunta.
+- Encuestas: las del chat aparecen como [encuesta «pregunta», …: opción (votos: nombres); …]
+  con los resultados actuales; úsalos si preguntan qué va ganando o quién falta por votar
+  (compara con la lista de participantes; tú no votas). Si {invoker} te pide crear una
+  encuesta o votación, llama create_poll: se publica debajo de tu respuesta sin
+  confirmación. Si no dio las opciones y no salen claras de la conversación, pregúntalas.
+  multiple=true solo si cada quien puede elegir varias (p. ej. días disponibles).
 - Si una herramienta devuelve un error, explica ese mismo motivo en palabras simples
   (no inventes otro).
 - Responde en español, breve y en texto plano: sin markdown (nada de #, ** ni tablas);
@@ -308,6 +355,9 @@ def _question(db, source: Message, ctx: tools.ToolContext) -> str:
     body = (quoted.content or "").strip()
     if len(body) > 600:
         body = body[:599] + "…"
+    poll_info = tools.poll_texts(db, [quoted])
+    if quoted.id in poll_info:
+        body = f"{body} {poll_info[quoted.id]}"
     files = _attachments_text(ctx, quoted)
     body = f"«{body}» {files}".strip() if body else (files or "«(adjunto)»")
     return f"[Responde a {who}: {body}]\n{text}"
@@ -347,9 +397,10 @@ def _run_llm(
         {"role": "user", "content": question},
     ]
     used = 0
-    nudged = image_nudged = False
+    nudged = image_nudged = poll_nudged = False
     asks_image = bool(_ASKS_IMAGE.search(question or ""))
-    force = asks_image or bool(_ASKS_ACTION.search(question or ""))
+    asks_poll = bool(_ASKS_POLL.search(question or ""))
+    force = asks_image or asks_poll or bool(_ASKS_ACTION.search(question or ""))
     for _ in range(settings.assistant_max_tool_calls + 3):
         final = used >= settings.assistant_max_tool_calls
         completion = llm.chat.completions.create(
@@ -371,6 +422,16 @@ def _run_llm(
                 image_nudged = True  # sin forzar: puede negarse (persona real, marca…)
                 messages.append({"role": "assistant", "content": text})
                 messages.append({"role": "user", "content": _IMAGE_NUDGE})
+                continue
+            if (
+                not poll_nudged and not final and not ctx.polls and "create_poll" not in ctx.errors
+                and _CLAIMS_POLL.search(text or "")
+            ):
+                # Dijo que dejó la encuesta sin llamar create_poll: se le pide una vez.
+                logger.info("assistant claimed a poll without create_poll: %r", text[:200])
+                poll_nudged = True
+                messages.append({"role": "assistant", "content": text})
+                messages.append({"role": "user", "content": _POLL_NUDGE})
                 continue
             if not _claims_missing_proposal(ctx, text):
                 return text
@@ -456,11 +517,12 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
         if not answer:
             answer = (
                 "Dejé la propuesta para que la confirmes." if ctx.proposals
+                else "Aquí está la encuesta." if ctx.polls
                 else "Aquí está la imagen." if ctx.images
                 else "No encontré cómo ayudarte con eso. ¿Me lo puedes decir de otra forma?"
             )
         sources = [{"id": doc_id, "title": title} for doc_id, title in list(ctx.sources.items())[:MAX_SOURCES]]
-        _post_reply(db, scope, source, answer, ctx.proposals, sources, ctx.images)
+        _post_reply(db, scope, source, answer, ctx.proposals, sources, ctx.images, ctx.polls)
         _log_images(scope, conv_id, ctx)
 
         audit.log_search(source.content or "", user=scope.invoker, result_count=len(ctx.calls), search_type="assistant")
@@ -468,7 +530,7 @@ def handle_invocation(conv_id, message_id, invoker_id) -> None:
             "assistant_invoke", user=scope.invoker,
             resource_type="conversation", resource_id=str(conv_id), resource_name=scope.conversation.name,
             details=(
-                f"tools={','.join(ctx.calls) or '-'} proposals={len(ctx.proposals)}"
+                f"tools={','.join(ctx.calls) or '-'} proposals={len(ctx.proposals)} polls={len(ctx.polls)}"
                 + (f" errors={','.join(ctx.errors)}" if ctx.errors else "")
             ),
         )

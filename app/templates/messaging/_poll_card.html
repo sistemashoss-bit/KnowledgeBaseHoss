@@ -1,0 +1,6 @@
+{#- Tarjeta de la encuesta de un mensaje del chat (la incluye _messages.html con msg, poll_res, is_mine). -#}
+{% with poll=msg.poll, pr=poll_res, poll_mine=is_mine,
+        vote_url="/messaging/" ~ msg.conversation_id ~ "/messages/" ~ msg.id ~ "/poll/vote",
+        vote_target="[data-msg-id='" ~ msg.id ~ "']" %}
+{% include "polls/_card.html" %}
+{% endwith %}
