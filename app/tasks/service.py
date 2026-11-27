@@ -41,19 +41,22 @@ def _tasks_query(user: User, db: Session, include_archived: bool = True, *, audi
         joinedload(Task.tags).joinedload(TaskTagAssignment.tag),
     )
     if user.role != ROLE_SUPERADMIN and not (audit and user.role == ROLE_AUDITOR):
-        conditions = [
-            Task.created_by == user.id,
-            Task.assigned_to == user.id,
-        ]
-        if user.department_id:
-            conditions.append(Task.department_id == user.department_id)
-        granted = granted_department_ids(user)
-        if granted:
-            conditions.append(Task.department_id.in_(granted))
-        q = q.filter(or_(*conditions))
+        q = q.filter(or_(*_scope_conditions(user)))
     if not include_archived:
         q = q.filter(Task.archived_at.is_(None))
     return q
+
+
+def _scope_conditions(user: User) -> list:
+    """Su alcance propio: las que creó, las que tiene asignadas y las de su
+    departamento y de sus accesos extra. Base de _tasks_query y task_view_condition."""
+    conditions = [Task.created_by == user.id, Task.assigned_to == user.id]
+    if user.department_id:
+        conditions.append(Task.department_id == user.department_id)
+    granted = granted_department_ids(user)
+    if granted:
+        conditions.append(Task.department_id.in_(granted))
+    return conditions
 
 
 def _effective_department_id(department_id, assigned_to, db: Session):
@@ -98,19 +101,15 @@ def shared_with_overseen_condition(user: User, db: Session | None = None):
     return Task.id.in_(select(TaskShare.task_id).join(User, User.id == TaskShare.user_id).where(in_scope))
 
 
-def _is_shared_with_overseen(user: User, task_id, db: Session) -> bool:
-    cond = shared_with_overseen_condition(user, db)
-    return cond is not None and db.query(Task.id).filter(Task.id == task_id, cond).first() is not None
-
-
 def _can_view_task(user: User, task_id, db: Session) -> bool:
     """La ve por su alcance (incluye la lectura de auditor), porque se la
-    compartieron o porque se compartió con alguien que supervisa."""
-    return (
-        _tasks_query(user, db, audit=True).filter(Task.id == task_id).first() is not None
-        or _is_shared_with(user, task_id, db)
-        or _is_shared_with_overseen(user, task_id, db)
-    )
+    compartieron o porque se compartió con alguien que supervisa: la misma regla
+    que task_view_condition, que usan las listas, el resumen y el asistente."""
+    q = db.query(Task.id).filter(Task.id == task_id)
+    cond = task_view_condition(user)
+    if cond is not None:
+        q = q.filter(cond)
+    return q.first() is not None
 
 
 def _can_manage_follow_ups(user: User, task: Task, db: Session) -> bool:
@@ -287,22 +286,16 @@ def _schedule_follow_up(f: TaskFollowUp, start_at: datetime, end_at: datetime, r
 
 
 def task_view_condition(user: User):
-    """Condición SQL de las tareas que `user` puede ver (igual que _can_view_task:
-    su alcance con lectura de auditor, más las compartidas con él o con quien
-    supervisa), o None si las ve todas. Sirve para combinar varias personas con
-    AND (asistente MAX)."""
+    """LA regla de ver tareas (permissions.py, tabla de reglas): su alcance con
+    lectura de auditor, más las compartidas con él o con quien supervisa; None si
+    las ve todas. La usan _can_view_task, el Resumen de Tareas y el asistente MAX
+    (que la combina con AND entre los participantes)."""
     if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         return None
     conditions = [
-        Task.created_by == user.id,
-        Task.assigned_to == user.id,
+        *_scope_conditions(user),
         Task.id.in_(select(TaskShare.task_id).where(TaskShare.user_id == user.id)),
     ]
-    if user.department_id:
-        conditions.append(Task.department_id == user.department_id)
-    granted = granted_department_ids(user)
-    if granted:
-        conditions.append(Task.department_id.in_(granted))
     overseen = shared_with_overseen_condition(user)
     if overseen is not None:
         conditions.append(overseen)

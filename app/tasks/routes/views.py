@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.database import get_db, SessionLocal
-from app import audit, reactions, storage, images
+from app import attachments, audit, comments, reactions, storage
 from app.documents.router import _preview_meta
 from app.messaging import realtime
 from app.permissions import (
@@ -57,11 +57,9 @@ from app.tasks.helpers import (
     _can_comment,
     _can_share,
     _can_update_status,
-    _comment_threads,
     _follow_up_view,
     _notify_shared,
     _parse_date,
-    _safe_filename,
     _share_candidates,
     _status_durations,
     _validated_tag_ids,
@@ -321,24 +319,8 @@ def create_task(
         db.add(TaskTagAssignment(task_id=task.id, tag_id=tid))
     shared_ids = _add_shares(task, shared_with, current_user, db)
 
-    for f in evidences:
-        if not f.filename:
-            continue
-        content, filename, ctype = images.optimize_image(
-            f.file.read(), f.filename, f.content_type or "application/octet-stream",
-        )
-        safe = _safe_filename(filename)
-        key = f"tasks/{task.id}/{uuid.uuid4()}_{safe}"
-        storage.upload_evidence(key, content, ctype)
-        db.add(TaskEvidence(
-            id=uuid.uuid4(),
-            task_id=task.id,
-            uploaded_by=current_user.id,
-            filename=filename,
-            file_key=key,
-            content_type=ctype,
-            file_size=len(content),
-        ))
+    for f in attachments.store_uploads(f"tasks/{task.id}", evidences):
+        db.add(TaskEvidence(id=uuid.uuid4(), task_id=task.id, uploaded_by=current_user.id, **f))
 
     db.commit()
     task_service.notify_task_created(task, current_user)
@@ -445,7 +427,7 @@ def task_detail(
             "can_approve": _can_approve_task(current_user, task),
             "can_participate": can_participate,
             "can_comment": _can_comment(current_user, task_id, db),
-            "comment_threads": _comment_threads(task.comments),
+            "comment_threads": comments.threads(task.comments),
             # Consulta agrupada aparte: otro joinedload multiplicaría las filas de la de arriba.
             "comment_reactions": reactions.summarize(
                 db, TaskCommentReaction, [c.id for c in task.comments], current_user.id,

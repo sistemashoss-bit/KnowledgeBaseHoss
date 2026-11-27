@@ -1,3 +1,26 @@
+"""Quién ve qué en knowledge. Cada recurso tiene UNA regla de lectura; toda
+pantalla que lo liste o lo muestre (lista, detalle, reportes, exportación,
+buscador, asistente MAX) la usa en lugar de filtrar por su cuenta. La regla a
+veces existe en dos formas que deben decir lo mismo (SQL o OpenSearch para
+listas, Python para un objeto ya cargado): si cambias una, cambia la otra.
+
+| Recurso | Regla (lista / objeto) | Quién lo ve |
+|---|---|---|
+| Ticket | tickets.service.visible_condition / can_view | solicitante, asignado, departamento receptor y quien lo supervisa; con categoría (Comercial) solo solicitante, asignado, departamento del paso mientras no tenga asignado y a quien se avisó del SLA. Superadmin y auditor, todos. Usan: /tickets, /reports/tickets y su exportación. |
+| Tarea | tasks.service.task_view_condition / _can_view_task | creador, asignado, su departamento y accesos extra, compartidas con él o con alguien que supervisa. Superadmin y auditor (lectura), todas. Usan: detalle, comentarios, evidencias, /reports/tasks, MAX. Las listas por pestaña (_tasks_query) parten del mismo alcance (_scope_conditions). |
+| Proyecto | visible_projects_filter / visible_projects_query | creador, su departamento, su sucursal, accesos extra y, en un departamento por sucursal, las sucursales y zonas que cubre. |
+| Documento | build_access_filter (OpenSearch) / can_access_document | público y "empleados" para todos; "custom" para las personas elegidas y quien supervisa su departamento; carpetas compartidas. |
+| Capacitación | visible_trainings_filter / can_access_training | "empleados" todos; "departamento" ese departamento y accesos extra; "custom" personas elegidas y quien supervisa. |
+| Evento de calendario | calendar.helpers._visible_event con calendar_members_query | dueño, compartidos y quien puede agregar el calendario del dueño (admin en su alcance, accesos extra). |
+| Pizarra | whiteboards.router._access | dueño, compartidas, su departamento y accesos extra. |
+
+Excepciones a propósito (el contenedor manda): el detalle de un proyecto lista
+todas sus tareas, y el calendario muestra las tareas de las personas cuyo
+calendario puedes ver, aunque la tarea no pase task_view_condition.
+
+Los conteos del tablero (/reports/) agregan por departamento sin pasar por estas
+reglas: dan números, no títulos.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -307,32 +330,6 @@ def can_manage_user(actor: "User", target: "User") -> bool:
         branch_ids = managed_branch_ids(actor)
         return branch_ids is None or target.branch_id in branch_ids
     return False
-
-
-def visible_tasks_query(user: "User", db):
-    """SQLAlchemy query for tasks visible to this user, with eager loads."""
-    from sqlalchemy import or_
-    from sqlalchemy.orm import joinedload
-    from app.models import Task, ROLE_SUPERADMIN, ROLE_AUDITOR
-
-    q = db.query(Task).options(
-        joinedload(Task.assignee),
-        joinedload(Task.created_by_user),
-        joinedload(Task.department),
-        joinedload(Task.projects),
-    )
-    if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
-        return q
-    conditions = [
-        Task.created_by == user.id,
-        Task.assigned_to == user.id,
-    ]
-    if user.department_id:
-        conditions.append(Task.department_id == user.department_id)
-    granted = granted_department_ids(user)
-    if granted:
-        conditions.append(Task.department_id.in_(granted))
-    return q.filter(or_(*conditions))
 
 
 def can_manage_doc_dict(user: "User | None", doc_dict: dict) -> bool:

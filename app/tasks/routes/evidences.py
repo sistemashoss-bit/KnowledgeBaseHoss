@@ -8,14 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
 from app.database import get_db
-from app import audit, storage, images
+from app import attachments, audit, storage
 from app.messaging import realtime
 from app.models import Task, TaskEvidence
 from app.tasks.service import _can_edit_task, _can_view_task, _tasks_query
-from app.tasks.helpers import (
-    _followers,
-    _safe_filename,
-)
+from app.tasks.helpers import _followers
 
 router = APIRouter()
 
@@ -30,57 +27,42 @@ def upload_evidences(
 ):
     if not current_user:
         raise HTTPException(401)
-
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(404)
-    if not _tasks_query(current_user, db).filter(Task.id == task_id).first():
+    task = _task_or_404(task_id, db)
+    if not _tasks_query(current_user, db).filter(Task.id == task.id).first():
         raise HTTPException(403)
 
     storage.check_upload_sizes(*files)
-
-    for f in files:
-        if not f.filename:
-            continue
-        content, filename, ctype = images.optimize_image(
-            f.file.read(), f.filename, f.content_type or "application/octet-stream",
-        )
-        safe = _safe_filename(filename)
-        key = f"tasks/{task_id}/{uuid.uuid4()}_{safe}"
-        storage.upload_evidence(key, content, ctype)
-        db.add(TaskEvidence(
-            id=uuid.uuid4(),
-            task_id=task.id,
-            uploaded_by=current_user.id,
-            filename=filename,
-            file_key=key,
-            content_type=ctype,
-            file_size=len(content),
-        ))
+    stored = attachments.store_uploads(f"tasks/{task.id}", files)
+    for f in stored:
+        db.add(TaskEvidence(id=uuid.uuid4(), task_id=task.id, uploaded_by=current_user.id, **f))
     db.commit()
-    uploaded = [f.filename for f in files if f.filename]
+    uploaded = [f["filename"] for f in stored]
     if uploaded:
-        realtime.notify_task(task_id)
-    task_obj = db.query(Task).filter(Task.id == task_id).first()
+        realtime.notify_task(task.id)
     audit.log_action(
         "evidence_upload", user=current_user, request=request,
-        resource_type="task", resource_id=task_id,
-        resource_name=task_obj.title if task_obj else task_id,
+        resource_type="task", resource_id=task.id, resource_name=task.title,
         details=f"files={len(uploaded)} names={','.join(uploaded[:5])}",
     )
     # Notifica al asignado y al creador (menos a quien sube), solo si hubo archivos.
     if uploaded:
         actor = current_user.name or current_user.email
-        for uid in _followers(task):
-            if uid and str(uid) != str(current_user.id):
-                realtime.notify_user(
-                    uid,
-                    title=f"{actor} subió evidencia",
-                    body=task.title,
-                    url=f"/tasks/{task_id}",
-                    kind="task_evidence",
-                )
-    return RedirectResponse(f"/tasks/{task_id}", status_code=302)
+        ids = [uid for uid in _followers(task) if uid and str(uid) != str(current_user.id)]
+        if ids:
+            realtime.notify_users(
+                ids, title=f"{actor} subió evidencia", body=task.title, url=f"/tasks/{task.id}", kind="task_evidence",
+            )
+    return RedirectResponse(f"/tasks/{task.id}", status_code=302)
+
+
+def _task_or_404(task_id: str, db: Session) -> Task:
+    try:
+        task = db.get(Task, uuid.UUID(str(task_id)))
+    except ValueError:
+        task = None
+    if not task:
+        raise HTTPException(404)
+    return task
 
 
 @router.post("/{task_id}/evidences/{evidence_id}/delete")
@@ -93,32 +75,19 @@ def delete_evidence(
 ):
     if not current_user:
         raise HTTPException(401)
-
-    ev = db.query(TaskEvidence).filter(
-        TaskEvidence.id == evidence_id,
-        TaskEvidence.task_id == task_id,
-    ).first()
-    if not ev:
-        raise HTTPException(404)
-
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = _task_or_404(task_id, db)
+    ev = attachments.get_or_404(db, TaskEvidence, TaskEvidence.task_id, task.id, evidence_id)
     is_uploader = str(ev.uploaded_by) == str(current_user.id)
     if not is_uploader and not _can_edit_task(current_user, task, db):
         raise HTTPException(403)
-
-    filename = ev.filename
-    try:
-        storage.delete_evidence(ev.file_key)
-    except Exception:
-        pass
-    db.delete(ev)
+    filename = attachments.remove(ev, db)
     db.commit()
-    realtime.notify_task(task_id)
+    realtime.notify_task(task.id)
     audit.log_action(
         "evidence_delete", user=current_user, request=request,
-        resource_type="task", resource_id=task_id, resource_name=filename,
+        resource_type="task", resource_id=task.id, resource_name=filename,
     )
-    return RedirectResponse(f"/tasks/{task_id}", status_code=302)
+    return RedirectResponse(f"/tasks/{task.id}", status_code=302)
 
 
 @router.get("/{task_id}/evidences/{evidence_id}/download")
@@ -131,16 +100,8 @@ def download_evidence(
 ):
     if not current_user:
         raise HTTPException(401)
-    if not _can_view_task(current_user, task_id, db):
+    task = _task_or_404(task_id, db)
+    if not _can_view_task(current_user, task.id, db):
         raise HTTPException(403)
-
-    ev = db.query(TaskEvidence).filter(
-        TaskEvidence.id == evidence_id,
-        TaskEvidence.task_id == task_id,
-    ).first()
-    if not ev:
-        raise HTTPException(404)
-
-    url = storage.get_evidence_url(ev.file_key, ev.filename, inline=inline)
-    from fastapi.responses import RedirectResponse as RR
-    return RR(url, status_code=302)
+    ev = attachments.get_or_404(db, TaskEvidence, TaskEvidence.task_id, task.id, evidence_id)
+    return attachments.download(ev, inline)

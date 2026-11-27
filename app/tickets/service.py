@@ -324,15 +324,11 @@ def add_evidence(
     t: Ticket, user: User, content: bytes, filename: str, content_type: str, db: Session,
 ) -> TicketEvidence:
     """Sube el archivo al bucket de evidencias y lo registra (sin commit)."""
-    import re
-    from app import storage
+    from app import attachments
 
-    safe = re.sub(r"[^\w.\-]", "_", filename)[:200] or "file"
-    key = f"tickets/{t.id}/{uuid.uuid4()}_{safe}"
-    storage.upload_evidence(key, content, content_type)
     ev = TicketEvidence(
-        id=uuid.uuid4(), ticket_id=t.id, uploaded_by=user.id, filename=filename,
-        file_key=key, content_type=content_type, file_size=len(content),
+        id=uuid.uuid4(), ticket_id=t.id, uploaded_by=user.id,
+        **attachments.store(f"tickets/{t.id}", content, filename, content_type),
     )
     db.add(ev)
     return ev

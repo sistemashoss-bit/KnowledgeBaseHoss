@@ -87,33 +87,6 @@
         <p><span class="text-xs text-gray-400">Le toca a</span> <span class="font-medium text-gray-800">{{ step_info.label }}</span></p>
         {% endif %}
       </div>
-      {% if ticket.escalations %}
-      <details class="px-4 sm:px-6 py-3 border-b border-gray-100 text-sm">
-        <summary class="cursor-pointer text-xs font-medium text-gray-500">Escalamientos ({{ ticket.escalations | length }})</summary>
-        <table class="w-full mt-2 text-xs">
-          <thead class="text-gray-400">
-            <tr>
-              <th class="text-left font-medium py-1 pr-3">Fecha</th>
-              <th class="text-left font-medium py-1 pr-3">Paso</th>
-              <th class="text-left font-medium py-1 pr-3">Pasó a</th>
-              <th class="text-left font-medium py-1 pr-3">Motivo</th>
-              <th class="text-left font-medium py-1">Quién</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100 text-gray-700">
-            {% for e in ticket.escalations %}
-            <tr>
-              <td class="py-1 pr-3 whitespace-nowrap"><time datetime="{{ e.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</time></td>
-              <td class="py-1 pr-3 whitespace-nowrap">{{ e.from_position or "—" }} → {{ e.to_position }}</td>
-              <td class="py-1 pr-3">{{ (e.to_user.name or e.to_user.email) if e.to_user else (e.to_department.name if e.to_department else "—") }}</td>
-              <td class="py-1 pr-3">{{ e.note or "—" }}</td>
-              <td class="py-1">{{ (e.actor.name or e.actor.email) if e.actor else "—" }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </details>
-      {% endif %}
       {% if ticket.sla_alerts %}
       <details class="px-4 sm:px-6 py-3 border-b border-gray-100 text-sm">
         <summary class="cursor-pointer text-xs font-medium text-gray-500">Avisos de SLA vencido ({{ ticket.sla_alerts | length }})</summary>
@@ -392,7 +365,11 @@
           <time datetime="{{ h.changed_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime" class="text-gray-400">{{ h.changed_at.strftime('%d/%m/%Y %H:%M') }}</time>
           {% if h.from_status %}{{ tk.status_badge(h.from_status) }} →{% endif %}
           {{ tk.status_badge(h.to_status) }}
+          {% if h.to_position %}
+          <span class="text-gray-700">Escaló del paso {{ h.from_position }} al {{ h.to_position }}: {{ (h.to_user.name or h.to_user.email) if h.to_user else (h.to_department.name if h.to_department else "—") }}</span>
+          {% endif %}
           <span>{{ h.changed_by_user.name or h.changed_by_user.email if h.changed_by_user else "" }}</span>
+          {% if h.note %}<span class="basis-full text-gray-600">{{ h.note }}</span>{% endif %}
         </li>
         {% endfor %}
       </ol>

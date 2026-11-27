@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     STEP_DEPARTMENT, STEP_DIRECT_BOSS, STEP_USER, TICKET_OPEN, Ticket, TicketCategory, TicketCategoryStep,
-    TicketEscalation, TicketStatusHistory, User,
+    TicketStatusHistory, User,
 )
 from app.tickets.hierarchy import pick_direct_boss
 
@@ -100,38 +100,30 @@ def has_next_step(t: Ticket) -> bool:
 
 
 def escalate(
-    t: Ticket, db: Session, *, reason: str, actor: User | None = None, note: str | None = None,
-    when: datetime | None = None,
-) -> TicketEscalation | None:
-    """Pasa el ticket al siguiente paso que se pueda resolver (sin commit) y deja el
-    registro. None si ya no hay paso. Vuelve a "Abierto": el nuevo responsable no ha
-    empezado. Quien lo tenía deja de verlo (regla de visibilidad con categoría)."""
+    t: Ticket, db: Session, *, actor: User | None = None, note: str | None = None, when: datetime | None = None,
+) -> TicketStatusHistory | None:
+    """Pasa el ticket al siguiente paso que se pueda resolver (sin commit) y lo deja
+    en el historial de estados. None si ya no hay paso. Vuelve a "Abierto": el nuevo
+    responsable no ha empezado. Quien lo tenía deja de verlo (regla de visibilidad)."""
     if not t.category or t.step_position is None:
         return None
     resolved = resolve_step(t.category, t.requester, db, after=t.step_position)
     if not resolved:
         return None
     when = when or datetime.utcnow()
-    esc = TicketEscalation(
-        id=uuid.uuid4(), ticket_id=t.id,
+    entry = TicketStatusHistory(
+        id=uuid.uuid4(), ticket_id=t.id, from_status=t.status, to_status=TICKET_OPEN,
+        changed_by=actor.id if actor else None, changed_at=when,
         from_position=t.step_position, to_position=resolved.step.position,
-        from_department_id=t.department_id, to_department_id=resolved.department_id,
-        from_user_id=t.assigned_to, to_user_id=resolved.assigned_to,
-        reason=reason, note=(note or "").strip()[:2000] or None,
-        actor_id=actor.id if actor else None, created_at=when,
+        to_department_id=resolved.department_id, to_user_id=resolved.assigned_to,
+        note=(note or "").strip()[:2000] or None,
     )
-    db.add(esc)
+    db.add(entry)
     apply_step(t, t.category, resolved, when=when)
-    if t.status != TICKET_OPEN:
-        old = t.status
-        t.status = TICKET_OPEN
-        t.resolved_at = None
-        t.closed_at = None
-        db.add(TicketStatusHistory(
-            id=uuid.uuid4(), ticket_id=t.id, from_status=old, to_status=TICKET_OPEN,
-            changed_by=actor.id if actor else None, changed_at=when,
-        ))
-    return esc
+    t.status = TICKET_OPEN
+    t.resolved_at = None
+    t.closed_at = None
+    return entry
 
 
 def escalation_recipients(t: Ticket, db: Session) -> list:

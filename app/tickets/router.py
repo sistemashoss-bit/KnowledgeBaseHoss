@@ -2,7 +2,8 @@
 
 Se identifican por su folio (`Ticket.number`), que es lo que va en la URL:
 /tickets/1024. Comentarios (hilos, stickers, reacciones) y evidencias reutilizan
-las plantillas de tareas con `comment_base`/`ev_base` apuntando aquí.
+las plantillas de tareas con `comment_base`/`ev_base` apuntando aquí, y la
+lógica común de app/comments.py y app/attachments.py.
 """
 import uuid
 from datetime import datetime
@@ -13,22 +14,21 @@ from jwt import PyJWTError as JWTError
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app import audit, images, reactions, storage
+from app import attachments, audit, comments, reactions, storage
 from app.auth.deps import get_current_user
 from app.auth.utils import decode_token, generate_csrf_token
 from app.config import settings
 from app.database import SessionLocal, get_db
-from app.messaging import realtime, stickers
+from app.messaging import realtime
 from app.models import (
     Department, Ticket, TicketCategory, TicketCategoryStep, TicketComment, TicketCommentReaction,
-    TicketEscalation, TicketEvidence, TicketSlaAlert, TicketSlaPolicy, TicketStatusHistory, User,
-    ALERT_DEPARTMENT, ALERT_TARGETS, ESCALATION_MANUAL, STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
+    TicketEvidence, TicketSlaAlert, TicketSlaPolicy, TicketStatusHistory, User,
+    ALERT_DEPARTMENT, ALERT_TARGETS, STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
     PRIORITY_MEDIUM, ROLE_AUDITOR, ROLE_SUPERADMIN, TASK_PRIORITIES,
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_KINDS, TICKET_RESOLVED, TICKET_STATUSES,
 )
 from app.permissions import managed_department_ids, overseen_department_ids
 from app.tasks.business_hours import business_hours_label
-from app.tasks.router import _comment_threads
 from app.templating import templates
 from app.tickets import service as svc
 from app.tickets.categories import (
@@ -86,16 +86,10 @@ def _actor(user: User) -> str:
 
 
 def _save_files(t: Ticket, user: User, files: list[UploadFile], db: Session) -> list[str]:
-    names = []
-    for f in files:
-        if not f or not f.filename:
-            continue
-        content, filename, ctype = images.optimize_image(
-            f.file.read(), f.filename, f.content_type or "application/octet-stream",
-        )
-        svc.add_evidence(t, user, content, filename, ctype, db)
-        names.append(filename)
-    return names
+    stored = attachments.store_uploads(f"tickets/{t.id}", files)
+    for f in stored:
+        db.add(TicketEvidence(id=uuid.uuid4(), ticket_id=t.id, uploaded_by=user.id, **f))
+    return [f["filename"] for f in stored]
 
 
 # ── Lista ─────────────────────────────────────────────────────────────────────
@@ -569,10 +563,8 @@ def ticket_detail(
             selectinload(Ticket.comments).joinedload(TicketComment.user),
             selectinload(Ticket.evidences).joinedload(TicketEvidence.uploader),
             selectinload(Ticket.status_history).joinedload(TicketStatusHistory.changed_by_user),
-            selectinload(Ticket.escalations).joinedload(TicketEscalation.to_department),
-            selectinload(Ticket.escalations).joinedload(TicketEscalation.to_user),
-            selectinload(Ticket.escalations).joinedload(TicketEscalation.from_user),
-            selectinload(Ticket.escalations).joinedload(TicketEscalation.actor),
+            selectinload(Ticket.status_history).joinedload(TicketStatusHistory.to_department),
+            selectinload(Ticket.status_history).joinedload(TicketStatusHistory.to_user),
             selectinload(Ticket.sla_alerts).joinedload(TicketSlaAlert.user),
         )
         .filter(Ticket.number == number).first()
@@ -611,7 +603,7 @@ def ticket_detail(
         "allowed_statuses": svc.allowed_statuses(user, t),
         "assignable_users": svc.assignable_users(t, db) if can_attend else [],
         "departments": db.query(Department).order_by(Department.name).all() if can_attend else [],
-        "comment_threads": _comment_threads(t.comments),
+        "comment_threads": comments.threads(t.comments),
         "comment_reactions": reactions.summarize(
             db, TicketCommentReaction, [c.id for c in t.comments], user.id,
         ),
@@ -734,7 +726,7 @@ def escalate_ticket(
         raise HTTPException(400, "El ticket ya está resuelto o cerrado")
     if not note.strip():
         raise HTTPException(400, "Escribe por qué lo escalas")
-    esc = escalate(t, db, reason=ESCALATION_MANUAL, actor=user, note=note)
+    esc = escalate(t, db, actor=user, note=note)
     if not esc:
         raise HTTPException(400, "Ya no hay más pasos a los que escalarlo")
     db.commit()
@@ -910,15 +902,7 @@ def upload_evidences(
 
 
 def _evidence(t: Ticket, evidence_id: str, db: Session) -> TicketEvidence:
-    try:
-        ev = db.query(TicketEvidence).filter(
-            TicketEvidence.id == uuid.UUID(evidence_id), TicketEvidence.ticket_id == t.id,
-        ).first()
-    except ValueError:
-        ev = None
-    if not ev:
-        raise HTTPException(404)
-    return ev
+    return attachments.get_or_404(db, TicketEvidence, TicketEvidence.ticket_id, t.id, evidence_id)
 
 
 @router.post("/{number:int}/evidences/{evidence_id}/delete")
@@ -934,12 +918,7 @@ def delete_evidence(
     ev = _evidence(t, evidence_id, db)
     if str(ev.uploaded_by) != str(user.id) and not svc.can_manage(user, t):
         raise HTTPException(403)
-    try:
-        storage.delete_evidence(ev.file_key)
-    except Exception:
-        pass
-    filename = ev.filename
-    db.delete(ev)
+    filename = attachments.remove(ev, db)
     db.commit()
     realtime.notify_ticket(t.id)
     audit.log_action(
@@ -959,22 +938,13 @@ def download_evidence(
 ):
     user = _require_user(current_user)
     t = _get(number, db, user)
-    ev = _evidence(t, evidence_id, db)
-    return RedirectResponse(storage.get_evidence_url(ev.file_key, ev.filename, inline=inline), status_code=302)
+    return attachments.download(_evidence(t, evidence_id, db), inline)
 
 
 # ── Comentarios ───────────────────────────────────────────────────────────────
 
 def _comment(t: Ticket, comment_id: str, db: Session) -> TicketComment:
-    try:
-        c = db.query(TicketComment).filter(
-            TicketComment.id == uuid.UUID(comment_id), TicketComment.ticket_id == t.id,
-        ).first()
-    except ValueError:
-        c = None
-    if not c:
-        raise HTTPException(404)
-    return c
+    return comments.get_or_404(db, TicketComment, TicketComment.ticket_id, t.id, comment_id)
 
 
 def _comment_ctx(t: Ticket, user: User, **extra) -> dict:
@@ -1002,34 +972,18 @@ def add_comment(
     t = _get(number, db, user)
     if not svc.can_comment(user, t):
         raise HTTPException(403)
-    parent = _comment(t, parent_id, db) if parent_id else None
-    if parent and parent.parent_id:
-        parent = db.get(TicketComment, parent.parent_id) or parent
-
-    content = stickers.require_url(sticker) if sticker else content.strip()
-    if not content:
-        raise HTTPException(400, "El comentario no puede quedar vacío")
-    comment = TicketComment(
-        id=uuid.uuid4(), ticket_id=t.id, user_id=user.id,
-        parent_id=parent.id if parent else None, content=content,
-    )
-    db.add(comment)
+    parent = comments.thread_root(db, TicketComment, _comment(t, parent_id, db) if parent_id else None)
+    content = comments.clean(content, sticker)
+    comment = comments.create(db, TicketComment, user, content, parent, ticket_id=t.id)
     svc.mark_responded(t, user)
     t.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(comment)
     comment.user = user
 
-    url = f"{_url(t)}#comment-{comment.id}"
-    replied_to = parent.user_id if parent and parent.user_id != user.id else None
-    if replied_to:
-        realtime.notify_user(
-            replied_to, title=f"{_actor(user)} respondió a tu comentario", body=_label(t), url=url,
-            kind="ticket_comment",
-        )
-    _notify(
-        svc.followers(t, db) - {replied_to}, user, f"{_actor(user)} comentó en un ticket", t,
-        "ticket_comment", url=url,
+    comments.notify(
+        user, svc.followers(t, db), parent=parent, title=f"{_actor(user)} comentó en un ticket",
+        body=_label(t), url=f"{_url(t)}#comment-{comment.id}", kind="ticket_comment",
     )
     realtime.notify_ticket(t.id)
     audit.log_action(
@@ -1056,15 +1010,7 @@ def edit_comment(
     user = _require_user(current_user)
     t = _get(number, db, user)
     comment = _comment(t, comment_id, db)
-    if str(comment.user_id) != str(user.id):
-        raise HTTPException(403)
-    if stickers.is_sticker(comment.content):
-        raise HTTPException(400, "Un sticker no se puede editar")
-    content = content.strip()
-    if not content:
-        raise HTTPException(400, "El comentario no puede quedar vacío")
-    comment.content = content
-    comment.edited = True
+    comments.edit(comment, user, content)
     db.commit()
     db.refresh(comment)
     realtime.notify_ticket(t.id)
@@ -1093,14 +1039,10 @@ def delete_comment(
 
 
 def _render_reactions(request: Request, t: Ticket, comment: TicketComment, user: User, db: Session):
-    summary = reactions.summarize(db, TicketCommentReaction, [comment.id], user.id)
-    return templates.TemplateResponse(request, "_reactions.html", {
-        "rx_id": comment.id,
-        "rx_list": summary.get(comment.id, []),
-        "rx_url": f"{_url(t)}/comments/{comment.id}/reactions",
-        "rx_class": "mt-1.5",
-        "rx_readonly": not svc.can_comment(user, t),
-    })
+    return comments.reactions_block(
+        request, db, TicketCommentReaction, comment, user,
+        url=f"{_url(t)}/comments/{comment.id}/reactions", readonly=not svc.can_comment(user, t),
+    )
 
 
 @router.get("/{number:int}/comments/{comment_id}/reactions", response_class=HTMLResponse)

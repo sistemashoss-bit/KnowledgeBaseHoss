@@ -66,8 +66,6 @@ STEP_DIRECT_BOSS = "direct_boss"   # jefe directo de quien reporta (app/tickets/
 STEP_DEPARTMENT = "department"     # un departamento; lo toma alguien de ahí
 STEP_USER = "user"                 # una persona específica
 STEP_TARGETS = [STEP_DIRECT_BOSS, STEP_DEPARTMENT, STEP_USER]
-# Por qué cambió de paso: hoy solo a mano (botón Escalar).
-ESCALATION_MANUAL = "manual"
 # A quién avisar si se vence el SLA del paso.
 ALERT_BOSS = "boss"
 ALERT_DEPARTMENT = "department"
@@ -836,9 +834,6 @@ class Ticket(Base):
     assignee = relationship("User", foreign_keys=[assigned_to])
     requester = relationship("User", foreign_keys=[requester_id])
     category = relationship("TicketCategory")
-    escalations = relationship(
-        "TicketEscalation", back_populates="ticket", order_by="TicketEscalation.created_at", passive_deletes=True,
-    )
     sla_alerts = relationship(
         "TicketSlaAlert", back_populates="ticket", order_by="TicketSlaAlert.created_at", passive_deletes=True,
     )
@@ -856,7 +851,9 @@ class Ticket(Base):
 
 class TicketStatusHistory(Base):
     """Cada cambio de estado (el inicial con `from_status` NULL). El SLA de
-    resolución se calcula con estos tramos, sin contar los de "En espera"."""
+    resolución se calcula con estos tramos, sin contar los de "En espera".
+    Escalar un ticket con categoría también deja un registro aquí (vuelve a
+    "Abierto"), con `from_position`/`to_position`, a quién pasó y el motivo."""
     __tablename__ = "ticket_status_history"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -865,9 +862,16 @@ class TicketStatusHistory(Base):
     to_status = Column(String(20), nullable=False)
     changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    from_position = Column(Integer, nullable=True)
+    to_position = Column(Integer, nullable=True)
+    to_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    to_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    note = Column(Text, nullable=True)
 
     ticket = relationship("Ticket", back_populates="status_history")
     changed_by_user = relationship("User", foreign_keys=[changed_by])
+    to_department = relationship("Department", foreign_keys=[to_department_id])
+    to_user = relationship("User", foreign_keys=[to_user_id])
 
 
 class TicketComment(Base):
@@ -987,32 +991,6 @@ class TicketCategoryStep(Base):
     department = relationship("Department", foreign_keys=[department_id])
     user = relationship("User")
     alert_department = relationship("Department", foreign_keys=[alert_department_id])
-
-
-class TicketEscalation(Base):
-    """Cada vez que un ticket con categoría pasa a otro paso."""
-    __tablename__ = "ticket_escalations"
-    __table_args__ = (Index("ix_ticket_escalations_ticket", "ticket_id"),)
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
-    from_position = Column(Integer, nullable=True)
-    to_position = Column(Integer, nullable=False)
-    from_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
-    to_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
-    from_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    to_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    reason = Column(String(20), nullable=False)
-    note = Column(Text, nullable=True)
-    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    ticket = relationship("Ticket", back_populates="escalations")
-    from_department = relationship("Department", foreign_keys=[from_department_id])
-    to_department = relationship("Department", foreign_keys=[to_department_id])
-    from_user = relationship("User", foreign_keys=[from_user_id])
-    to_user = relationship("User", foreign_keys=[to_user_id])
-    actor = relationship("User", foreign_keys=[actor_id])
 
 
 class TicketSlaAlert(Base):

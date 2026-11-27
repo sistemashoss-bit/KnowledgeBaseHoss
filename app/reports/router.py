@@ -17,6 +17,7 @@ from app.models import (
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_IN_PROGRESS, TICKET_OPEN, TICKET_RESOLVED, TICKET_WAITING,
 )
 from app.reports.export import open_tasks_pdf, open_tasks_xlsx, open_tickets_pdf, open_tickets_xlsx
+from app.tasks.service import task_view_condition
 from app.tickets import service as ticket_svc
 from app.calendar.reminders import to_local
 from app.tasks.business_hours import business_hours_label, business_seconds
@@ -394,6 +395,10 @@ def _task_report_scope(current_user, department_id: str, user_id: str, relation:
     conds = []
     if dept_ids is not None:
         conds.append(Task.department_id.in_(dept_ids) if dept_ids else Task.id == None)  # noqa: E711
+    # Además, la regla de ver tareas (permissions.py, tabla de reglas).
+    visible = task_view_condition(current_user)
+    if visible is not None:
+        conds.append(visible)
     if active_user:
         by_relation = {
             "assigned": Task.assigned_to == active_user,

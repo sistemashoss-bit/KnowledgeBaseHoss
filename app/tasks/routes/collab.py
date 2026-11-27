@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user
 from app.auth.utils import generate_csrf_token
 from app.database import get_db
-from app import audit, reactions
-from app.messaging import realtime, stickers
+from app import audit, comments, reactions
+from app.messaging import realtime
 from app.models import Task, TaskComment, TaskCommentReaction, TaskShare, User
 from app.tasks.service import _can_edit_task, _can_view_task
 from app.templating import templates
@@ -103,50 +103,23 @@ def add_comment(
     # Comenta quien participa por su alcance o a quien se la compartieron
     if not _can_comment(current_user, task_id, db):
         raise HTTPException(403)
-    # Respuesta: siempre cuelga del comentario raíz (hilos de un solo nivel).
-    parent = _task_comment(task_id, parent_id, db) if parent_id else None
-    if parent and parent.parent_id:
-        parent = db.get(TaskComment, parent.parent_id) or parent
-
-    # Un sticker se guarda como la URL de su APNG (igual que en el chat).
-    content = stickers.require_url(sticker) if sticker else content.strip()
-    if not content:
-        raise HTTPException(400, "El comentario no puede quedar vacío")
-    comment = TaskComment(
-        id=uuid.uuid4(),
-        task_id=task.id,
-        user_id=current_user.id,
-        parent_id=parent.id if parent else None,
-        content=content,
+    parent = _task_comment(task.id, parent_id, db) if parent_id else None
+    parent = comments.thread_root(db, TaskComment, parent)
+    comment = comments.create(
+        db, TaskComment, current_user, comments.clean(content, sticker), parent, task_id=task.id,
     )
-    db.add(comment)
     db.commit()
     db.refresh(comment)
     comment.user = current_user  # for template rendering
 
-    # Notifica al asignado, al creador y a con quienes se compartió (menos a quien
-    # comenta). En una respuesta, el autor del comentario raíz recibe "respondió a
-    # tu comentario" en lugar del aviso genérico.
+    # Asignado, creador y con quienes se compartió (menos quien comenta).
     actor = current_user.name or current_user.email
-    body = "Sticker" if sticker else comment.content[:120]
-    replied_to = parent.user_id if parent and parent.user_id != current_user.id else None
-    if replied_to:
-        realtime.notify_user(
-            replied_to,
-            title=f"{actor} respondió a tu comentario",
-            body=body,
-            url=f"/tasks/{task.id}#comment-{comment.id}",
-            kind="task_comment",
-        )
-    for uid in _followers(task):
-        if uid and str(uid) != str(current_user.id) and uid != replied_to:
-            realtime.notify_user(
-                uid,
-                title=f"{actor} respondió un comentario" if parent else f"{actor} comentó",
-                body=body,
-                url=f"/tasks/{task.id}#comment-{comment.id}",
-                kind="task_comment",
-            )
+    comments.notify(
+        current_user, _followers(task), parent=parent,
+        title=f"{actor} respondió un comentario" if parent else f"{actor} comentó",
+        body="Sticker" if sticker else comment.content[:120],
+        url=f"/tasks/{task.id}#comment-{comment.id}", kind="task_comment",
+    )
     realtime.notify_task(task.id)
     audit.log_action(
         "task_comment", user=current_user, request=request,
@@ -180,23 +153,8 @@ def edit_comment(
 ):
     if not current_user:
         raise HTTPException(401)
-
-    comment = db.query(TaskComment).filter(
-        TaskComment.id == comment_id, TaskComment.task_id == task_id
-    ).first()
-    if not comment:
-        raise HTTPException(404)
-    # Solo el autor puede editar su comentario.
-    if str(comment.user_id) != str(current_user.id):
-        raise HTTPException(403)
-    if stickers.is_sticker(comment.content):
-        raise HTTPException(400, "Un sticker no se puede editar")
-
-    new_content = content.strip()
-    if not new_content:
-        raise HTTPException(400, "El comentario no puede quedar vacío")
-    comment.content = new_content
-    comment.edited = True
+    comment = _task_comment(task_id, comment_id, db)
+    comments.edit(comment, current_user, content)
     db.commit()
     db.refresh(comment)
     comment.user = current_user  # for template rendering
@@ -224,13 +182,8 @@ def delete_comment(
 ):
     if not current_user:
         raise HTTPException(401)
-
-    comment = db.query(TaskComment).filter(
-        TaskComment.id == comment_id, TaskComment.task_id == task_id
-    ).first()
-    if not comment:
-        raise HTTPException(404)
-    task = db.query(Task).filter(Task.id == task_id).first()
+    comment = _task_comment(task_id, comment_id, db)
+    task = db.query(Task).filter(Task.id == comment.task_id).first()
     # Borra el autor, o quien pueda editar la tarea (creador/admin del depto/superadmin).
     is_author = str(comment.user_id) == str(current_user.id)
     if not (is_author or (task and _can_edit_task(current_user, task, db))):
@@ -243,29 +196,19 @@ def delete_comment(
     return HTMLResponse("")
 
 
-def _task_comment(task_id: str, comment_id: str, db: Session) -> TaskComment:
+def _task_comment(task_id, comment_id: str, db: Session) -> TaskComment:
     try:
-        uuid.UUID(comment_id)
+        task_uuid = uuid.UUID(str(task_id))
     except ValueError:
         raise HTTPException(404)
-    comment = db.query(TaskComment).filter(TaskComment.id == comment_id, TaskComment.task_id == task_id).first()
-    if not comment:
-        raise HTTPException(404)
-    return comment
+    return comments.get_or_404(db, TaskComment, TaskComment.task_id, task_uuid, comment_id)
 
 
 def _render_comment_reactions(request: Request, comment: TaskComment, current_user: User, db: Session):
-    summary = reactions.summarize(db, TaskCommentReaction, [comment.id], current_user.id)
-    return templates.TemplateResponse(
-        request,
-        "_reactions.html",
-        {
-            "rx_id": comment.id,
-            "rx_list": summary.get(comment.id, []),
-            "rx_url": f"/tasks/{comment.task_id}/comments/{comment.id}/reactions",
-            "rx_class": "mt-1.5",
-            "rx_readonly": not _can_comment(current_user, comment.task_id, db),
-        },
+    return comments.reactions_block(
+        request, db, TaskCommentReaction, comment, current_user,
+        url=f"/tasks/{comment.task_id}/comments/{comment.id}/reactions",
+        readonly=not _can_comment(current_user, comment.task_id, db),
     )
 
 

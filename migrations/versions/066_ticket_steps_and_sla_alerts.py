@@ -1,5 +1,5 @@
 """Escalamiento de tickets con categoría (PLAN_CATEGORIAS_TICKETS.md, fase 4):
-historial ticket_escalations (a mano), ticket_sla_alerts (a quién se avisó que
+escalamientos a mano en ticket_status_history (paso de/a, destino y nota), ticket_sla_alerts (a quién se avisó que
 venció el SLA del paso; también le da permiso de ver el ticket) y
 tickets.step_responded_at, la primera respuesta dentro del paso actual (el SLA de
 respuesta se mide por paso; first_response_at sigue siendo la del ticket).
@@ -20,22 +20,16 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("tickets", sa.Column("step_responded_at", sa.DateTime(), nullable=True))
-    op.create_table(
-        "ticket_escalations",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("ticket_id", UUID(as_uuid=True), sa.ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("from_position", sa.Integer(), nullable=True),
-        sa.Column("to_position", sa.Integer(), nullable=False),
-        sa.Column("from_department_id", UUID(as_uuid=True), sa.ForeignKey("departments.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("to_department_id", UUID(as_uuid=True), sa.ForeignKey("departments.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("from_user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("to_user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("reason", sa.String(20), nullable=False),
-        sa.Column("note", sa.Text(), nullable=True),
-        sa.Column("actor_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_ticket_escalations_ticket", "ticket_escalations", ["ticket_id"])
+    # Escalar es un cambio en el historial de estados: de qué paso a cuál, a quién y por qué.
+    op.add_column("ticket_status_history", sa.Column("from_position", sa.Integer(), nullable=True))
+    op.add_column("ticket_status_history", sa.Column("to_position", sa.Integer(), nullable=True))
+    op.add_column("ticket_status_history", sa.Column(
+        "to_department_id", UUID(as_uuid=True), sa.ForeignKey("departments.id", ondelete="SET NULL"), nullable=True,
+    ))
+    op.add_column("ticket_status_history", sa.Column(
+        "to_user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    ))
+    op.add_column("ticket_status_history", sa.Column("note", sa.Text(), nullable=True))
     op.create_table(
         "ticket_sla_alerts",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
@@ -53,6 +47,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_ticket_sla_alerts_user", table_name="ticket_sla_alerts")
     op.drop_table("ticket_sla_alerts")
-    op.drop_index("ix_ticket_escalations_ticket", table_name="ticket_escalations")
-    op.drop_table("ticket_escalations")
+    for col in ("note", "to_user_id", "to_department_id", "to_position", "from_position"):
+        op.drop_column("ticket_status_history", col)
     op.drop_column("tickets", "step_responded_at")

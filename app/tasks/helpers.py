@@ -1,6 +1,5 @@
 """Funciones compartidas por las rutas de tareas (app/tasks/routes/)."""
 
-import re
 import uuid
 from datetime import date, datetime
 
@@ -12,7 +11,6 @@ from app.messaging import realtime
 from app.permissions import build_access_filter
 from app.models import (
     Task,
-    TaskComment,
     TaskFollowUp,
     TaskShare,
     TaskTag,
@@ -24,11 +22,6 @@ from app.models import (
 from app.calendar.reminders import to_local
 from app.tasks.business_hours import business_hours_label, business_seconds
 from app.tasks.service import _can_edit_task, _is_shared_with, _tasks_query
-
-
-def _safe_filename(name: str) -> str:
-    name = re.sub(r"[^\w.\-]", "_", name)
-    return name[:200] or "file"
 
 
 def _can_update_status(user: User, task: Task, db: Session) -> bool:
@@ -169,17 +162,6 @@ def _validated_tag_ids(tag_ids: list[str], department_id: str | None, db: Sessio
         ).all()
     }
     return [t for t in tag_ids if t in valid]
-
-
-def _comment_threads(comments: list[TaskComment]) -> list[tuple[TaskComment, list[TaskComment]]]:
-    """[(raíz, respuestas)] en orden cronológico. Una respuesta cuyo raíz ya no
-    está (borrado → SET NULL, o fuera de la lista) se muestra como raíz."""
-    ids = {c.id for c in comments}
-    replies: dict = {}
-    for c in comments:
-        if c.parent_id and c.parent_id in ids:
-            replies.setdefault(c.parent_id, []).append(c)
-    return [(c, replies.get(c.id, [])) for c in comments if not (c.parent_id and c.parent_id in ids)]
 
 
 def _follow_up_view(f: TaskFollowUp) -> dict:

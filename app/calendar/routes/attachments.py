@@ -1,14 +1,12 @@
 """Archivos / evidencias de un evento (mismos permisos que los comentarios)."""
 
-import re
-import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
-from app import audit, storage, images
+from app import attachments, audit, storage
 from app.auth.deps import get_current_user
 from app.calendar.reminders import to_local
 from app.database import get_db
@@ -20,11 +18,6 @@ from app.calendar.helpers import (
 )
 
 router = APIRouter()
-
-
-def _safe_filename(name: str) -> str:
-    name = re.sub(r"[^\w.\-]", "_", name)
-    return name[:200] or "file"
 
 
 def _attachment_json(a: CalendarEventAttachment, user: User, ev: CalendarEvent) -> dict:
@@ -42,16 +35,7 @@ def _attachment_json(a: CalendarEventAttachment, user: User, ev: CalendarEvent) 
 
 
 def _event_attachment(ev: CalendarEvent, attachment_id: str, db: Session) -> CalendarEventAttachment:
-    try:
-        uuid.UUID(attachment_id)
-    except ValueError:
-        raise HTTPException(404)
-    a = db.query(CalendarEventAttachment).filter(
-        CalendarEventAttachment.id == attachment_id, CalendarEventAttachment.event_id == ev.id,
-    ).first()
-    if not a:
-        raise HTTPException(404)
-    return a
+    return attachments.get_or_404(db, CalendarEventAttachment, CalendarEventAttachment.event_id, ev.id, attachment_id)
 
 
 @router.get("/events/{event_id}/attachments")
@@ -91,15 +75,8 @@ def upload_attachments(
     storage.check_upload_sizes(*files)
 
     added = []
-    for f in files:
-        content, filename, content_type = images.optimize_image(f.file.read(), f.filename, f.content_type)
-        key = f"calendar/{ev.id}/{uuid.uuid4()}_{_safe_filename(filename)}"
-        content_type = (content_type or "application/octet-stream")[:100]
-        storage.upload_evidence(key, content, content_type)
-        a = CalendarEventAttachment(
-            event_id=ev.id, uploaded_by=current_user.id, filename=filename[:255],
-            file_key=key, content_type=content_type, file_size=len(content),
-        )
+    for f in attachments.store_uploads(f"calendar/{ev.id}", files):
+        a = CalendarEventAttachment(event_id=ev.id, uploaded_by=current_user.id, **f)
         db.add(a)
         added.append(a)
     db.commit()
@@ -137,8 +114,7 @@ def download_attachment(
     if not current_user:
         raise HTTPException(401)
     ev = _visible_event(event_id, current_user, db)
-    a = _event_attachment(ev, attachment_id, db)
-    return RedirectResponse(storage.get_evidence_url(a.file_key, a.filename, inline=inline), status_code=302)
+    return attachments.download(_event_attachment(ev, attachment_id, db), inline)
 
 
 @router.post("/events/{event_id}/attachments/{attachment_id}/delete")
@@ -155,12 +131,7 @@ def delete_attachment(
     a = _event_attachment(ev, attachment_id, db)
     if a.uploaded_by != current_user.id and ev.owner_id != current_user.id:
         raise HTTPException(403)
-    filename = a.filename
-    try:
-        storage.delete_evidence(a.file_key)
-    except Exception:
-        pass
-    db.delete(a)
+    filename = attachments.remove(a, db)
     db.commit()
     audit.log_action(
         "calendar_attachment_delete", user=current_user, request=request,

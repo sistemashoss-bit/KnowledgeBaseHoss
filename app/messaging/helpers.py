@@ -1,6 +1,5 @@
 """Funciones y constantes compartidas por las rutas de mensajería (app/messaging/routes/)."""
 
-import re
 import uuid
 from datetime import datetime, timedelta
 
@@ -75,9 +74,7 @@ def osm_location_url(lat: float, lng: float) -> str:
     return f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lng:.6f}#map=17/{lat:.6f}/{lng:.6f}"
 
 
-def _safe_filename(name: str) -> str:
-    name = re.sub(r"[^\w.\-]", "_", name)
-    return name[:200] or "file"
+from app.attachments import safe_filename as _safe_filename  # noqa: E402,F401
 
 
 def _conv_display_name(conv: Conversation, current_user: User) -> str:
