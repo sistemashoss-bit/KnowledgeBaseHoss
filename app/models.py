@@ -61,6 +61,12 @@ TICKET_CLOSED = "closed"
 TICKET_STATUSES = [TICKET_OPEN, TICKET_IN_PROGRESS, TICKET_WAITING, TICKET_RESOLVED, TICKET_CLOSED]
 TICKET_ACTIVE_STATUSES = [TICKET_OPEN, TICKET_IN_PROGRESS, TICKET_WAITING]
 
+# Pasos de una categoría de tickets (PLAN_CATEGORIAS_TICKETS.md): a quién le toca.
+STEP_DIRECT_BOSS = "direct_boss"   # jefe directo de quien reporta (app/tickets/hierarchy.py)
+STEP_DEPARTMENT = "department"     # un departamento; lo toma alguien de ahí
+STEP_USER = "user"                 # una persona específica
+STEP_TARGETS = [STEP_DIRECT_BOSS, STEP_DEPARTMENT, STEP_USER]
+
 # ── Task tag colors (paleta fija, mapeada a clases Tailwind en la plantilla) ───
 TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "pink"]
 
@@ -227,6 +233,10 @@ class User(Base):
     # Puesto en hoss-api (su rol allá), refrescado en cada login (SSO). Solo se
     # muestra: los permisos aquí salen de `role` (site_role que manda hoss).
     position_name = Column(String(100), nullable=True)
+    # Nivel del puesto en hoss-api (Roles.level): a mayor número, más arriba. Solo
+    # ordena la jerarquía para encontrar al jefe directo (app/tickets/hierarchy.py);
+    # no da permisos. Null = el puesto no entra en la jerarquía.
+    position_level = Column(Integer, nullable=True)
     # Solo para el bot (`asset:<archivo>` en app/assets). El avatar del staff vive en
     # Bunny y su URL sale del corporate_id (storage.get_avatar_url); lo que quede
     # aquí de cuando hoss-api lo mandaba en el identity se ignora.
@@ -796,6 +806,14 @@ class Ticket(Base):
     sla_response_minutes = Column(Integer, nullable=True)
     sla_resolution_minutes = Column(Integer, nullable=True)
 
+    # Categoría (solo los reportes de un departamento que usa categorías, hoy Comercial)
+    # y el paso de su cadena en el que va. Con categoría, solo el asignado lo ve y lo
+    # atiende (además del solicitante); sin asignado, el departamento del paso.
+    # step_started_at: inicio del paso (su SLA se cuenta desde ahí).
+    category_id = Column(UUID(as_uuid=True), ForeignKey("ticket_categories.id", ondelete="SET NULL"), nullable=True)
+    step_position = Column(Integer, nullable=True)
+    step_started_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     # Primer comentario o cambio de estado de alguien que lo atiende (no el solicitante).
@@ -807,6 +825,7 @@ class Ticket(Base):
     department = relationship("Department")
     assignee = relationship("User", foreign_keys=[assigned_to])
     requester = relationship("User", foreign_keys=[requester_id])
+    category = relationship("TicketCategory")
     comments = relationship(
         "TicketComment", back_populates="ticket", order_by="TicketComment.created_at", passive_deletes=True,
     )
@@ -890,6 +909,59 @@ class TicketSlaPolicy(Base):
     response_minutes = Column(Integer, nullable=True)
     resolution_minutes = Column(Integer, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TicketCategory(Base):
+    """Categoría que elige quien reporta desde el widget, en lugar del departamento.
+    Pertenece al departamento de QUIEN REPORTA (hoy solo Comercial): si su
+    departamento tiene categorías activas, el widget solo ofrece esas. Cada una
+    tiene una cadena de pasos (TicketCategoryStep)."""
+    __tablename__ = "ticket_categories"
+    __table_args__ = (UniqueConstraint("department_id", "name", name="uq_ticket_categories_department_name"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(100), nullable=False)
+    # Para que Jev elija la categoría cuando quien reporta no sabe cuál es.
+    description = Column(Text, nullable=True)
+    default_kind = Column(String(20), nullable=False, default=TICKET_INCIDENT)
+    sort_order = Column(Integer, nullable=False, default=0)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    department = relationship("Department")
+    steps = relationship(
+        "TicketCategoryStep", back_populates="category", order_by="TicketCategoryStep.position",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class TicketCategoryStep(Base):
+    """Paso de la cadena de una categoría, en orden (1, 2, 3…). Cada uno con su SLA
+    en minutos laborales; al vencerse el de resolución, el ticket pasa al siguiente."""
+    __tablename__ = "ticket_category_steps"
+    __table_args__ = (
+        UniqueConstraint("category_id", "position", name="uq_ticket_category_steps_position"),
+        CheckConstraint(
+            "(target = 'direct_boss' AND department_id IS NULL AND user_id IS NULL)"
+            " OR (target = 'department' AND department_id IS NOT NULL AND user_id IS NULL)"
+            " OR (target = 'user' AND user_id IS NOT NULL AND department_id IS NULL)",
+            name="ck_ticket_category_steps_target",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("ticket_categories.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)
+    target = Column(String(20), nullable=False)
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    sla_response_minutes = Column(Integer, nullable=True)
+    sla_resolution_minutes = Column(Integer, nullable=True)
+
+    category = relationship("TicketCategory", back_populates="steps")
+    department = relationship("Department")
+    user = relationship("User")
 
 
 # ── Calendar ──────────────────────────────────────────────────────────────────

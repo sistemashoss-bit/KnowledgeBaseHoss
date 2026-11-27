@@ -86,10 +86,18 @@ def _sync_org(user: User, identity: dict, db: Session) -> bool:
     changed = False
     # position ausente (hoss sin esa versión): no se toca; null: puesto sin asignar.
     if "position" in identity:
-        position_name = (identity["position"] or {}).get("name")
+        position = identity["position"] or {}
+        position_name = position.get("name")
         if user.position_name != position_name:
             user.position_name = position_name
             changed = True
+        # level ausente (hoss sin esa versión): no se toca.
+        if "level" in position or not identity["position"]:
+            level = position.get("level")
+            level = level if isinstance(level, int) and not isinstance(level, bool) else None
+            if user.position_level != level:
+                user.position_level = level
+                changed = True
 
     site_role = identity.get("site_role")
     if site_role in _SITE_ROLES and user.role != site_role:

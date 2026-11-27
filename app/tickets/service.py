@@ -4,12 +4,16 @@ y el widget de reportes).
 Visibilidad: el solicitante, el asignado, todo el departamento receptor y quien
 supervise ese departamento (su admin o un acceso extra). Superadmin y auditor
 ven todos; el auditor solo participa en los de su propio departamento.
+
+Tickets con categoría (Comercial, PLAN_CATEGORIAS_TICKETS.md): solo el solicitante
+y quien lo tiene asignado ahora; mientras no tenga asignado, el departamento del
+paso (para que alguien lo tome). Al escalarse, quien lo tenía deja de verlo.
 """
 import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -39,8 +43,27 @@ def visible_condition(user: User):
     conds = [Ticket.requester_id == user.id, Ticket.assigned_to == user.id]
     depts = attended_department_ids(user) | overseen_department_ids(user)
     if depts:
-        conds.append(Ticket.department_id.in_(depts))
+        # Con categoría y asignado, el departamento ya no lo ve.
+        conds.append(and_(
+            Ticket.department_id.in_(depts),
+            or_(Ticket.category_id.is_(None), Ticket.assigned_to.is_(None)),
+        ))
     return or_(*conds)
+
+
+def _open_to_department(t: Ticket) -> bool:
+    """El departamento receptor (y quien lo supervisa) lo ve y lo trabaja: siempre
+    en los tickets sin categoría; en los de categoría, solo mientras nadie lo tiene."""
+    return t.category_id is None or t.assigned_to is None
+
+
+def in_direct_boss_step(t: Ticket) -> bool:
+    """El ticket va en un paso de jefe directo de su categoría."""
+    from app.models import STEP_DIRECT_BOSS
+
+    if not t.category_id or t.step_position is None or not t.category:
+        return False
+    return any(s.position == t.step_position and s.target == STEP_DIRECT_BOSS for s in t.category.steps)
 
 
 def attended_department_ids(user: User) -> set:
@@ -56,7 +79,7 @@ def can_view(user: User, t: Ticket) -> bool:
         return True
     return (
         is_requester(user, t) or _same(t.assigned_to, user.id)
-        or t.department_id in attended_department_ids(user) | overseen_department_ids(user)
+        or (_open_to_department(t) and t.department_id in attended_department_ids(user) | overseen_department_ids(user))
     )
 
 
@@ -65,14 +88,16 @@ def can_attend(user: User, t: Ticket) -> bool:
     departamento, lo transfiere, comenta y sube evidencias."""
     return (
         user.role == ROLE_SUPERADMIN or _same(t.assigned_to, user.id)
-        or t.department_id in attended_department_ids(user)
+        or (_open_to_department(t) and t.department_id in attended_department_ids(user))
     )
 
 
 def can_manage(user: User, t: Ticket) -> bool:
     """Además de atender: edita título/descripción de cualquiera y borra
     comentarios y evidencias ajenos."""
-    return user.role == ROLE_SUPERADMIN or t.department_id in managed_department_ids(user)
+    return user.role == ROLE_SUPERADMIN or (
+        _open_to_department(t) and t.department_id in managed_department_ids(user)
+    )
 
 
 def can_comment(user: User, t: Ticket) -> bool:

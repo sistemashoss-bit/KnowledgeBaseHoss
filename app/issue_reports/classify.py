@@ -42,12 +42,14 @@ def _priority(severity: float, multi_user: float, feature_request: float) -> str
     return _SEVERITY_PRIORITY[level]
 
 
-async def classify(state: dict, departments: list[Department]) -> dict | None:
-    """Devuelve {"department_id", "priority", "jev"} o None si Jev falla o
-    tarda más de `jev_timeout_seconds`. `department_id` es None cuando Jev no
-    está seguro (o no hay departamentos con triage_description): el llamador
-    usa el de triage."""
+async def classify(state: dict, departments: list[Department], categories: list | None = None) -> dict | None:
+    """Devuelve {"department_id", "category_id", "priority", "jev"} o None si Jev
+    falla o tarda más de `jev_timeout_seconds`. `department_id` es None cuando Jev
+    no está seguro (o no hay departamentos con triage_description): el llamador
+    usa el de triage. Con `categories` (las de Comercial) elige entre ellas, por su
+    `description`, en lugar de departamento; `category_id` None = no está seguro."""
     candidates = [d for d in departments if (d.triage_description or "").strip()]
+    cat_candidates = [c for c in (categories or []) if (c.description or "").strip()]
     questions = {
         "severity": Score(
             instructions="How much does the reported problem impact the reporter's work, based only on the facts described (not on the tone)?",
@@ -58,6 +60,11 @@ async def classify(state: dict, departments: list[Department]) -> dict | None:
             instructions="The report asks for a new feature or an improvement, instead of reporting that something is broken",
         ),
     }
+    if len(cat_candidates) > 1:
+        questions["category"] = Choice(
+            instructions="Which category best describes this internal issue report?",
+            criteria={str(c.id): c.description.strip() for c in cat_candidates},
+        )
     if len(candidates) > 1:
         questions["department"] = Choice(
             instructions="Which department should handle this internal issue report?",
@@ -98,8 +105,18 @@ async def classify(state: dict, departments: list[Department]) -> dict | None:
     elif len(candidates) == 1:
         department_id = str(candidates[0].id)
 
+    category_id = None
+    if "category" in a:
+        cat = a["category"]
+        jev["category"] = {"choice": cat.choice, "confidence": cat.confidence, "probabilities": cat.probabilities}
+        if cat.confidence >= DEPARTMENT_MIN_CONFIDENCE:
+            category_id = cat.choice
+    elif len(cat_candidates) == 1:
+        category_id = str(cat_candidates[0].id)
+
     return {
         "department_id": department_id,
+        "category_id": category_id,
         "priority": _priority(severity.score, multi_user.noul, feature.noul),
         "jev": jev,
     }

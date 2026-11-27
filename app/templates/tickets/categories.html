@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Categorías de tickets — HOSS Conocimiento{% endblock %}
+
+{% block content %}
+<div class="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-50">
+  <div class="max-w-4xl mx-auto">
+
+    <a href="/tickets/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Volver a Tickets
+    </a>
+
+    <h1 class="text-2xl font-bold text-gray-900">Categorías de tickets</h1>
+    <p class="text-sm text-gray-500 mt-1 mb-5">
+      Si un departamento tiene categorías activas, su gente elige una categoría en el widget en lugar del departamento.
+      Cada categoría pasa por sus pasos en orden; un paso que no se puede resolver (sin jefe, persona inactiva) se salta.
+      Los demás departamentos siguen reportando por departamento.
+    </p>
+
+    <form method="get" class="mb-4">
+      <label for="c-dept" class="block text-xs font-medium text-gray-700 mb-1">Departamento de quien reporta</label>
+      <select id="c-dept" name="department_id" onchange="this.form.submit()"
+              class="w-full sm:w-1/2 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        {% for d in departments %}
+        <option value="{{ d.id }}" {% if d.id == dept.id %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </form>
+
+    {% if saved %}
+    <p class="mb-4 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700" role="status">Categoría guardada.</p>
+    {% endif %}
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold text-gray-700">{{ dept.name }}</h2>
+        <a href="/tickets/categorias?department_id={{ dept.id }}&edit=new"
+           class="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">Nueva categoría</a>
+      </div>
+      {% if categories %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left font-medium px-4 sm:px-6 py-3">Orden</th>
+              <th class="text-left font-medium px-4 py-3">Categoría</th>
+              <th class="text-left font-medium px-4 py-3">Tipo</th>
+              <th class="text-left font-medium px-4 py-3">Pasos</th>
+              <th class="text-left font-medium px-4 py-3">Estado</th>
+              <th class="px-4 py-3"><span class="sr-only">Acciones</span></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for c in categories %}
+            <tr>
+              <td class="px-4 sm:px-6 py-3 text-gray-500">{{ c.sort_order }}</td>
+              <td class="px-4 py-3 font-medium text-gray-800">{{ c.name }}</td>
+              <td class="px-4 py-3 text-gray-600">{{ kind_labels[c.default_kind] }}</td>
+              <td class="px-4 py-3 text-gray-600">
+                {% for st in c.steps %}{{ loop.index }}. {{ step_label(st) }}{% if not loop.last %} → {% endif %}{% endfor %}
+              </td>
+              <td class="px-4 py-3">{% if c.active %}<span class="text-green-700">Activa</span>{% else %}<span class="text-gray-400">Inactiva</span>{% endif %}</td>
+              <td class="px-4 py-3 text-right">
+                <a href="/tickets/categorias?department_id={{ dept.id }}&edit={{ c.id }}" class="text-blue-600 hover:text-blue-500 text-sm">Editar</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="px-4 sm:px-6 py-6 text-sm text-gray-500">Sin categorías: su gente reporta por departamento, como hoy.</p>
+      {% endif %}
+    </div>
+
+    {% if editing is not none %}
+    <form method="post" action="/tickets/categorias" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="department_id" value="{{ dept.id }}" />
+      <input type="hidden" name="category_id" value="{{ editing.id or '' }}" />
+      <input type="hidden" name="step_count" value="{{ step_rows | length }}" />
+      <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+        <h2 class="text-sm font-semibold text-gray-700">{% if editing.id %}Editar {{ editing.name }}{% else %}Nueva categoría{% endif %}</h2>
+      </div>
+
+      <div class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label for="f-name" class="block text-xs font-medium text-gray-700 mb-1">Nombre</label>
+          <input id="f-name" name="name" value="{{ editing.name or '' }}" required maxlength="100"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="f-kind" class="block text-xs font-medium text-gray-700 mb-1">Tipo</label>
+            <select id="f-kind" name="default_kind" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+              {% for k in kinds %}<option value="{{ k }}" {% if editing.default_kind == k %}selected{% endif %}>{{ kind_labels[k] }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="f-order" class="block text-xs font-medium text-gray-700 mb-1">Orden</label>
+            <input id="f-order" name="sort_order" type="number" value="{{ editing.sort_order or 0 }}"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+        </div>
+        <div class="sm:col-span-2">
+          <label for="f-desc" class="block text-xs font-medium text-gray-700 mb-1">Descripción</label>
+          <textarea id="f-desc" name="description" rows="2" maxlength="2000"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    placeholder="Qué entra en esta categoría. La IA la usa para elegirla cuando quien reporta no sabe cuál es.">{{ editing.description or '' }}</textarea>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" name="active" {% if editing.active %}checked{% endif %} class="rounded border-gray-300" />
+          Activa
+        </label>
+      </div>
+
+      <div class="px-4 sm:px-6 pt-2 pb-1">
+        <h3 class="text-sm font-semibold text-gray-700">Pasos</h3>
+        <p class="text-xs text-gray-400">En orden. SLA en horas laborales ({{ hours_label }}); al vencerse el de resolución, el ticket pasa al siguiente paso. Vacío = sin meta. Deja el tipo vacío para no usar la fila.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left font-medium px-4 sm:px-6 py-3">#</th>
+              <th class="text-left font-medium px-4 py-3">Tipo</th>
+              <th class="text-left font-medium px-4 py-3">Departamento o persona</th>
+              <th class="text-left font-medium px-4 py-3">Respuesta (h)</th>
+              <th class="text-left font-medium px-4 py-3">Resolución (h)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {% for row in step_rows %}
+            {% set i = loop.index0 %}
+            <tr x-data="{ target: '{{ row.target }}' }">
+              <td class="px-4 sm:px-6 py-3 text-gray-400">{{ loop.index }}</td>
+              <td class="px-4 py-3">
+                <select name="target_{{ i }}" x-model="target" aria-label="Tipo del paso {{ loop.index }}"
+                        class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <option value="">—</option>
+                  {% for t, label in target_labels.items() %}<option value="{{ t }}" {% if row.target == t %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+              </td>
+              <td class="px-4 py-3">
+                <select name="department_{{ i }}" x-show="target === 'department'" aria-label="Departamento del paso {{ loop.index }}"
+                        class="w-full max-w-xs px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <option value="">Elige departamento</option>
+                  {% for d in all_departments %}<option value="{{ d.id }}" {% if row.department_id == d.id | string %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+                </select>
+                <select name="user_{{ i }}" x-show="target === 'user'" aria-label="Persona del paso {{ loop.index }}"
+                        class="w-full max-w-xs px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <option value="">Elige persona</option>
+                  {% for u in people %}<option value="{{ u.id }}" {% if row.user_id == u.id | string %}selected{% endif %}>{{ u.name or u.email }}</option>{% endfor %}
+                </select>
+                <span x-show="target === 'direct_boss'" class="text-xs text-gray-500">Según el nivel del puesto y la sucursal</span>
+              </td>
+              <td class="px-4 py-3">
+                <input type="text" inputmode="decimal" name="response_{{ i }}" value="{{ row.response }}" aria-label="Respuesta del paso {{ loop.index }}"
+                       class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              </td>
+              <td class="px-4 py-3">
+                <input type="text" inputmode="decimal" name="resolution_{{ i }}" value="{{ row.resolution }}" aria-label="Resolución del paso {{ loop.index }}"
+                       class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
+        <p class="text-xs text-gray-400">Para más pasos, guarda y vuelve a editar: siempre quedan 3 filas libres.</p>
+        <div class="flex items-center gap-2">
+          <a href="/tickets/categorias?department_id={{ dept.id }}" class="px-3 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</a>
+          <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">Guardar categoría</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

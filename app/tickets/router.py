@@ -10,6 +10,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from jwt import PyJWTError as JWTError
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app import audit, images, reactions, storage
@@ -19,8 +20,9 @@ from app.config import settings
 from app.database import SessionLocal, get_db
 from app.messaging import realtime, stickers
 from app.models import (
-    Department, Ticket, TicketComment, TicketCommentReaction, TicketEvidence, TicketSlaPolicy,
-    TicketStatusHistory, User,
+    Department, Ticket, TicketCategory, TicketCategoryStep, TicketComment, TicketCommentReaction,
+    TicketEvidence, TicketSlaPolicy, TicketStatusHistory, User,
+    STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
     PRIORITY_MEDIUM, ROLE_AUDITOR, ROLE_SUPERADMIN, TASK_PRIORITIES,
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_KINDS, TICKET_RESOLVED, TICKET_STATUSES,
 )
@@ -29,6 +31,7 @@ from app.tasks.business_hours import business_hours_label
 from app.tasks.router import _comment_threads
 from app.templating import templates
 from app.tickets import service as svc
+from app.tickets.categories import TARGET_LABELS, step_label
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -359,6 +362,171 @@ async def save_sla(
     return RedirectResponse(f"/tickets/sla?department_id={dept.id}&saved=1", status_code=302)
 
 
+# ── Categorías (Comercial, PLAN_CATEGORIAS_TICKETS.md) ───────────────────────
+
+CATEGORY_BLANK_STEPS = 3
+
+
+def _require_superadmin(user):
+    if not user or user.role != ROLE_SUPERADMIN:
+        raise HTTPException(403)
+    return user
+
+
+def _category_departments(db: Session) -> list[Department]:
+    """Los acotados por sucursal (Comercial) primero: son los que hoy usan categorías."""
+    return sorted(db.query(Department).all(), key=lambda d: (not d.branch_scoped, d.name.lower()))
+
+
+@router.get("/categorias", response_class=HTMLResponse)
+def categories_page(
+    request: Request,
+    department_id: str = "",
+    edit: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse("/auth/login", status_code=302)
+    user = _require_superadmin(current_user)
+    departments = _category_departments(db)
+    if not departments:
+        raise HTTPException(400, "No hay departamentos")
+    dept = next((d for d in departments if str(d.id) == department_id), departments[0])
+    categories = (
+        db.query(TicketCategory)
+        .options(selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.department),
+                 selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.user))
+        .filter(TicketCategory.department_id == dept.id)
+        .order_by(TicketCategory.sort_order, TicketCategory.name).all()
+    )
+    editing = None
+    if edit == "new":
+        editing = TicketCategory(department_id=dept.id, default_kind=TICKET_KINDS[0], sort_order=len(categories), active=True)
+    elif edit:
+        editing = next((c for c in categories if str(c.id) == edit), None)
+    step_rows = []
+    if editing is not None:
+        for st in (editing.steps or []):
+            step_rows.append({
+                "target": st.target, "department_id": str(st.department_id or ""), "user_id": str(st.user_id or ""),
+                "response": _hours(st.sla_response_minutes), "resolution": _hours(st.sla_resolution_minutes),
+            })
+        step_rows += [{"target": "", "department_id": "", "user_id": "", "response": "", "resolution": ""}] * CATEGORY_BLANK_STEPS
+    people = (
+        db.query(User).filter(User.is_active == True, User.is_bot == False)  # noqa: E712
+        .order_by(User.name, User.email).all() if editing is not None else []
+    )
+    return templates.TemplateResponse(request, "tickets/categories.html", {
+        "current_user": user,
+        "departments": departments, "dept": dept, "categories": categories,
+        "editing": editing, "step_rows": step_rows, "people": people,
+        "all_departments": sorted(departments, key=lambda d: d.name.lower()),
+        "target_labels": TARGET_LABELS, "step_label": step_label,
+        "kind_labels": KIND_LABELS, "kinds": TICKET_KINDS,
+        "hours_label": business_hours_label(),
+        "saved": request.query_params.get("saved") == "1",
+        "csrf_token": generate_csrf_token(str(user.id)),
+    })
+
+
+@router.post("/categorias")
+async def save_category(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    user = _require_superadmin(current_user)
+    form = await request.form()
+    get = lambda k: str(form.get(k) or "").strip()  # noqa: E731
+    try:
+        dept = db.get(Department, uuid.UUID(get("department_id")))
+    except ValueError:
+        dept = None
+    if not dept:
+        raise HTTPException(400, "Departamento inválido")
+
+    category_id = get("category_id")
+    if category_id:
+        category = db.get(TicketCategory, uuid.UUID(category_id))
+        if not category or category.department_id != dept.id:
+            raise HTTPException(404, "La categoría no existe")
+    else:
+        category = TicketCategory(id=uuid.uuid4(), department_id=dept.id)
+        db.add(category)
+
+    name = get("name")[:100]
+    if not name:
+        raise HTTPException(400, "Escribe el nombre de la categoría")
+    clash = db.query(TicketCategory.id).filter(
+        TicketCategory.department_id == dept.id, func.lower(TicketCategory.name) == name.lower(),
+        TicketCategory.id != category.id,
+    ).first()
+    if clash:
+        raise HTTPException(400, "Ya hay una categoría con ese nombre en el departamento")
+    kind = get("default_kind")
+    if kind not in TICKET_KINDS:
+        raise HTTPException(400, "Tipo inválido")
+    try:
+        sort_order = int(get("sort_order") or 0)
+    except ValueError:
+        raise HTTPException(400, "El orden debe ser un número")
+
+    steps = []
+    for i in range(int(get("step_count") or 0)):
+        target = get(f"target_{i}")
+        if not target:
+            continue
+        if target not in STEP_TARGETS:
+            raise HTTPException(400, "Tipo de paso inválido")
+        step = {"target": target, "department_id": None, "user_id": None}
+        n = len(steps) + 1
+        if target == STEP_DEPARTMENT:
+            try:
+                step["department_id"] = uuid.UUID(get(f"department_{i}"))
+            except ValueError:
+                raise HTTPException(400, f"Elige el departamento del paso {n}")
+            if not db.get(Department, step["department_id"]):
+                raise HTTPException(400, f"Departamento inválido en el paso {n}")
+        elif target == STEP_USER:
+            try:
+                person = db.get(User, uuid.UUID(get(f"user_{i}")))
+            except ValueError:
+                person = None
+            if not person or not person.is_active:
+                raise HTTPException(400, f"Elige una persona activa en el paso {n}")
+            step["user_id"] = person.id
+        step["response"] = _parse_hours(get(f"response_{i}"))
+        step["resolution"] = _parse_hours(get(f"resolution_{i}"))
+        if step["response"] and step["resolution"] and step["response"] > step["resolution"]:
+            raise HTTPException(400, f"En el paso {n} la primera respuesta no puede tardar más que la resolución")
+        steps.append(step)
+    if not steps:
+        raise HTTPException(400, "La categoría necesita al menos un paso")
+
+    category.name = name
+    category.description = get("description")[:2000] or None
+    category.default_kind = kind
+    category.sort_order = sort_order
+    category.active = form.get("active") == "on"
+    # Los pasos se reemplazan; los tickets en curso conservan su número de paso.
+    db.query(TicketCategoryStep).filter(TicketCategoryStep.category_id == category.id).delete()
+    db.flush()
+    for n, st in enumerate(steps, start=1):
+        db.add(TicketCategoryStep(
+            id=uuid.uuid4(), category_id=category.id, position=n, target=st["target"],
+            department_id=st["department_id"], user_id=st["user_id"],
+            sla_response_minutes=st["response"], sla_resolution_minutes=st["resolution"],
+        ))
+    db.commit()
+    audit.log_action(
+        "ticket_category_save", user=user, request=request,
+        resource_type="ticket_category", resource_id=category.id, resource_name=f"{dept.name} · {name}",
+        details=f"steps={len(steps)} active={category.active}",
+    )
+    return RedirectResponse(f"/tickets/categorias?department_id={dept.id}&saved=1", status_code=302)
+
+
 # ── Detalle ───────────────────────────────────────────────────────────────────
 
 @router.get("/{number:int}", response_class=HTMLResponse)
@@ -389,9 +557,21 @@ def ticket_detail(
 
     can_attend = svc.can_attend(user, t)
     can_comment = svc.can_comment(user, t)
+    step_info = None
+    if t.category:
+        steps = t.category.steps
+        current = next((s for s in steps if s.position == t.step_position), None)
+        step_info = {
+            "category": t.category.name,
+            "position": steps.index(current) + 1 if current else None,
+            "total": len(steps),
+            "label": step_label(current) if current else None,
+        }
     return templates.TemplateResponse(request, "tickets/detail.html", {
         "current_user": user,
         "ticket": t,
+        "step_info": step_info,
+        "in_direct_boss_step": svc.in_direct_boss_step(t),
         "sla": svc.sla_status(t),
         "hours_label": business_hours_label(),
         "is_requester": svc.is_requester(user, t),
@@ -487,6 +667,9 @@ def assign_ticket(
         target = next((u for u in svc.assignable_users(t, db) if str(u.id) == assigned_to), None)
         if not target:
             raise HTTPException(400, "Solo se asigna a alguien activo del departamento que lo atiende")
+    elif svc.in_direct_boss_step(t):
+        # Sin asignado lo vería todo el departamento de quien reporta (Comercial).
+        raise HTTPException(400, "En el paso del jefe directo el ticket siempre tiene responsable")
     t.assigned_to = target.id if target else None
     db.commit()
 
@@ -516,6 +699,8 @@ def transfer_ticket(
     t = _get(number, db, user)
     if not svc.can_attend(user, t):
         raise HTTPException(403)
+    if t.category_id:
+        raise HTTPException(400, "Un ticket con categoría no se transfiere: sigue los pasos de su categoría")
     try:
         dept = db.get(Department, uuid.UUID(department_id))
     except ValueError:

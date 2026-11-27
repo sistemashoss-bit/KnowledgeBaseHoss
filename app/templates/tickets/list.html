@@ -18,6 +18,10 @@
         <a href="/tickets/sla"
            class="px-3 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-white transition-colors">SLA</a>
         {% endif %}
+        {% if current_user.role == "superadmin" %}
+        <a href="/tickets/categorias"
+           class="px-3 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-white transition-colors">Categorías</a>
+        {% endif %}
         <a href="/tickets/new"
            class="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

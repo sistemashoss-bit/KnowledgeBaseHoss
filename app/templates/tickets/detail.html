@@ -78,6 +78,17 @@
         {% endif %}
       </div>
 
+      {% if step_info %}
+      <!-- Categoría y paso (PLAN_CATEGORIAS_TICKETS.md) -->
+      <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+        <p><span class="text-xs text-gray-400">Categoría</span> <span class="font-medium text-gray-800">{{ step_info.category }}</span></p>
+        {% if step_info.position %}
+        <p><span class="text-xs text-gray-400">Paso</span> <span class="font-medium text-gray-800">{{ step_info.position }} de {{ step_info.total }}</span></p>
+        <p><span class="text-xs text-gray-400">Le toca a</span> <span class="font-medium text-gray-800">{{ step_info.label }}</span></p>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <!-- Datos -->
       <div class="grid grid-cols-2 sm:grid-cols-4 divide-y divide-gray-100 sm:divide-y-0 sm:divide-x border-b border-gray-100">
         <div class="px-5 py-4 min-w-0">
@@ -223,7 +234,7 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <select id="a-user" name="assigned_to"
                         class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">— Sin asignar —</option>
+                  {% if not in_direct_boss_step %}<option value="">— Sin asignar —</option>{% endif %}
                   {% for u in assignable_users %}
                   <option value="{{ u.id }}" {% if ticket.assigned_to == u.id %}selected{% endif %}>{{ u.name or u.email }}</option>
                   {% endfor %}
@@ -268,6 +279,7 @@
             </div>
           </form>
 
+          {% if not ticket.category_id %}
           <form method="post" action="/tickets/{{ ticket.number }}/transfer"
                 class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-[10rem_1fr] items-start gap-x-6 gap-y-2"
                 onsubmit="return confirm('¿Transferir el ticket? Se quitará la asignación actual.')">
@@ -285,6 +297,7 @@
               <button type="submit" class="shrink-0 w-24 px-3 py-2 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">Transferir</button>
             </div>
           </form>
+          {% endif %}
 
         </div>
       </div>

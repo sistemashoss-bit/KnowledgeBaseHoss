@@ -69,6 +69,8 @@ ACTION_LABELS: dict[str, str] = {
     "calendar_attachment_delete": "Eliminación de archivo de evento de calendario",
     "calendar_subscription_add": "Calendario agregado a la vista",
     "calendar_subscription_remove": "Calendario quitado de la vista",
+    # Tickets
+    "ticket_category_save": "Categoría de tickets guardada",
     # Organización
     "org_sync": "Sincronización de organización",
     "zone_create": "Creación de zona",

@@ -36,6 +36,7 @@ from app.issue_reports.classify import NOUL_YES, classify
 from app.messaging import realtime
 from app.models import Department, User, PRIORITY_MEDIUM, TICKET_INCIDENT, TICKET_REQUEST
 from app.tickets import service as tickets
+from app.tickets.categories import active_categories, apply_step, resolve_step
 
 router = APIRouter(prefix="/api/issue-reports", tags=["issue-reports"])
 
@@ -137,6 +138,32 @@ def _chosen_department(raw: str, db: Session) -> Department | None:
     return dept
 
 
+@router.get("/options")
+async def report_options(request: Request, db: Session = Depends(get_db)):
+    """Qué ofrece el widget a quien reporta: las categorías de su departamento si
+    tiene (Comercial) o, si no, los departamentos como hoy."""
+    user = await _reporter(request, db)
+    categories = active_categories(user.department_id, db)
+    if categories:
+        return {
+            "mode": "categories",
+            "categories": [{"id": str(c.id), "name": c.name, "description": c.description} for c in categories],
+        }
+    departments = db.query(Department).order_by(Department.name).all()
+    return {"mode": "departments", "departments": [{"id": str(d.id), "name": d.name} for d in departments]}
+
+
+def _chosen_category(raw: str, categories: list):
+    """Categoría elegida en el widget, entre las de su departamento; vacío = que elija Jev."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    chosen = next((c for c in categories if str(c.id) == raw), None)
+    if not chosen:
+        raise HTTPException(400, "Categoría inválida")
+    return chosen
+
+
 @router.get("/departments")
 async def list_report_departments(request: Request, db: Session = Depends(get_db)):
     """Opciones del selector de departamento del widget."""
@@ -151,6 +178,7 @@ async def create_issue_report(
     description: str = Form(...),
     context: str = Form("{}"),
     department_id: str = Form(""),
+    category_id: str = Form(""),
     screenshot: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
 ):
@@ -170,6 +198,12 @@ async def create_issue_report(
     description = description[:MAX_DESCRIPTION]
     ctx = _clean_context(context)
     chosen = _chosen_department(department_id, db)
+    # Categorías (Comercial): solo si el widget no mandó departamento (los widgets
+    # anteriores a las categorías lo siguen mandando y se respetan).
+    categories = [] if chosen else active_categories(user.department_id, db)
+    chosen_category = _chosen_category(category_id, categories) if categories else None
+    if category_id.strip() and not categories:
+        raise HTTPException(400, "Tu departamento no usa categorías")
 
     shot = None
     if screenshot and screenshot.filename:
@@ -186,7 +220,8 @@ async def create_issue_report(
 
     # Clasificación. Si Jev falla, tarda o no está seguro: triage + prioridad media.
     # Si el usuario eligió departamento, a Jev no se le pregunta: solo decide la prioridad.
-    departments = [] if chosen else db.query(Department).order_by(Department.name).all()
+    # Con categorías, Jev elige categoría (si no la eligió el usuario), no departamento.
+    departments = [] if chosen or categories else db.query(Department).order_by(Department.name).all()
     jev_state = {
         "app": ctx.get("app"),
         "page_title": ctx.get("page_title"),
@@ -194,10 +229,23 @@ async def create_issue_report(
         "description": description,
         "recent_errors": [e[:300] for e in ctx.get("recent_errors", [])[-5:]],
     }
-    result = await classify({k: v for k, v in jev_state.items() if v}, departments)
+    result = await classify(
+        {k: v for k, v in jev_state.items() if v}, departments,
+        categories if categories and not chosen_category else None,
+    )
     triage = _triage_department(db)
+    category = chosen_category
+    if categories and not category:
+        guessed = (result or {}).get("category_id")
+        category = next((c for c in categories if str(c.id) == guessed), None)
+    # Paso de la categoría; si ningún paso se puede resolver, se va a triage sin categoría.
+    step = resolve_step(category, user, db) if category else None
     if chosen:
         department_id = chosen.id
+    elif step:
+        department_id = step.department_id
+    elif categories:
+        department_id = triage.id if triage else None
     else:
         department_id = (result or {}).get("department_id") or (triage.id if triage else None)
     priority = (result or {}).get("priority") or PRIORITY_MEDIUM
@@ -207,9 +255,10 @@ async def create_issue_report(
     feature = bool(result) and result["jev"].get("feature_request", 0) >= NOUL_YES
     if not department_id:
         raise HTTPException(503, "No hay departamento de triage configurado para recibir el reporte")
+    ticket_kind = TICKET_REQUEST if feature else (category.default_kind if step else TICKET_INCIDENT)
     ticket = tickets.create_ticket(
         db, user,
-        kind=TICKET_REQUEST if feature else TICKET_INCIDENT,
+        kind=ticket_kind,
         title=_title(description, ctx.get("app")),
         description=description,
         department_id=department_id,
@@ -217,14 +266,20 @@ async def create_issue_report(
         source_app=ctx.get("app") or "widget",
         context=ctx,
     )
+    if step:
+        apply_step(ticket, category, step, when=ticket.created_at)
     if shot:
         content, content_type, ext = shot
         tickets.add_evidence(ticket, user, content, f"captura.{ext}", content_type, db)
     db.commit()
 
-    # Avisar a los admins del departamento destino: el ticket nace sin asignar.
+    # Avisar: a quien le tocó (paso con responsable) o a los admins del departamento
+    # destino (el ticket nace sin asignar).
     dept = db.get(Department, ticket.department_id)
-    admin_ids = tickets.department_admin_ids(dept.id, db, exclude=user.id)
+    if ticket.assigned_to:
+        admin_ids = [ticket.assigned_to] if ticket.assigned_to != user.id else []
+    else:
+        admin_ids = tickets.department_admin_ids(dept.id, db, exclude=user.id)
     if admin_ids:
         realtime.notify_users(
             admin_ids, title=f"Nuevo reporte de {user.name or user.email}",
@@ -236,6 +291,7 @@ async def create_issue_report(
         details=(
             f"app={ticket.source_app} kind={ticket.kind} priority={priority} classified={bool(result)}"
             f" department={'manual' if chosen else 'auto'}"
+            + (f" category={category.name} step={ticket.step_position}" if step else "")
         ),
     )
 
@@ -245,6 +301,7 @@ async def create_issue_report(
         "kind": ticket.kind,
         "url": str(request.base_url).rstrip("/") + f"/tickets/{ticket.number}",
         "department": dept.name,
+        "category": category.name if step else None,
         "priority": priority,
         "classified": bool(result),
     }
