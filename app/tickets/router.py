@@ -21,8 +21,8 @@ from app.database import SessionLocal, get_db
 from app.messaging import realtime, stickers
 from app.models import (
     Department, Ticket, TicketCategory, TicketCategoryStep, TicketComment, TicketCommentReaction,
-    TicketEvidence, TicketSlaPolicy, TicketStatusHistory, User,
-    STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
+    TicketEscalation, TicketEvidence, TicketSlaPolicy, TicketStatusHistory, User,
+    ESCALATION_MANUAL, STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
     PRIORITY_MEDIUM, ROLE_AUDITOR, ROLE_SUPERADMIN, TASK_PRIORITIES,
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_KINDS, TICKET_RESOLVED, TICKET_STATUSES,
 )
@@ -31,7 +31,7 @@ from app.tasks.business_hours import business_hours_label
 from app.tasks.router import _comment_threads
 from app.templating import templates
 from app.tickets import service as svc
-from app.tickets.categories import TARGET_LABELS, step_label
+from app.tickets.categories import TARGET_LABELS, escalate, escalation_recipients, has_next_step, step_label
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -547,6 +547,10 @@ def ticket_detail(
             selectinload(Ticket.comments).joinedload(TicketComment.user),
             selectinload(Ticket.evidences).joinedload(TicketEvidence.uploader),
             selectinload(Ticket.status_history).joinedload(TicketStatusHistory.changed_by_user),
+            selectinload(Ticket.escalations).joinedload(TicketEscalation.to_department),
+            selectinload(Ticket.escalations).joinedload(TicketEscalation.to_user),
+            selectinload(Ticket.escalations).joinedload(TicketEscalation.from_user),
+            selectinload(Ticket.escalations).joinedload(TicketEscalation.actor),
         )
         .filter(Ticket.number == number).first()
     )
@@ -572,6 +576,7 @@ def ticket_detail(
         "ticket": t,
         "step_info": step_info,
         "in_direct_boss_step": svc.in_direct_boss_step(t),
+        "can_escalate": can_attend and t.status in TICKET_ACTIVE_STATUSES and has_next_step(t),
         "sla": svc.sla_status(t),
         "hours_label": business_hours_label(),
         "is_requester": svc.is_requester(user, t),
@@ -685,6 +690,41 @@ def assign_ticket(
         details=f"assigned_to={target.email if target else '-'}",
     )
     return RedirectResponse(_url(t), status_code=302)
+
+
+@router.post("/{number:int}/escalate")
+def escalate_ticket(
+    number: int,
+    request: Request,
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Pasa un ticket con categoría al siguiente paso (quien lo atiende, con motivo)."""
+    user = _require_user(current_user)
+    t = _get(number, db, user)
+    if not svc.can_attend(user, t):
+        raise HTTPException(403)
+    if not t.category_id:
+        raise HTTPException(400, "Solo se escalan los tickets con categoría")
+    if t.status not in TICKET_ACTIVE_STATUSES:
+        raise HTTPException(400, "El ticket ya está resuelto o cerrado")
+    if not note.strip():
+        raise HTTPException(400, "Escribe por qué lo escalas")
+    esc = escalate(t, db, reason=ESCALATION_MANUAL, actor=user, note=note)
+    if not esc:
+        raise HTTPException(400, "Ya no hay más pasos a los que escalarlo")
+    db.commit()
+
+    _notify(escalation_recipients(t, db), user, f"{_actor(user)} escaló un ticket", t, "ticket_escalate")
+    realtime.notify_ticket(t.id)
+    audit.log_action(
+        "ticket_escalate", user=user, request=request,
+        resource_type="ticket", resource_id=t.id, resource_name=_label(t),
+        details=f"step {esc.from_position} -> {esc.to_position}",
+    )
+    # Quien lo escaló deja de verlo si ya no le toca.
+    return RedirectResponse(_url(t) if svc.can_view(user, t) else "/tickets/", status_code=302)
 
 
 @router.post("/{number:int}/transfer")

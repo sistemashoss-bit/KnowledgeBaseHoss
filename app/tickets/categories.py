@@ -5,13 +5,15 @@ elige categoría en el widget en vez de departamento. Cada paso dice a quién le
 el jefe directo de quien reporta, un departamento o una persona. Un paso que no se
 puede resolver (sin jefe, persona inactiva o sin departamento) se salta.
 """
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
-    STEP_DEPARTMENT, STEP_DIRECT_BOSS, STEP_USER, Ticket, TicketCategory, TicketCategoryStep, User,
+    STEP_DEPARTMENT, STEP_DIRECT_BOSS, STEP_USER, TICKET_OPEN, Ticket, TicketCategory, TicketCategoryStep,
+    TicketEscalation, TicketStatusHistory, User,
 )
 from app.tickets.hierarchy import pick_direct_boss
 
@@ -74,3 +76,55 @@ def apply_step(t: Ticket, category: TicketCategory, resolved: ResolvedStep, when
     t.assigned_to = resolved.assigned_to
     t.sla_response_minutes = resolved.step.sla_response_minutes
     t.sla_resolution_minutes = resolved.step.sla_resolution_minutes
+    t.step_responded_at = None
+
+
+def has_next_step(t: Ticket) -> bool:
+    """Hay algún paso después del actual (puede que no se pueda resolver)."""
+    if not t.category or t.step_position is None:
+        return False
+    return any(s.position > t.step_position for s in t.category.steps)
+
+
+def escalate(
+    t: Ticket, db: Session, *, reason: str, actor: User | None = None, note: str | None = None,
+    when: datetime | None = None,
+) -> TicketEscalation | None:
+    """Pasa el ticket al siguiente paso que se pueda resolver (sin commit) y deja el
+    registro. None si ya no hay paso. Vuelve a "Abierto": el nuevo responsable no ha
+    empezado. Quien lo tenía deja de verlo (regla de visibilidad con categoría)."""
+    if not t.category or t.step_position is None:
+        return None
+    resolved = resolve_step(t.category, t.requester, db, after=t.step_position)
+    if not resolved:
+        return None
+    when = when or datetime.utcnow()
+    esc = TicketEscalation(
+        id=uuid.uuid4(), ticket_id=t.id,
+        from_position=t.step_position, to_position=resolved.step.position,
+        from_department_id=t.department_id, to_department_id=resolved.department_id,
+        from_user_id=t.assigned_to, to_user_id=resolved.assigned_to,
+        reason=reason, note=(note or "").strip()[:2000] or None,
+        actor_id=actor.id if actor else None, created_at=when,
+    )
+    db.add(esc)
+    apply_step(t, t.category, resolved, when=when)
+    if t.status != TICKET_OPEN:
+        old = t.status
+        t.status = TICKET_OPEN
+        t.resolved_at = None
+        t.closed_at = None
+        db.add(TicketStatusHistory(
+            id=uuid.uuid4(), ticket_id=t.id, from_status=old, to_status=TICKET_OPEN,
+            changed_by=actor.id if actor else None, changed_at=when,
+        ))
+    return esc
+
+
+def escalation_recipients(t: Ticket, db: Session) -> list:
+    """A quién avisar del nuevo paso: su responsable o, sin responsable, los admins
+    del departamento; y al solicitante."""
+    from app.tickets.service import department_admin_ids
+
+    ids = [t.assigned_to] if t.assigned_to else department_admin_ids(t.department_id, db)
+    return list({*ids, t.requester_id})

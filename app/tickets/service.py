@@ -170,19 +170,28 @@ def apply_sla(t: Ticket, db: Session) -> None:
     t.sla_response_minutes, t.sla_resolution_minutes = policy_minutes(t.department_id, t.priority, db)
 
 
-def _resolution_seconds(t: Ticket, now: datetime) -> float:
+def _resolution_seconds(t: Ticket, now: datetime, since: datetime | None = None) -> float:
     """Horas laborales trabajadas: suma los tramos del historial salvo los de
-    "En espera" (pausa) y los posteriores a resolverse o cerrarse."""
+    "En espera" (pausa) y los posteriores a resolverse o cerrarse. `since`: solo
+    desde ahí (el inicio del paso, en los tickets con categoría)."""
     history = t.status_history
     if not history:
-        return business_seconds(t.created_at, t.resolved_at or now)
+        start = max(t.created_at, since) if since else t.created_at
+        return business_seconds(start, t.resolved_at or now)
     total = 0.0
     for i, entry in enumerate(history):
         if entry.to_status in (TICKET_WAITING, TICKET_RESOLVED, TICKET_CLOSED):
             continue
         end = history[i + 1].changed_at if i + 1 < len(history) else now
-        total += business_seconds(entry.changed_at, end)
+        start = max(entry.changed_at, since) if since else entry.changed_at
+        if end > start:
+            total += business_seconds(start, end)
     return total
+
+
+def _step_scoped(t: Ticket) -> bool:
+    """Con categoría, el SLA es el del paso actual y se cuenta desde que empezó."""
+    return bool(t.category_id and t.step_started_at)
 
 
 def resolution_seconds(t: Ticket, now: datetime | None = None) -> float:
@@ -214,13 +223,18 @@ def sla_status(t: Ticket, now: datetime | None = None) -> dict:
     Estados: ok / risk (por vencer) / breached (vencido, sigue abierto) /
     met / missed (ya terminó, dentro o fuera de la meta)."""
     now = now or datetime.utcnow()
+    scoped = _step_scoped(t)
+    start = t.step_started_at if scoped else t.created_at
+    responded = t.step_responded_at if scoped else t.first_response_at
     response = _metric(
         t.sla_response_minutes,
-        business_seconds(t.created_at, t.first_response_at or now),
-        t.first_response_at is not None,
+        business_seconds(start, responded or now),
+        responded is not None,
     )
     finished = t.status in (TICKET_RESOLVED, TICKET_CLOSED)
-    resolution = _metric(t.sla_resolution_minutes, _resolution_seconds(t, now), finished)
+    resolution = _metric(
+        t.sla_resolution_minutes, _resolution_seconds(t, now, since=start if scoped else None), finished,
+    )
     order = ["breached", "missed", "risk", "ok", "met"]
     states = [m["state"] for m in (response, resolution) if m]
     # Lo pendiente manda: una respuesta cumplida no oculta una resolución por vencer.
@@ -255,8 +269,13 @@ def record_status(t: Ticket, new_status: str, actor: User, db: Session, when: da
 
 def mark_responded(t: Ticket, actor: User, when: datetime | None = None) -> None:
     """La primera acción visible de alguien que no es el solicitante cuenta como respuesta."""
-    if t.first_response_at is None and not is_requester(actor, t):
-        t.first_response_at = when or datetime.utcnow()
+    if is_requester(actor, t):
+        return
+    when = when or datetime.utcnow()
+    if t.first_response_at is None:
+        t.first_response_at = when
+    if t.category_id and t.step_responded_at is None:
+        t.step_responded_at = when
 
 
 def create_ticket(

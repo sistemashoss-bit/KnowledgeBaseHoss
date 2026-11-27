@@ -87,6 +87,33 @@
         <p><span class="text-xs text-gray-400">Le toca a</span> <span class="font-medium text-gray-800">{{ step_info.label }}</span></p>
         {% endif %}
       </div>
+      {% if ticket.escalations %}
+      <details class="px-4 sm:px-6 py-3 border-b border-gray-100 text-sm">
+        <summary class="cursor-pointer text-xs font-medium text-gray-500">Escalamientos ({{ ticket.escalations | length }})</summary>
+        <table class="w-full mt-2 text-xs">
+          <thead class="text-gray-400">
+            <tr>
+              <th class="text-left font-medium py-1 pr-3">Fecha</th>
+              <th class="text-left font-medium py-1 pr-3">Paso</th>
+              <th class="text-left font-medium py-1 pr-3">Pasó a</th>
+              <th class="text-left font-medium py-1 pr-3">Motivo</th>
+              <th class="text-left font-medium py-1">Quién</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 text-gray-700">
+            {% for e in ticket.escalations %}
+            <tr>
+              <td class="py-1 pr-3 whitespace-nowrap"><time datetime="{{ e.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</time></td>
+              <td class="py-1 pr-3 whitespace-nowrap">{{ e.from_position or "—" }} → {{ e.to_position }}</td>
+              <td class="py-1 pr-3">{{ (e.to_user.name or e.to_user.email) if e.to_user else (e.to_department.name if e.to_department else "—") }}</td>
+              <td class="py-1 pr-3">{% if e.reason == "sla" %}SLA vencido{% else %}{{ e.note or "A mano" }}{% endif %}</td>
+              <td class="py-1">{{ (e.actor.name or e.actor.email) if e.actor else "Automático" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
       {% endif %}
 
       <!-- Datos -->
@@ -278,6 +305,23 @@
               <button type="submit" class="shrink-0 sm:w-24 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors">Guardar</button>
             </div>
           </form>
+
+          {% if can_escalate %}
+          <form method="post" action="/tickets/{{ ticket.number }}/escalate"
+                class="px-4 sm:px-6 py-4 grid grid-cols-1 sm:grid-cols-[10rem_1fr] items-start gap-x-6 gap-y-2"
+                onsubmit="return confirm('¿Escalar el ticket al siguiente paso? Dejarás de verlo si ya no te toca.')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <div>
+              <label for="t-esc" class="block text-sm font-medium text-gray-800">Escalar</label>
+              <p class="text-xs text-gray-400">Al siguiente paso de la categoría</p>
+            </div>
+            <div class="flex gap-2">
+              <input id="t-esc" name="note" required maxlength="2000" placeholder="Por qué lo escalas"
+                     class="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button type="submit" class="shrink-0 w-24 px-3 py-2 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">Escalar</button>
+            </div>
+          </form>
+          {% endif %}
 
           {% if not ticket.category_id %}
           <form method="post" action="/tickets/{{ ticket.number }}/transfer"
