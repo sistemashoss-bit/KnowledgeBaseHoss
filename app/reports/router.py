@@ -11,7 +11,7 @@ from app.database import get_db
 from app.permissions import granted_department_ids, has_oversight
 from app.models import (
     AuditLog, Department, Project, SearchLog,
-    Task, TaskComment, TaskFollowUp, TaskShare, TaskStatusHistory, Ticket, TicketComment, User,
+    Task, TaskComment, TaskFollowUp, TaskShare, TaskStatusHistory, Ticket, TicketCategory, TicketComment, User,
     ROLE_SUPERADMIN, ROLE_AUDITOR,
     TASK_STATUSES, TASK_PRIORITIES, TASK_DONE, TASK_PENDING, TASK_IN_PROGRESS, PROJECT_STATUSES,
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_IN_PROGRESS, TICKET_OPEN, TICKET_RESOLVED, TICKET_WAITING,
@@ -509,6 +509,7 @@ def _open_tickets(conds: list, db: Session) -> list[dict]:
         .options(
             joinedload(Ticket.assignee), joinedload(Ticket.requester), joinedload(Ticket.department),
             selectinload(Ticket.status_history),
+            selectinload(Ticket.category).selectinload(TicketCategory.steps),
         )
         .filter(Ticket.status.in_(TICKET_ACTIVE_STATUSES), *conds)
         .all()
@@ -536,6 +537,9 @@ def _open_tickets(conds: list, db: Session) -> list[dict]:
         # La meta que sigue corriendo: la respuesta mientras no haya, si no la resolución.
         pending = next((m for m in (sla["response"], sla["resolution"]) if m and m["state"] in ("ok", "risk", "breached")), None)
         c = last_comments.get(t.id)
+        # Con categoría el SLA es el del paso actual (PLAN_CATEGORIAS_TICKETS.md).
+        step_total = len(t.category.steps) if t.category else 0
+        of_step = " del paso" if t.category_id else ""
         g["tickets"].append({
             "number": t.number,
             "title": t.title,
@@ -548,8 +552,10 @@ def _open_tickets(conds: list, db: Session) -> list[dict]:
             "sla_state": sla["worst"],
             "sla_metric": pending,
             "sla_metric_name": (
-                "Primera respuesta" if pending is not None and pending is sla["response"] else "Resolución"
+                ("Primera respuesta" if pending is not None and pending is sla["response"] else "Resolución") + of_step
             ) if pending else "",
+            "category": t.category.name if t.category else "",
+            "step": f"{t.step_position} de {step_total}" if t.category and t.step_position else "",
             "last_comment": c.content if c else "",
             "last_comment_by": ((c.user.name or c.user.email) if c.user else "") if c else "",
             "last_comment_at": c.created_at if c else None,
@@ -572,6 +578,11 @@ def _ticket_report_scope(current_user, department_id: str, user_id: str, relatio
     conds = []
     if dept_ids is not None:
         conds.append(Ticket.department_id.in_(dept_ids) if dept_ids else Ticket.id == None)  # noqa: E711
+    # Además, solo lo que ve en Tickets: los de categoría (Comercial) son del
+    # solicitante, del asignado y de a quien se avisó del SLA, no de todo el depto.
+    visible = ticket_svc.visible_condition(current_user)
+    if visible is not None:
+        conds.append(visible)
     if active_user:
         by_relation = {"assigned": Ticket.assigned_to == active_user, "requested": Ticket.requester_id == active_user}
         conds.append(or_(*by_relation.values()) if relation == "all" else by_relation[relation])

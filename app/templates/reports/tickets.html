@@ -98,6 +98,8 @@
           <tr>
             <th class="text-left font-medium px-4 sm:px-6 py-2 min-w-[14rem]">Ticket</th>
             <th class="text-left font-medium px-3 py-2">Estado</th>
+            <th class="text-left font-medium px-3 py-2">Categoría</th>
+            <th class="text-left font-medium px-3 py-2">Paso</th>
             <th class="text-left font-medium px-3 py-2">Responsable</th>
             <th class="text-left font-medium px-3 py-2">SLA</th>
             <th class="text-left font-medium px-3 py-2 min-w-[16rem]">Último comentario</th>
@@ -115,6 +117,8 @@
               <p class="text-xs text-gray-400 mt-1">{{ t.requester }} · <time datetime="{{ t.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="datetime">{{ t.created_at.strftime('%d/%m/%Y %H:%M') }}</time></p>
             </td>
             <td class="px-3 py-3 whitespace-nowrap">{{ status_badge(t.status) }}</td>
+            <td class="px-3 py-3 whitespace-nowrap {{ 'text-gray-700' if t.category else 'text-gray-300' }}">{{ t.category or '—' }}</td>
+            <td class="px-3 py-3 whitespace-nowrap {{ 'text-gray-700' if t.step else 'text-gray-300' }}">{{ t.step or '—' }}</td>
             <td class="px-3 py-3 whitespace-nowrap {{ 'text-gray-700' if t.assignee else 'text-gray-400 italic' }}">{{ t.assignee or 'Sin asignar' }}</td>
             <td class="px-3 py-3 whitespace-nowrap">
               {{ sla_badge(t.sla_state) }}

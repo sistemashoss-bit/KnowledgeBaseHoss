@@ -168,7 +168,7 @@ def open_tasks_pdf(groups: list[dict], subtitle: str) -> bytes:
 
 TICKETS_TITLE = "Resumen de Tickets — abiertos, en atención y en espera"
 TICKET_HEADERS = [
-    "Departamento", "Folio", "Ticket", "Tipo", "Prioridad", "Estado", "Responsable", "Solicitante",
+    "Departamento", "Folio", "Ticket", "Tipo", "Prioridad", "Estado", "Categoría", "Paso", "Responsable", "Solicitante",
     "Levantado", "SLA", "Detalle SLA", "Último comentario", "Comentado por", "Fecha comentario",
 ]
 TICKET_STATUS_LABELS = {"open": "Abierto", "in_progress": "En atención", "waiting": "En espera"}
@@ -214,22 +214,22 @@ def open_tickets_xlsx(groups: list[dict], subtitle: str) -> bytes:
             ws.append([
                 g["department"], t["number"], t["title"], TICKET_KIND_LABELS.get(t["kind"], t["kind"]),
                 TICKET_PRIORITY_LABELS.get(t["priority"], t["priority"]),
-                TICKET_STATUS_LABELS.get(t["status"], t["status"]),
+                TICKET_STATUS_LABELS.get(t["status"], t["status"]), t["category"], t["step"],
                 t["assignee"] or "Sin asignar", t["requester"], _local(t["created_at"]),
                 SLA_LABELS.get(t["sla_state"], "Sin meta"), sla_detail(t),
                 t["last_comment"] or "", t["last_comment_by"] or "", _local(t["last_comment_at"]),
             ])
             row = ws.max_row
-            ws.cell(row, 9).number_format = "DD/MM/YYYY HH:MM"
-            ws.cell(row, 14).number_format = "DD/MM/YYYY HH:MM"
-            for col in (3, 11, 12):
+            ws.cell(row, 11).number_format = "DD/MM/YYYY HH:MM"
+            ws.cell(row, 16).number_format = "DD/MM/YYYY HH:MM"
+            for col in (3, 13, 14):
                 ws.cell(row, col).alignment = Alignment(wrap_text=True, vertical="top")
             if t["sla_state"] == "breached":
-                ws.cell(row, 10).font = Font(color="DC2626", bold=True)
+                ws.cell(row, 12).font = Font(color="DC2626", bold=True)
             elif t["sla_state"] == "risk":
-                ws.cell(row, 10).font = Font(color="B45309")
+                ws.cell(row, 12).font = Font(color="B45309")
 
-    widths = [22, 8, 40, 12, 10, 12, 24, 24, 17, 12, 34, 60, 24, 17]
+    widths = [22, 8, 40, 12, 10, 12, 20, 8, 24, 24, 17, 12, 34, 60, 24, 17]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = ws.cell(header_row + 1, 1)
@@ -263,7 +263,7 @@ def open_tickets_pdf(groups: list[dict], subtitle: str) -> bytes:
         return bytes(pdf.output())
 
     header_style = FontFace(emphasis="BOLD", color=255, fill_color=(31, 41, 55))
-    col_widths = (72, 24, 38, 46, 97)
+    col_widths = (66, 22, 30, 16, 34, 44, 65)
     for g in groups:
         pdf.set_font("DejaVu", "B", 11)
         line = (
@@ -278,7 +278,7 @@ def open_tickets_pdf(groups: list[dict], subtitle: str) -> bytes:
             col_widths=col_widths, headings_style=header_style, line_height=4.5,
             text_align="LEFT", repeat_headings=1, padding=1.2,
         ) as table:
-            table.row(["Ticket", "Estado", "Responsable", "SLA", "Último comentario"])
+            table.row(["Ticket", "Estado", "Categoría", "Paso", "Responsable", "SLA", "Último comentario"])
             for t in g["tickets"]:
                 title = (
                     f"#{t['number']} {t['title']}\n"
@@ -296,7 +296,10 @@ def open_tickets_pdf(groups: list[dict], subtitle: str) -> bytes:
                 else:
                     comment = "Sin comentarios"
                 row = table.row()
-                for value in (title, TICKET_STATUS_LABELS.get(t["status"], t["status"]), t["assignee"] or "Sin asignar", sla, comment):
+                for value in (
+                    title, TICKET_STATUS_LABELS.get(t["status"], t["status"]), t["category"] or "—", t["step"] or "—",
+                    t["assignee"] or "Sin asignar", sla, comment,
+                ):
                     row.cell(_pdf_text(value))
         pdf.ln(4)
 
