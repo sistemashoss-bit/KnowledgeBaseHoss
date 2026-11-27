@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     from app import search as search_module
     from app.messaging.cleanup import recurring_scheduler_loop, scheduler_loop
     from app.calendar.reminders import reminder_scheduler_loop
-    from app.tickets.escalation_loop import escalation_scheduler_loop
+    from app.tickets.sla_alerts import sla_alert_scheduler_loop
 
     Base.metadata.create_all(bind=engine)
     search_module.ensure_indices()
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(recurring_scheduler_loop()),
         asyncio.create_task(reminder_scheduler_loop()),
-        asyncio.create_task(escalation_scheduler_loop()),
+        asyncio.create_task(sla_alert_scheduler_loop()),
     ]
     try:
         yield

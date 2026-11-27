@@ -66,10 +66,13 @@ STEP_DIRECT_BOSS = "direct_boss"   # jefe directo de quien reporta (app/tickets/
 STEP_DEPARTMENT = "department"     # un departamento; lo toma alguien de ahí
 STEP_USER = "user"                 # una persona específica
 STEP_TARGETS = [STEP_DIRECT_BOSS, STEP_DEPARTMENT, STEP_USER]
-# Por qué cambió de paso: a mano (botón Escalar), por SLA de resolución vencido, o
-# porque el paso no se pudo resolver (sin jefe, persona inactiva) y se saltó.
+# Por qué cambió de paso: hoy solo a mano (botón Escalar).
 ESCALATION_MANUAL = "manual"
-ESCALATION_SLA = "sla"
+# A quién avisar si se vence el SLA del paso.
+ALERT_BOSS = "boss"
+ALERT_DEPARTMENT = "department"
+ALERT_TARGETS = [ALERT_BOSS, ALERT_DEPARTMENT]
+SLA_METRICS = ["response", "resolution"]
 
 # ── Task tag colors (paleta fija, mapeada a clases Tailwind en la plantilla) ───
 TASK_TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "pink"]
@@ -836,6 +839,9 @@ class Ticket(Base):
     escalations = relationship(
         "TicketEscalation", back_populates="ticket", order_by="TicketEscalation.created_at", passive_deletes=True,
     )
+    sla_alerts = relationship(
+        "TicketSlaAlert", back_populates="ticket", order_by="TicketSlaAlert.created_at", passive_deletes=True,
+    )
     comments = relationship(
         "TicketComment", back_populates="ticket", order_by="TicketComment.created_at", passive_deletes=True,
     )
@@ -948,10 +954,16 @@ class TicketCategory(Base):
 
 class TicketCategoryStep(Base):
     """Paso de la cadena de una categoría, en orden (1, 2, 3…). Cada uno con su SLA
-    en minutos laborales; al vencerse el de resolución, el ticket pasa al siguiente."""
+    en minutos laborales; si se vence (respuesta o resolución) se avisa a
+    `alert_target`: el jefe directo del responsable o los admins de un departamento.
+    Pasar al siguiente paso es siempre a mano (Escalar)."""
     __tablename__ = "ticket_category_steps"
     __table_args__ = (
         UniqueConstraint("category_id", "position", name="uq_ticket_category_steps_position"),
+        CheckConstraint(
+            "alert_target IS NULL OR alert_target = 'boss' OR alert_target = 'department'",
+            name="ck_ticket_category_steps_alert",
+        ),
         CheckConstraint(
             "(target = 'direct_boss' AND department_id IS NULL AND user_id IS NULL)"
             " OR (target = 'department' AND department_id IS NOT NULL AND user_id IS NULL)"
@@ -968,18 +980,22 @@ class TicketCategoryStep(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     sla_response_minutes = Column(Integer, nullable=True)
     sla_resolution_minutes = Column(Integer, nullable=True)
+    alert_target = Column(String(20), nullable=True)
+    alert_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
 
     category = relationship("TicketCategory", back_populates="steps")
-    department = relationship("Department")
+    department = relationship("Department", foreign_keys=[department_id])
     user = relationship("User")
+    alert_department = relationship("Department", foreign_keys=[alert_department_id])
 
 
 class TicketEscalation(Base):
     """Cada vez que un ticket con categoría pasa a otro paso."""
     __tablename__ = "ticket_escalations"
+    __table_args__ = (Index("ix_ticket_escalations_ticket", "ticket_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
     from_position = Column(Integer, nullable=True)
     to_position = Column(Integer, nullable=False)
     from_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
@@ -988,7 +1004,6 @@ class TicketEscalation(Base):
     to_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reason = Column(String(20), nullable=False)
     note = Column(Text, nullable=True)
-    # Null = automático (SLA vencido).
     actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -998,6 +1013,27 @@ class TicketEscalation(Base):
     from_user = relationship("User", foreign_keys=[from_user_id])
     to_user = relationship("User", foreign_keys=[to_user_id])
     actor = relationship("User", foreign_keys=[actor_id])
+
+
+class TicketSlaAlert(Base):
+    """Aviso de SLA vencido en un paso (una vez por paso, métrica y persona). Quien
+    lo recibió puede ver el ticket."""
+    __tablename__ = "ticket_sla_alerts"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "step_position", "metric", "user_id", name="uq_ticket_sla_alerts"),
+        CheckConstraint("metric = 'response' OR metric = 'resolution'", name="ck_ticket_sla_alerts_metric"),
+        Index("ix_ticket_sla_alerts_user", "user_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    step_position = Column(Integer, nullable=False)
+    metric = Column(String(20), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    ticket = relationship("Ticket", back_populates="sla_alerts")
+    user = relationship("User")
 
 
 # ── Calendar ──────────────────────────────────────────────────────────────────

@@ -41,6 +41,19 @@ def active_categories(department_id, db: Session) -> list[TicketCategory]:
     return [c for c in rows if c.steps]
 
 
+ALERT_LABELS = {
+    "boss": "Jefe del responsable",
+    "department": "Departamento",
+}
+
+
+def alert_label(step: TicketCategoryStep) -> str:
+    """A quién se avisa si se vence el SLA del paso; vacío = a nadie."""
+    if step.alert_target == "department":
+        return step.alert_department.name if step.alert_department else "Departamento"
+    return ALERT_LABELS.get(step.alert_target or "", "")
+
+
 def step_label(step: TicketCategoryStep) -> str:
     if step.target == STEP_DEPARTMENT and step.department:
         return step.department.name

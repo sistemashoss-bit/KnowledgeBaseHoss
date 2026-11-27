@@ -85,7 +85,9 @@ Ejemplos:
 | `department_id` | FK null | Si `target = department`. |
 | `user_id` | FK null | Si `target = user`. La persona atiende el ticket dentro de **su** departamento. |
 | `sla_response_minutes` | int null | SLA de primera respuesta del paso, en minutos laborales. NULL = sin meta. |
-| `sla_resolution_minutes` | int null | SLA de resolución del paso. Al vencerse, el ticket **se escala solo** al siguiente paso. NULL = sin meta (solo se escala a mano). |
+| `sla_resolution_minutes` | int null | SLA de resolución del paso. Al vencerse (igual que el de respuesta) se avisa a `alert_target`; el ticket **no** cambia de paso. NULL = sin meta. |
+| `alert_target` | `boss` / `department` / null | A quién avisar si vence el SLA del paso: el jefe directo del responsable (sin responsable o sin jefe: admins del departamento del paso) o los admins de `alert_department_id`. Null = a nadie. |
+| `alert_department_id` | FK departments null | Departamento al que se avisa con `alert_target = department`. |
 
 Un CHECK asegura que cada tipo lleve su destino.
 
@@ -99,7 +101,11 @@ Un CHECK asegura que cada tipo lleve su destino.
 
 ### `ticket_escalations` (historial)
 
-`id`, `ticket_id`, `from_position`, `to_position`, `from_department_id`, `to_department_id`, `to_user_id`, `reason` (`sla` / `manual` / `skipped`), `actor_id` (null si fue automático), `created_at`.
+`id`, `ticket_id`, `from_position`, `to_position`, `from_department_id`, `to_department_id`, `from_user_id`, `to_user_id`, `reason` (hoy solo `manual`), `note`, `actor_id`, `created_at`.
+
+### `ticket_sla_alerts` (nueva, aprobada 2026-11-27)
+
+`id`, `ticket_id`, `step_position`, `metric` (`response` / `resolution`), `user_id`, `created_at`; único (ticket, paso, métrica, persona). Evita avisar dos veces y da permiso de **ver** (no atender) el ticket a quien recibió el aviso.
 
 Cada paso se traduce a lo que el ticket ya tiene; no hace falta tabla de responsables por paso ni sucursal en el ticket.
 
@@ -126,7 +132,7 @@ Los tickets sin categoría (los de `/tickets/new` y los anteriores) siguen con l
 2. **Alta:** `create_ticket` recibe la categoría, resuelve el paso 1 (o el primero que no se salte), fija departamento y asignado, copia el SLA del paso (en lugar de `apply_sla` por departamento) y avisa a quien corresponda.
 3. **Resolver:** quien lo tiene asignado puede resolverlo en cualquier paso, incluido el jefe directo. El solicitante confirma y cierra, como hoy.
 4. **Escalar a mano:** botón **Escalar** para quien lo tiene asignado. Pasa al siguiente paso con un motivo obligatorio; usa la misma lógica que la transferencia de hoy (`transfer_ticket`).
-5. **Escalar solo:** un ciclo cada minuto (como `app/calendar/reminders.py`) busca tickets con categoría, abiertos o en atención, cuyo SLA de resolución del paso ya venció en horas laborales, y los pasa al siguiente.
+5. **Avisos de SLA (cambio del 2026-11-27):** un ciclo cada minuto (`app/tickets/sla_alerts.py`) revisa los tickets con categoría abiertos o en atención; si se venció la primera respuesta o la resolución del paso actual (horas laborales, desde `step_started_at`; "En espera" pausa), avisa una vez a la persona que designa el paso y le da permiso de ver el ticket. **No** lo pasa al siguiente paso: escalar es siempre a mano.
 6. **Último paso:** no se escala más; se queda ahí hasta resolverse (el SLA vencido solo se marca).
 7. **Cierre:** sin cambios; el solicitante confirma o reabre. Reabrir **no** regresa al paso 1.
 
@@ -143,15 +149,15 @@ En los tickets con categoría **no hay transferencia libre** ni cambio de depart
 1. hoss-api: `Roles.level`, puestos y nivel en la identidad; hoss-front: campo Nivel. Asignar departamento y nivel a los puestos de Comercial. **Código hecho el 2026-11-27, sin commit** (hoss-api `migrations/20261127120000-add-role-level.js`, `models/role.js`, `actions/sso/identity.js`; hoss-front formulario y lista de puestos). En `core_dev` no existe el departamento Comercial (solo Procesos y Sistemas): hay que darlo de alta y asignárselo a los puestos.
 2. knowledge: `position_level`, `direct_bosses` y pruebas con datos de dev (casos con dos supervisores y sucursales sin supervisor). **Código hecho el 2026-11-27, sin commit:** migración `064_user_position_level.py`, `User.position_level`, sync en `app/auth/provisioning.py` y `app/tickets/hierarchy.py` (`direct_bosses`, `pick_direct_boss` y la regla pura `select_bosses`, probada con 10 casos). Falta probarla con datos reales cuando dev tenga Comercial y niveles.
 3. knowledge: categorías y pasos, la pantalla de categorías y el alta desde el widget. `report-widget` (`report-widget.js`, hoy pide `/api/issue-reports/departments`): pedir `/options` y mostrar categorías o departamentos según la respuesta; mandar `category_id` o `department_id`. Mientras no se actualice el widget, `/departments` sigue funcionando igual. **Código hecho el 2026-11-27, sin commit:** migración `065_ticket_categories.py`, modelos `TicketCategory`/`TicketCategoryStep` y columnas en `Ticket`, `app/tickets/categories.py` (resolver y aplicar pasos, saltando los que no se pueden resolver), visibilidad "solo el asignado" en `app/tickets/service.py` (con candado: en el paso del jefe no se puede dejar sin asignar y los tickets con categoría no se transfieren), `/tickets/categorias` (superadmin), detalle con categoría y paso, `/api/issue-reports/options` y alta con `category_id` (Jev elige categoría con "No sé"; sin categoría resoluble va a triage, Sistemas), y `report-widget` v1.5.0. Escalar (manual y por SLA) e historial quedan para la fase 4: mientras tanto el ticket se queda en su paso y quien lo tiene lo puede resolver.
-4. knowledge: escalar a mano, escalado automático e historial. **Código hecho el 2026-11-27, sin commit:** migración `066_ticket_escalations.py` (tabla `ticket_escalations` y `tickets.step_responded_at`), `escalate()` en `app/tickets/categories.py` (siguiente paso resoluble, vuelve a "Abierto", deja registro), `POST /tickets/{n}/escalate` con motivo obligatorio (quien lo atiende; si ya no le toca deja de verlo), historial "Escalamientos" en el detalle, y `app/tickets/escalation_loop.py` cada minuto (abiertos o en atención; "En espera" pausa) con `FOR UPDATE SKIP LOCKED`. En tickets con categoría el SLA de respuesta y de resolución se mide desde `step_started_at`; en el último paso el SLA vencido solo se marca.
+4. knowledge: escalar a mano, avisos de SLA por paso e historial. **Código hecho el 2026-11-27, sin commit:** migración `066_ticket_escalations.py` (`ticket_escalations`, `ticket_sla_alerts` y `tickets.step_responded_at`; columnas `alert_target`/`alert_department_id` de los pasos en 065), `escalate()` en `app/tickets/categories.py` (siguiente paso resoluble, vuelve a "Abierto", deja registro), `POST /tickets/{n}/escalate` con motivo obligatorio, historial de escalamientos y de avisos en el detalle, «Avisar a» por paso en `/tickets/categorias`, y `app/tickets/sla_alerts.py` cada minuto con `ON CONFLICT DO NOTHING`.
 
 ## 8. Decisiones (2026-11-27)
 
-1. **Escala de las dos formas:** a mano (botón Escalar) y sola al vencerse el SLA de resolución del paso.
+1. **Escalar es a mano** (botón Escalar). *Cambió el 2026-11-27:* el SLA vencido ya no escala solo; avisa al designado del paso (jefe del responsable o un departamento), que puede ver el ticket.
 2. **El jefe directo puede resolver** el ticket; no solo lo pasa.
 3. **Solo quien lo tiene asignado ahora** lo ve y lo atiende, además del solicitante (y superadmin/auditor). Los pasos anteriores dejan de verlo.
 4. **Solo Comercial usa categorías.** Sus personas ven solo categorías en el widget. Todos los demás siguen reportando por departamento como hoy (en el widget y en knowledge). Se decide por el departamento de quien reporta: tiene categorías activas o no. No hace falta otra bandera.
-5. **Cada paso tiene su SLA** de respuesta y de resolución; el de resolución dispara el escalamiento automático.
+5. **Cada paso tiene su SLA** de respuesta y de resolución; si cualquiera de los dos se vence, se avisa al designado del paso (una vez por métrica).
 6. **No se acota por sucursal.** Con la regla 3, el ticket solo lo ve su asignado, así que la sucursal no hace falta. Acotar por sucursal tampoco bastaba: los demás vendedores de la misma sucursal lo habrían seguido viendo.
 7. **Empate de jefes:** se asigna al que tenga menos tickets abiertos asignados (empate, por nombre) y solo a él se le avisa.
 8. **Triage:** lo que Jev no clasifica va a una categoría de triage que atiende Sistemas (como hoy `report_triage_department`).

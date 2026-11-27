@@ -21,8 +21,8 @@ from app.database import SessionLocal, get_db
 from app.messaging import realtime, stickers
 from app.models import (
     Department, Ticket, TicketCategory, TicketCategoryStep, TicketComment, TicketCommentReaction,
-    TicketEscalation, TicketEvidence, TicketSlaPolicy, TicketStatusHistory, User,
-    ESCALATION_MANUAL, STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
+    TicketEscalation, TicketEvidence, TicketSlaAlert, TicketSlaPolicy, TicketStatusHistory, User,
+    ALERT_DEPARTMENT, ALERT_TARGETS, ESCALATION_MANUAL, STEP_DEPARTMENT, STEP_TARGETS, STEP_USER,
     PRIORITY_MEDIUM, ROLE_AUDITOR, ROLE_SUPERADMIN, TASK_PRIORITIES,
     TICKET_ACTIVE_STATUSES, TICKET_CLOSED, TICKET_KINDS, TICKET_RESOLVED, TICKET_STATUSES,
 )
@@ -31,7 +31,9 @@ from app.tasks.business_hours import business_hours_label
 from app.tasks.router import _comment_threads
 from app.templating import templates
 from app.tickets import service as svc
-from app.tickets.categories import TARGET_LABELS, escalate, escalation_recipients, has_next_step, step_label
+from app.tickets.categories import (
+    ALERT_LABELS, TARGET_LABELS, alert_label, escalate, escalation_recipients, has_next_step, step_label,
+)
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -396,7 +398,8 @@ def categories_page(
     categories = (
         db.query(TicketCategory)
         .options(selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.department),
-                 selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.user))
+                 selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.user),
+                 selectinload(TicketCategory.steps).joinedload(TicketCategoryStep.alert_department))
         .filter(TicketCategory.department_id == dept.id)
         .order_by(TicketCategory.sort_order, TicketCategory.name).all()
     )
@@ -411,8 +414,12 @@ def categories_page(
             step_rows.append({
                 "target": st.target, "department_id": str(st.department_id or ""), "user_id": str(st.user_id or ""),
                 "response": _hours(st.sla_response_minutes), "resolution": _hours(st.sla_resolution_minutes),
+                "alert": st.alert_target or "", "alert_department_id": str(st.alert_department_id or ""),
             })
-        step_rows += [{"target": "", "department_id": "", "user_id": "", "response": "", "resolution": ""}] * CATEGORY_BLANK_STEPS
+        step_rows += [{
+            "target": "", "department_id": "", "user_id": "", "response": "", "resolution": "",
+            "alert": "", "alert_department_id": "",
+        }] * CATEGORY_BLANK_STEPS
     people = (
         db.query(User).filter(User.is_active == True, User.is_bot == False)  # noqa: E712
         .order_by(User.name, User.email).all() if editing is not None else []
@@ -423,6 +430,7 @@ def categories_page(
         "editing": editing, "step_rows": step_rows, "people": people,
         "all_departments": sorted(departments, key=lambda d: d.name.lower()),
         "target_labels": TARGET_LABELS, "step_label": step_label,
+        "alert_labels": ALERT_LABELS, "alert_label": alert_label,
         "kind_labels": KIND_LABELS, "kinds": TICKET_KINDS,
         "hours_label": business_hours_label(),
         "saved": request.query_params.get("saved") == "1",
@@ -500,6 +508,19 @@ async def save_category(
         step["resolution"] = _parse_hours(get(f"resolution_{i}"))
         if step["response"] and step["resolution"] and step["response"] > step["resolution"]:
             raise HTTPException(400, f"En el paso {n} la primera respuesta no puede tardar más que la resolución")
+        alert = get(f"alert_{i}")
+        if alert and alert not in ALERT_TARGETS:
+            raise HTTPException(400, f"Aviso inválido en el paso {n}")
+        if alert and not (step["response"] or step["resolution"]):
+            raise HTTPException(400, f"El paso {n} avisa si se vence el SLA, pero no tiene SLA")
+        step["alert"], step["alert_department_id"] = alert or None, None
+        if alert == ALERT_DEPARTMENT:
+            try:
+                step["alert_department_id"] = uuid.UUID(get(f"alert_department_{i}"))
+            except ValueError:
+                raise HTTPException(400, f"Elige el departamento al que se avisa en el paso {n}")
+            if not db.get(Department, step["alert_department_id"]):
+                raise HTTPException(400, f"Departamento de aviso inválido en el paso {n}")
         steps.append(step)
     if not steps:
         raise HTTPException(400, "La categoría necesita al menos un paso")
@@ -517,6 +538,7 @@ async def save_category(
             id=uuid.uuid4(), category_id=category.id, position=n, target=st["target"],
             department_id=st["department_id"], user_id=st["user_id"],
             sla_response_minutes=st["response"], sla_resolution_minutes=st["resolution"],
+            alert_target=st["alert"], alert_department_id=st["alert_department_id"],
         ))
     db.commit()
     audit.log_action(
@@ -551,6 +573,7 @@ def ticket_detail(
             selectinload(Ticket.escalations).joinedload(TicketEscalation.to_user),
             selectinload(Ticket.escalations).joinedload(TicketEscalation.from_user),
             selectinload(Ticket.escalations).joinedload(TicketEscalation.actor),
+            selectinload(Ticket.sla_alerts).joinedload(TicketSlaAlert.user),
         )
         .filter(Ticket.number == number).first()
     )

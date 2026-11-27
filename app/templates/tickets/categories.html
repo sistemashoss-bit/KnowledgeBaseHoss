@@ -16,6 +16,7 @@
     <p class="text-sm text-gray-500 mt-1 mb-5">
       Si un departamento tiene categorías activas, su gente elige una categoría en el widget en lugar del departamento.
       Cada categoría pasa por sus pasos en orden; un paso que no se puede resolver (sin jefe, persona inactiva) se salta.
+      Pasar al siguiente paso es a mano (Escalar); si se vence el SLA del paso, se avisa a quien elijas y puede ver el ticket.
       Los demás departamentos siguen reportando por departamento.
     </p>
 
@@ -48,6 +49,7 @@
               <th class="text-left font-medium px-4 py-3">Categoría</th>
               <th class="text-left font-medium px-4 py-3">Tipo</th>
               <th class="text-left font-medium px-4 py-3">Pasos</th>
+              <th class="text-left font-medium px-4 py-3">Avisos de SLA</th>
               <th class="text-left font-medium px-4 py-3">Estado</th>
               <th class="px-4 py-3"><span class="sr-only">Acciones</span></th>
             </tr>
@@ -60,6 +62,9 @@
               <td class="px-4 py-3 text-gray-600">{{ kind_labels[c.default_kind] }}</td>
               <td class="px-4 py-3 text-gray-600">
                 {% for st in c.steps %}{{ loop.index }}. {{ step_label(st) }}{% if not loop.last %} → {% endif %}{% endfor %}
+              </td>
+              <td class="px-4 py-3 text-gray-600">
+                {% for st in c.steps if st.alert_target %}{{ st.position }}. {{ alert_label(st) }}{% if not loop.last %}, {% endif %}{% else %}<span class="text-gray-400">—</span>{% endfor %}
               </td>
               <td class="px-4 py-3">{% if c.active %}<span class="text-green-700">Activa</span>{% else %}<span class="text-gray-400">Inactiva</span>{% endif %}</td>
               <td class="px-4 py-3 text-right">
@@ -118,7 +123,7 @@
 
       <div class="px-4 sm:px-6 pt-2 pb-1">
         <h3 class="text-sm font-semibold text-gray-700">Pasos</h3>
-        <p class="text-xs text-gray-400">En orden. SLA en horas laborales ({{ hours_label }}); al vencerse el de resolución, el ticket pasa al siguiente paso. Vacío = sin meta. Deja el tipo vacío para no usar la fila.</p>
+        <p class="text-xs text-gray-400">En orden. SLA en horas laborales ({{ hours_label }}), contado desde que el ticket llega al paso; vacío = sin meta. Si se vence la respuesta o la resolución se avisa una vez a quien elijas en «Avisar a». Deja el tipo vacío para no usar la fila.</p>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -129,12 +134,13 @@
               <th class="text-left font-medium px-4 py-3">Departamento o persona</th>
               <th class="text-left font-medium px-4 py-3">Respuesta (h)</th>
               <th class="text-left font-medium px-4 py-3">Resolución (h)</th>
+              <th class="text-left font-medium px-4 py-3">Avisar a</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             {% for row in step_rows %}
             {% set i = loop.index0 %}
-            <tr x-data="{ target: '{{ row.target }}' }">
+            <tr x-data="{ target: '{{ row.target }}', alert: '{{ row.alert }}' }">
               <td class="px-4 sm:px-6 py-3 text-gray-400">{{ loop.index }}</td>
               <td class="px-4 py-3">
                 <select name="target_{{ i }}" x-model="target" aria-label="Tipo del paso {{ loop.index }}"
@@ -163,6 +169,18 @@
               <td class="px-4 py-3">
                 <input type="text" inputmode="decimal" name="resolution_{{ i }}" value="{{ row.resolution }}" aria-label="Resolución del paso {{ loop.index }}"
                        class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              </td>
+              <td class="px-4 py-3 space-y-1">
+                <select name="alert_{{ i }}" x-model="alert" aria-label="A quién avisar si vence el SLA del paso {{ loop.index }}"
+                        class="w-full max-w-[12rem] px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <option value="">Nadie</option>
+                  {% for a, label in alert_labels.items() %}<option value="{{ a }}" {% if row.alert == a %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+                <select name="alert_department_{{ i }}" x-show="alert === 'department'" aria-label="Departamento al que se avisa en el paso {{ loop.index }}"
+                        class="w-full max-w-[12rem] px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                  <option value="">Elige departamento</option>
+                  {% for d in all_departments %}<option value="{{ d.id }}" {% if row.alert_department_id == d.id | string %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+                </select>
               </td>
             </tr>
             {% endfor %}

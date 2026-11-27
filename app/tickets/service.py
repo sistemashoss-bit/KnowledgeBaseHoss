@@ -8,17 +8,19 @@ ven todos; el auditor solo participa en los de su propio departamento.
 Tickets con categoría (Comercial, PLAN_CATEGORIAS_TICKETS.md): solo el solicitante
 y quien lo tiene asignado ahora; mientras no tenga asignado, el departamento del
 paso (para que alguien lo tome). Al escalarse, quien lo tenía deja de verlo.
+Quien recibió un aviso de SLA vencido del ticket (TicketSlaAlert) lo ve, sin
+atenderlo.
 """
 import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import (
-    Department, Ticket, TicketEvidence, TicketSlaPolicy, TicketStatusHistory, User,
+    Department, Ticket, TicketEvidence, TicketSlaAlert, TicketSlaPolicy, TicketStatusHistory, User,
     PRIORITY_MEDIUM, ROLE_ADMIN, ROLE_AUDITOR, ROLE_SUPERADMIN,
     TASK_PRIORITIES, TICKET_CLOSED, TICKET_KINDS, TICKET_OPEN, TICKET_RESOLVED, TICKET_STATUSES, TICKET_WAITING,
 )
@@ -40,7 +42,10 @@ def visible_condition(user: User):
     """Condición SQL de los tickets que ve, o None si ve todos."""
     if user.role in (ROLE_SUPERADMIN, ROLE_AUDITOR):
         return None
-    conds = [Ticket.requester_id == user.id, Ticket.assigned_to == user.id]
+    conds = [
+        Ticket.requester_id == user.id, Ticket.assigned_to == user.id,
+        Ticket.id.in_(select(TicketSlaAlert.ticket_id).where(TicketSlaAlert.user_id == user.id)),
+    ]
     depts = attended_department_ids(user) | overseen_department_ids(user)
     if depts:
         # Con categoría y asignado, el departamento ya no lo ve.
@@ -80,6 +85,7 @@ def can_view(user: User, t: Ticket) -> bool:
     return (
         is_requester(user, t) or _same(t.assigned_to, user.id)
         or (_open_to_department(t) and t.department_id in attended_department_ids(user) | overseen_department_ids(user))
+        or (t.category_id is not None and any(_same(a.user_id, user.id) for a in t.sla_alerts))
     )
 
 

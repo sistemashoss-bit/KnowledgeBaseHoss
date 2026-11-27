@@ -40,7 +40,13 @@ def upgrade() -> None:
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
         sa.Column("sla_response_minutes", sa.Integer(), nullable=True),
         sa.Column("sla_resolution_minutes", sa.Integer(), nullable=True),
+        sa.Column("alert_target", sa.String(20), nullable=True),
+        sa.Column("alert_department_id", UUID(as_uuid=True), sa.ForeignKey("departments.id", ondelete="SET NULL"), nullable=True),
         sa.UniqueConstraint("category_id", "position", name="uq_ticket_category_steps_position"),
+        sa.CheckConstraint(
+            "alert_target IS NULL OR alert_target = 'boss' OR alert_target = 'department'",
+            name="ck_ticket_category_steps_alert",
+        ),
         sa.CheckConstraint(
             "(target = 'direct_boss' AND department_id IS NULL AND user_id IS NULL)"
             " OR (target = 'department' AND department_id IS NOT NULL AND user_id IS NULL)"
